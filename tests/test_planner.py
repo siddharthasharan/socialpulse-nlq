@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from socialpulse_nlq.planner import guard_sql, plan
+from socialpulse_nlq.planner import catalog_metric_ids, guard_sql, plan
 
 
 def test_dau_by_app():
@@ -43,6 +43,13 @@ def test_guard_blocks_writes():
 def test_experiment_list():
     p = plan("List the experiments in the registry.")
     assert p["type"] == "experiment_list"
+
+
+def test_planner_metrics_are_in_catalog():
+    ids = catalog_metric_ids(Path(__file__).resolve().parents[1] / "catalog/measures.yaml")
+    assert len(ids) == 20
+    for expected in ["dau_mean_daily", "d7_exact_retention", "orphan_post_rate"]:
+        assert expected in ids
 
 
 if __name__ == "__main__":

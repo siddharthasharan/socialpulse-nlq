@@ -14,9 +14,13 @@
 
 ## How the planner works
 
-1. Detect a metric from `catalog/measures.yaml` by keyword rules,
-   specific phrases before generic ones (for example, "two-way" before
-   any generic messaging metric, WAU/MAU before DAU).
+1. Detect a metric by keyword rules, using templates that mirror
+   `catalog/measures.yaml` (specific phrases before generic ones, for
+   example "two-way" before any generic messaging metric, WAU/MAU before
+   DAU). Honest limit: the YAML is the contract, not yet the runtime
+   source of truth for templates — `tests/test_planner.py` checks the
+   catalog still lists all 20 metrics, and making the planner truly
+   catalog-driven is a Phase 3 cleanup.
 2. Extract only allowlisted filters: date range, app, country, platform,
    surface, acquisition source. Country names map to codes (India -> IN);
    a country not in the synthetic data (for example France) is a

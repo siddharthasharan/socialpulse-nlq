@@ -1,7 +1,11 @@
 """Deterministic natural-language planner for SocialPulse NLQ, Phase 2.
 
 No LLM is involved. The planner:
-1. Detects a metric from catalog/measures.yaml by keyword rules.
+1. Detects a metric by keyword rules, using SQL templates that mirror
+   catalog/measures.yaml. The YAML itself is the human-readable contract;
+   it is not yet the runtime source of truth for templates (see
+   catalog_metric_ids, used by tests to check the two stay in sync).
+   Making the planner truly catalog-driven is a Phase 3 cleanup.
 2. Extracts only allowlisted filters (date range, app, country, platform,
    surface, acquisition source) and an allowlisted breakdown dimension.
 3. Fills a pre-written SQL template for that metric. User text is never
