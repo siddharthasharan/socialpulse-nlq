@@ -62,8 +62,18 @@ const samples = [
   "How is the product doing?",
   "How is Whatsapp doing recently?"
 ];
+// Bug fixed 2026-10-28: the old buttons embedded a JSON string inside a
+// double-quoted click handler, so the browser ended the attribute at the
+// inner quote and the click did nothing. Buttons now carry a data
+// attribute instead, and a delegated listener on the container handles
+// the click. This fixes both the sample buttons here and the chat option
+// buttons below, which had the same bug.
 document.getElementById('samples').innerHTML = samples.map(s =>
-  `<button onclick="document.getElementById('q').value=${JSON.stringify(s)};ask()">${s}</button>`).join('');
+  `<button data-sample="${s.replace(/&/g,'&amp;').replace(/"/g,'&quot;')}">${s}</button>`).join('');
+document.getElementById('samples').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-sample]');
+  if (btn) { document.getElementById('q').value = btn.getAttribute('data-sample'); ask(); }
+});
 
 function fmtVal(c){
   if(c.current === null || c.current === undefined) return 'n/a';
@@ -153,7 +163,14 @@ function drawChart(d){
   ctx.fillStyle = '#555'; ctx.fillText('value (last column)', 40, H-8);
 }
 let chatSessionId = null;
-function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/"/g,'&quot;'); }
+// Delegated click handler for chat option buttons (see samples fix above).
+// Using delegation means re-rendering the log with innerHTML does not
+// lose the handler, unlike per-button onclick attributes.
+document.getElementById('chatlog').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-chat-send]');
+  if (btn) sendChatMsg(btn.getAttribute('data-chat-send'));
+});
 async function sendChatMsg(text){
   text = (text||'').trim(); if(!text) return;
   const log = document.getElementById('chatlog');
@@ -167,7 +184,7 @@ async function sendChatMsg(text){
     html += '<p>' + d.options.map(o=>{
       const apps = ['instagram','whatsapp','facebook'];
       const sendText = apps.includes(o.topic) ? `What's happening with ${o.topic}?` : o.topic;
-      return `<button onclick="sendChatMsg(${JSON.stringify(sendText)})">${esc(o.key)}) ${esc(o.label)}</button>`;
+      return `<button data-chat-send="${esc(sendText)}">${esc(o.key)}) ${esc(o.label)}</button>`;
     }).join('') + '</p>';
   }
   log.innerHTML += html;
