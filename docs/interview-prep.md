@@ -332,7 +332,7 @@ drives the routing rule for Phase 2:
   its sample size and a warning, not a confident decimal.
 
 This routing rule — cheapest sufficient table, not fastest engine — is
-the practical version of the original Aqua query-planning idea: choose
+the practical version of the original internal tool's query-planning idea: choose
 the source that defines the metric correctly first, then worry about
 latency.
 
@@ -445,7 +445,7 @@ the catalog stores definitions, not just expressions.
 
 ### Why a PM note is not a metric contract
 
-This is a line from the original Aqua design, and it is worth
+This is a line from the original internal tool's design, and it is worth
 understanding rather than repeating. In a real analytics system, context
 comes from sources with different authority: reviewed metric definitions,
 schema documentation, join patterns, worked examples, and informal
@@ -1096,7 +1096,7 @@ ever sees it. The rules to be able to state:
    `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, and any
    multi-statement input are rejected. This is enforced in code, not by
    asking the model nicely to be read-only — a prompt is not a control,
-   and the original Aqua design makes the same point about bounded
+   and the original internal tool's design makes the same point about bounded
    capabilities.
 2. **Allowlisted tables only.** Only the 12 Phase 1 tables (and, later,
    the tables the catalog names) may appear. An unknown table name is a
@@ -1142,7 +1142,7 @@ know; it is more dangerous, because its errors look like answers.
 Every answer carries a receipt: which metric, which grain, which
 filters, which tables, which route (aggregate vs raw events), and how
 long the query took. A receipt does not make a result causal, complete,
-or transferable — the original Aqua design is explicit that a result
+or transferable — the original internal tool's design is explicit that a result
 receipt supports a claim about *what ran*, not a causal story — but it
 does make the result *checkable*. A reviewer can rerun the same SQL,
 see the same grain and denominator, and disagree with the definition
@@ -1155,7 +1155,7 @@ limits. The receipt is the mechanism for that."
 
 ### Async jobs and honest terminal states (architecture context)
 
-The original Aqua design uses asynchronous execution for expensive
+The original internal tool's design uses asynchronous execution for expensive
 queries: submit a bounded query, receive a job ID, poll the same job,
 observe a terminal result, and retain or expire it explicitly. A client
 timeout is not proof the backend query stopped, so resubmitting blindly
@@ -1369,19 +1369,19 @@ what, and how it was fixed before tuning began.
 
 ### The original architecture, in one paragraph
 
-The high-level Aqua architecture shared for this project has six layers
+The high-level architecture of the original internal tool, shared for this project, has six layers
 (and you should be able to sketch them from memory):
 
-1. **Remote systems, not stored inside Aqua.** A Fabric / OneLake
+1. **Remote systems, not stored inside the original internal tool.** A Fabric / OneLake
    warehouse (SQL endpoint), Power BI semantic models (queried by DAX),
    Scuba / Interana behavioural events (BQL or saved-query replay), an
    ECS deployment system (configuration, feature flags, rollout), ExP
    experiment results (workspace → feature → experiment → step →
    analysis → scorecard), and approved external feedback/research inputs.
-   Aqua does not store source data; it queries it through adapters, and
+   The original internal tool does not store source data; it queries it through adapters, and
    exact upstream ingestion and lineage are audited elsewhere, not
-   inside Aqua.
-2. **Local Aqua process: a Node / TypeScript MCP server over stdio.**
+   inside the original internal tool.
+2. **Local process of the original internal tool: a Node / TypeScript MCP server over stdio.**
    The host agent calls typed tools; adapters return rows, CSV, or
    metadata. Adapters cover SQL (T-SQL, SELECT / read-only CTE guard),
    DAX (Power BI REST `executeQueries`), Scuba (HTTP API, BQL or replay),
@@ -1404,13 +1404,13 @@ The high-level Aqua architecture shared for this project has six layers
    database, and process loss is a separate concern from upstream data
    completeness.
 6. **User / model boundary and local files.** The host is a Copilot CLI
-   agent plus an approved model service; the LLM is outside Aqua, and
+   agent plus an approved model service; the LLM is outside the original internal tool, and
    only prompt, context, and selected results cross the boundary under
    host policy. Persistent local files are user-owned configuration,
    notes, and explicitly saved outputs — never credentials, never
    production data by default.
 
-Alongside Aqua sits **Raven**, a local skill (not its own MCP server):
+Alongside the original internal tool sits **Raven**, a local skill (not its own MCP server):
 feedback intake and review, then ExP linkage, then review + measurement
 → structured model → static HTML renderer. Raven's scoring is covered
 below.
@@ -1470,7 +1470,7 @@ guard, UI, benchmark — that one person can actually maintain.
   between "same idea" and "same interface."
 - **Browser / Playwright observation.** In the original design,
   Playwright is a host tool for opening ECS / ExP pages and inspecting
-  rendered output — it is not an Aqua database connector. SocialPulse
+  rendered output — it is not a database connector of the original internal tool. SocialPulse
   does not need it, and dropping it loses nothing for the core
   analytics loop. If asked, say that explicitly: browser observation
   proves what is visible on a page; it does not prove what the database
@@ -1478,7 +1478,7 @@ guard, UI, benchmark — that one person can actually maintain.
 
 ### Raven-style decision scoring, without inventing causal lift
 
-Raven, in the original design, composes feedback, Aqua measurements,
+Raven, in the original design, composes feedback, measurements from the original internal tool,
 reviewed historical context, and a reproducible local dashboard. Its
 model is:
 
@@ -1493,7 +1493,7 @@ model is:
 
 Three boundaries make this defensible, and you should state all three:
 
-1. **Measure versus model.** Aqua measurements are measured; Opportunity
+1. **Measure versus model.** Measurements from the original internal tool are measured; Opportunity
    sub-scores are modelled judgements, labelled as such. Mixing them
    into one "score" without labelling which parts are measured and
    which are modelled is how a dashboard starts lying politely.
@@ -1637,13 +1637,13 @@ Trap: do not hide AI use, and do not overclaim it either. "AI built it"
 and "I built it alone" are both wrong here. The honest middle is
 verifiable: decisions, definitions, and debugging are yours.
 
-**Q: Is this Meta's Aqua?**
+**Q: Is this the original internal tool?**
 A: "No. It is an independent synthetic project inspired by the idea of a
 natural-language analytics tool. It does not copy internal code, data,
 or definitions, and it does not claim to be Meta's tool or to describe
 Meta's actual dashboards. The name SocialPulse NLQ is deliberate: it
 keeps that boundary visible."
-Trap: do not hedge this answer, do not say "basically Aqua," and do not
+Trap: do not hedge this answer, do not say "basically the original internal tool," and do not
 let an interviewer reframe it as an internal tool. Clarity here protects
 both you and the project.
 
