@@ -21,6 +21,11 @@ canvas{border:1px solid #ddd;width:100%;height:260px}
 <h1>SocialPulse NLQ</h1>
 <p class="small">Independent synthetic product analytics. Not affiliated with Meta. Ask in plain English; the planner maps your question to a catalog metric, builds SQL from an allowlisted template, checks it with a read-only guard, and returns a receipt.</p>
 
+<h2>Product health — weather report</h2>
+<p class="small">Not one metric and not a score: DAU, WAU, retention, and creator health, last 28 days vs the prior 28 days, with watchouts. Asking "How is the product doing?" below gives you this same report.</p>
+<p><button onclick="showWeather()">Show weather report</button></p>
+<div id="weather"></div>
+
 <label for="q">Ask a question</label>
 <input type="text" id="q" value="What was DAU by app over the last 28 days?">
 <p><button onclick="ask()">Ask</button></p>
@@ -51,12 +56,42 @@ const samples = [
 document.getElementById('samples').innerHTML = samples.map(s =>
   `<button onclick="document.getElementById('q').value=${JSON.stringify(s)};ask()">${s}</button>`).join('');
 
+function fmtVal(c){
+  if(c.current === null || c.current === undefined) return 'n/a';
+  if(c.unit === 'share') return (c.current * 100).toFixed(1) + '%';
+  if(c.unit === 'minutes') return Number(c.current).toFixed(1) + ' min';
+  return Math.round(c.current).toLocaleString();
+}
+function renderWeather(w){
+  if(w.error) return `<div class="warn">Weather report failed: ${w.error}. Generate the Phase 1 data first.</div>`;
+  const arrow = {up:'↑', down:'↓', flat:'→'};
+  let html = `<div class="note"><b>${w.headline}</b></div>`;
+  html += `<p class="small">Current: ${w.current_period.join(' to ')} &nbsp; Prior: ${w.prior_period.join(' to ')} &nbsp; Retention cohorts: ${w.retention_cohorts_current.join(' to ')} vs ${w.retention_cohorts_prior.join(' to ')}</p>`;
+  html += '<table><tr><th>Metric</th><th>Current</th><th>Direction</th><th>Prior</th></tr>' + w.cards.map(c=>{
+    const prior = c.prior === null || c.prior === undefined ? 'level only' : fmtVal({current:c.prior, unit:c.unit});
+    const chg = c.change_pct === null ? '' : (c.kind === 'rate' ? `${c.change_pp >= 0 ? '+' : ''}${c.change_pp.toFixed(1)} pts` : `${c.change_pct >= 0 ? '+' : ''}${c.change_pct.toFixed(1)}%`);
+    return `<tr><td>${c.label}</td><td>${fmtVal(c)}</td><td>${arrow[c.direction]} ${c.direction} (${c.good_bad}) ${chg}</td><td>${prior}</td></tr>`;
+  }).join('') + '</table>';
+  html += '<h3>Watchouts</h3><ul>' + w.watchouts.map(x=>`<li>${x}</li>`).join('') + '</ul>';
+  html += '<p class="small">' + w.notes.join(' ') + '</p>';
+  return html;
+}
+async function showWeather(){
+  const el = document.getElementById('weather');
+  el.innerHTML = '<p>Computing…</p>';
+  const r = await fetch('/api/weather'); const w = await r.json();
+  el.innerHTML = renderWeather(w);
+}
 async function ask(){
   const question = document.getElementById('q').value;
   const out = document.getElementById('out');
   out.innerHTML = '<p>Running…</p>';
   const r = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question})});
   const d = await r.json();
+  if(d.type === 'weather_report'){
+    out.innerHTML = renderWeather(d.weather);
+    return;
+  }
   if(d.type === 'clarification' || d.type === 'refusal'){
     out.innerHTML = `<div class="warn"><b>Clarification — no SQL was run.</b><br>${d.clarification}</div>`;
     return;

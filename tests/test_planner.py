@@ -19,7 +19,10 @@ def test_retention_by_acquisition():
 
 
 def test_ambiguous_clarifies():
-    p = plan("How is the product doing?")
+    # Note: "How is the product doing?" is NO LONGER ambiguous — since
+    # the weather report it routes to a weather_report plan (see
+    # tests/test_weather.py). A genuinely unmapped question still clarifies.
+    p = plan("Tell me something interesting about the product")
     assert p["type"] == "clarification" and p["sql"] is None
 
 

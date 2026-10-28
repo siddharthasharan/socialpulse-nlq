@@ -1,1 +1,268 @@
-[{"category":"simple","expected_metric":"dau_mean_daily","expected_type":"scalar","expected_value":8897.36,"id":"b01","question":"What is the mean daily DAU?"},{"category":"simple","expected_metric":"wau_mean_weekly","expected_type":"scalar","expected_value":26651.5,"id":"b02","question":"What is WAU?"},{"category":"simple","expected_metric":"mau_march","expected_type":"scalar","expected_value":46818,"id":"b03","question":"What is MAU in March?"},{"category":"simple","expected_metric":"dau_mau_stickiness","expected_type":"scalar","expected_value":0.21535,"id":"b04","question":"What is DAU/MAU stickiness?"},{"category":"simple","expected_metric":"new_users_in_window","expected_type":"scalar","expected_value":25071,"id":"b05","question":"How many new users were there in the window?"},{"category":"simple","expected_metric":"sessions_per_dau","expected_type":"scalar","expected_value":1.69287,"id":"b06","question":"What is sessions per DAU?"},{"category":"simple","expected_metric":"median_session_duration_min","expected_type":"scalar","expected_value":12.0,"id":"b07","question":"What is the median session duration in minutes?"},{"category":"simple","expected_metric":"messaging_dau_mean","expected_type":"scalar","expected_value":3820.57,"id":"b08","question":"What is messaging DAU on average per day?"},{"category":"segments","expected_dim_count":3,"expected_metric":"dau_mean_daily","expected_type":"series_by_dim","id":"b09","min_rows":80,"question":"What was DAU by app over the last 28 days?"},{"category":"segments","expected_dim_count":7,"expected_metric":"dau_mean_daily","expected_type":"series_by_dim","id":"b10","min_rows":190,"question":"What was DAU by country over the last 28 days?"},{"category":"segments","expected_dim_count":3,"expected_metric":"dau_mean_daily","expected_type":"series_by_dim","id":"b11","min_rows":80,"question":"What was DAU by platform over the last 28 days?"},{"category":"segments","expected_metric":"sessions_per_dau","expected_rows":3,"expected_type":"breakdown","id":"b12","question":"What is sessions per DAU by platform?"},{"category":"segments","expected_dim_count":3,"expected_metric":"daily_creators_mean","expected_type":"series_by_dim","id":"b13","min_rows":200,"question":"What are daily creators by app?"},{"category":"segments","expected_metric":"engagement_rate_per_impression","expected_rows":3,"expected_type":"breakdown","id":"b14","question":"What is engagement rate by surface?"},{"category":"segments","expected_dim_count":3,"expected_metric":"messaging_dau_mean","expected_type":"series_by_dim","id":"b15","min_rows":80,"question":"What is messaging DAU by app over the last 28 days?"},{"category":"segments","expected_metric":"dau_mean_daily","expected_type":"series","id":"b16","min_rows":28,"question":"What is the DAU trend over the last 28 days?"},{"category":"cohorts","expected_metric":"d7_exact_retention","expected_type":"scalar","expected_value":0.22053,"id":"b17","question":"What is D7 retention?"},{"category":"cohorts","expected_metric":"d7_retention_by_acquisition","expected_rows":3,"expected_type":"breakdown","expected_values":{"organic":0.22242,"paid":0.20042,"referral":0.22829},"id":"b18","question":"What is D7 retention by acquisition source?"},{"category":"cohorts","expected_metric":"d7_retention_by_acquisition","expected_rows":1,"expected_type":"breakdown","expected_values":{"paid":0.20042},"id":"b19","question":"What is D7 retention for paid users?"},{"category":"cohorts","expected_metric":"posts_per_creator_90d","expected_type":"scalar","expected_value":22.66789,"id":"b20","question":"What is posts per creator over 90 days?"},{"category":"cohorts","expected_metric":"creator_penetration","expected_type":"scalar","expected_value":0.19894,"id":"b21","question":"What is creator penetration?"},{"category":"experiments","expected_metric":null,"expected_type":"experiment_list","id":"b22","question":"List the experiments in the registry."},{"category":"experiments","expected_metric":"reels_watch_time_per_viewer_day","expected_type":"experiment_info","id":"b23","question":"What is the primary metric for the Reels ranking experiment?"},{"category":"experiments","expected_contains":"cannot evaluate","expected_metric":null,"expected_type":"clarification","id":"b24","question":"Did the new creator discovery boost experiment improve creator retention?"},{"category":"diagnostics","expected_metric":"orphan_post_rate","expected_type":"scalar","expected_value":0.24588,"id":"b25","question":"What is the orphan post rate?"},{"category":"diagnostics","expected_metric":"top1_creator_impression_share","expected_type":"scalar","expected_value":0.09535,"id":"b26","question":"Are the top 1% of creators capturing a disproportionate share of views?"},{"category":"diagnostics","expected_metric":"commenter_penetration","expected_type":"scalar","expected_value":0.09146,"id":"b27","question":"What is commenter penetration?"},{"category":"diagnostics","expected_metric":"engagement_rate_per_impression","expected_type":"scalar","expected_value":0.15964,"id":"b28","question":"What is engagement rate per impression?"},{"category":"diagnostics","expected_metric":"reels_completion_rate","expected_type":"scalar","expected_value":0.35047,"id":"b29","question":"What is the Reels completion rate?"},{"category":"diagnostics","expected_metric":"reels_watch_time_per_viewer_day","expected_type":"scalar","expected_value":0.90443,"id":"b30","question":"What is Reels watch time per viewer per day?"},{"category":"ambiguous_invalid","expected_contains":"France","expected_metric":null,"expected_type":"clarification","id":"b31","question":"What was DAU in France?"},{"category":"ambiguous_invalid","expected_contains":"could not map","expected_metric":null,"expected_type":"clarification","id":"b32","question":"How is the product doing?"}]
+[
+  {
+    "category": "simple",
+    "expected_metric": "dau_mean_daily",
+    "expected_type": "scalar",
+    "expected_value": 8897.36,
+    "id": "b01",
+    "question": "What is the mean daily DAU?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "wau_mean_weekly",
+    "expected_type": "scalar",
+    "expected_value": 26651.5,
+    "id": "b02",
+    "question": "What is WAU?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "mau_march",
+    "expected_type": "scalar",
+    "expected_value": 46818,
+    "id": "b03",
+    "question": "What is MAU in March?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "dau_mau_stickiness",
+    "expected_type": "scalar",
+    "expected_value": 0.21535,
+    "id": "b04",
+    "question": "What is DAU/MAU stickiness?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "new_users_in_window",
+    "expected_type": "scalar",
+    "expected_value": 25071,
+    "id": "b05",
+    "question": "How many new users were there in the window?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "sessions_per_dau",
+    "expected_type": "scalar",
+    "expected_value": 1.69287,
+    "id": "b06",
+    "question": "What is sessions per DAU?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "median_session_duration_min",
+    "expected_type": "scalar",
+    "expected_value": 12.0,
+    "id": "b07",
+    "question": "What is the median session duration in minutes?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "messaging_dau_mean",
+    "expected_type": "scalar",
+    "expected_value": 3820.57,
+    "id": "b08",
+    "question": "What is messaging DAU on average per day?"
+  },
+  {
+    "category": "segments",
+    "expected_dim_count": 3,
+    "expected_metric": "dau_mean_daily",
+    "expected_type": "series_by_dim",
+    "id": "b09",
+    "min_rows": 80,
+    "question": "What was DAU by app over the last 28 days?"
+  },
+  {
+    "category": "segments",
+    "expected_dim_count": 7,
+    "expected_metric": "dau_mean_daily",
+    "expected_type": "series_by_dim",
+    "id": "b10",
+    "min_rows": 190,
+    "question": "What was DAU by country over the last 28 days?"
+  },
+  {
+    "category": "segments",
+    "expected_dim_count": 3,
+    "expected_metric": "dau_mean_daily",
+    "expected_type": "series_by_dim",
+    "id": "b11",
+    "min_rows": 80,
+    "question": "What was DAU by platform over the last 28 days?"
+  },
+  {
+    "category": "segments",
+    "expected_metric": "sessions_per_dau",
+    "expected_rows": 3,
+    "expected_type": "breakdown",
+    "id": "b12",
+    "question": "What is sessions per DAU by platform?"
+  },
+  {
+    "category": "segments",
+    "expected_dim_count": 3,
+    "expected_metric": "daily_creators_mean",
+    "expected_type": "series_by_dim",
+    "id": "b13",
+    "min_rows": 200,
+    "question": "What are daily creators by app?"
+  },
+  {
+    "category": "segments",
+    "expected_metric": "engagement_rate_per_impression",
+    "expected_rows": 3,
+    "expected_type": "breakdown",
+    "id": "b14",
+    "question": "What is engagement rate by surface?"
+  },
+  {
+    "category": "segments",
+    "expected_dim_count": 3,
+    "expected_metric": "messaging_dau_mean",
+    "expected_type": "series_by_dim",
+    "id": "b15",
+    "min_rows": 80,
+    "question": "What is messaging DAU by app over the last 28 days?"
+  },
+  {
+    "category": "segments",
+    "expected_metric": "dau_mean_daily",
+    "expected_type": "series",
+    "id": "b16",
+    "min_rows": 28,
+    "question": "What is the DAU trend over the last 28 days?"
+  },
+  {
+    "category": "cohorts",
+    "expected_metric": "d7_exact_retention",
+    "expected_type": "scalar",
+    "expected_value": 0.22053,
+    "id": "b17",
+    "question": "What is D7 retention?"
+  },
+  {
+    "category": "cohorts",
+    "expected_metric": "d7_retention_by_acquisition",
+    "expected_rows": 3,
+    "expected_type": "breakdown",
+    "expected_values": {
+      "organic": 0.22242,
+      "paid": 0.20042,
+      "referral": 0.22829
+    },
+    "id": "b18",
+    "question": "What is D7 retention by acquisition source?"
+  },
+  {
+    "category": "cohorts",
+    "expected_metric": "d7_retention_by_acquisition",
+    "expected_rows": 1,
+    "expected_type": "breakdown",
+    "expected_values": {
+      "paid": 0.20042
+    },
+    "id": "b19",
+    "question": "What is D7 retention for paid users?"
+  },
+  {
+    "category": "cohorts",
+    "expected_metric": "posts_per_creator_90d",
+    "expected_type": "scalar",
+    "expected_value": 22.66789,
+    "id": "b20",
+    "question": "What is posts per creator over 90 days?"
+  },
+  {
+    "category": "cohorts",
+    "expected_metric": "creator_penetration",
+    "expected_type": "scalar",
+    "expected_value": 0.19894,
+    "id": "b21",
+    "question": "What is creator penetration?"
+  },
+  {
+    "category": "experiments",
+    "expected_metric": null,
+    "expected_type": "experiment_list",
+    "id": "b22",
+    "question": "List the experiments in the registry."
+  },
+  {
+    "category": "experiments",
+    "expected_metric": "reels_watch_time_per_viewer_day",
+    "expected_type": "experiment_info",
+    "id": "b23",
+    "question": "What is the primary metric for the Reels ranking experiment?"
+  },
+  {
+    "category": "experiments",
+    "expected_contains": "cannot evaluate",
+    "expected_metric": null,
+    "expected_type": "clarification",
+    "id": "b24",
+    "question": "Did the new creator discovery boost experiment improve creator retention?"
+  },
+  {
+    "category": "diagnostics",
+    "expected_metric": "orphan_post_rate",
+    "expected_type": "scalar",
+    "expected_value": 0.24588,
+    "id": "b25",
+    "question": "What is the orphan post rate?"
+  },
+  {
+    "category": "diagnostics",
+    "expected_metric": "top1_creator_impression_share",
+    "expected_type": "scalar",
+    "expected_value": 0.09535,
+    "id": "b26",
+    "question": "Are the top 1% of creators capturing a disproportionate share of views?"
+  },
+  {
+    "category": "diagnostics",
+    "expected_metric": "commenter_penetration",
+    "expected_type": "scalar",
+    "expected_value": 0.09146,
+    "id": "b27",
+    "question": "What is commenter penetration?"
+  },
+  {
+    "category": "diagnostics",
+    "expected_metric": "engagement_rate_per_impression",
+    "expected_type": "scalar",
+    "expected_value": 0.15964,
+    "id": "b28",
+    "question": "What is engagement rate per impression?"
+  },
+  {
+    "category": "diagnostics",
+    "expected_metric": "reels_completion_rate",
+    "expected_type": "scalar",
+    "expected_value": 0.35047,
+    "id": "b29",
+    "question": "What is the Reels completion rate?"
+  },
+  {
+    "category": "diagnostics",
+    "expected_metric": "reels_watch_time_per_viewer_day",
+    "expected_type": "scalar",
+    "expected_value": 0.90443,
+    "id": "b30",
+    "question": "What is Reels watch time per viewer per day?"
+  },
+  {
+    "category": "ambiguous_invalid",
+    "expected_contains": "France",
+    "expected_metric": null,
+    "expected_type": "clarification",
+    "id": "b31",
+    "question": "What was DAU in France?"
+  },
+  {
+    "category": "weather_report",
+    "expected_metric": null,
+    "expected_type": "weather_report",
+    "id": "b32",
+    "question": "How is the product doing?"
+  }
+]

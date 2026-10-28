@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from socialpulse_nlq.planner import plan, run_plan
+from socialpulse_nlq.weather import compute_weather
 
 
 def parse_experiments():
@@ -60,6 +61,11 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"metrics": ids})
         elif self.path == "/api/experiments":
             self._send_json({"experiments": parse_experiments()})
+        elif self.path == "/api/weather":
+            try:
+                self._send_json(compute_weather(self.data_dir))
+            except Exception as e:
+                self._send_json({"error": str(e)}, status=500)
         else:
             self._send_json({"error": "not found"}, status=404)
 
@@ -71,9 +77,16 @@ class Handler(BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length) or b"{}")
         p = plan(str(body.get("question", "")))
         cols, rows, ms = [], [], 0
+        weather = None
         if p["type"] == "query":
             cols, rows, ms = run_plan(p, self.data_dir)
+        elif p["type"] == "weather_report":
+            try:
+                weather = compute_weather(self.data_dir)
+            except Exception as e:
+                weather = {"error": str(e)}
         self._send_json({
+            "weather": weather,
             "type": p["type"], "metric": p.get("metric"), "sql": p.get("sql"),
             "tables": p.get("tables", []), "grain": p.get("grain", ""),
             "filters": p.get("filters", {}), "breakdown": p.get("breakdown"),

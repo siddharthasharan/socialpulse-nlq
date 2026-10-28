@@ -44,6 +44,8 @@ def main() -> None:
             ok = p["type"] == "experiment_list"
         elif c["expected_type"] == "experiment_info":
             ok = p["type"] == "experiment_info" and p.get("metric") == c["expected_metric"]
+        elif c["expected_type"] == "weather_report":
+            ok = p["type"] == "weather_report" and p["sql"] is None
         else:
             if p["type"] != "query" or p.get("metric") != c["expected_metric"]:
                 ok, detail = False, f"metric {p.get('metric')} != {c['expected_metric']} (type {p['type']})"

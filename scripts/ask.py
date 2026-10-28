@@ -10,6 +10,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from socialpulse_nlq.planner import plan, run_plan
+from socialpulse_nlq.weather import compute_weather
 
 
 def main() -> None:
@@ -30,6 +31,20 @@ def main() -> None:
             print(json.dumps(p, indent=2))
         else:
             print(p["explanation"])
+        return
+    if p["type"] == "weather_report":
+        w = compute_weather(args.data)
+        if args.json:
+            print(json.dumps(w, indent=2, default=str))
+            return
+        print(w["headline"])
+        print()
+        for c in w["cards"]:
+            cur = f"{c['current'] * 100:.1f}%" if c["unit"] == "share" else f"{c['current']:,.1f}"
+            print(f"{c['label']}: {cur} ({c['direction']}, {c['good_bad']})")
+        print("\nWatchouts:")
+        for x in w["watchouts"]:
+            print(f"- {x}")
         return
     cols, rows, ms = run_plan(p, args.data)
     if args.json:

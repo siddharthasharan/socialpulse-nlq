@@ -459,6 +459,21 @@ def plan(question: str):
         exp = _experiment_plan(q)
         if exp is not None:
             return exp
+    # Product-health questions are answered by the weather report, not
+    # by a single metric. This must come before metric detection: "How
+    # is the product doing?" contains no metric keyword, and without
+    # this branch it used to clarify instead of answering.
+    if (("how is" in q and "product" in q and "doing" in q)
+            or "product health" in q or "weather report" in q
+            or "executive summary" in q or "overall health" in q
+            or "how are we doing" in q):
+        return {
+            "type": "weather_report", "metric": None, "sql": None, "tables": [],
+            "grain": "product health (last 28 days vs prior 28 days)",
+            "explanation": ("Weather report: DAU, WAU, retention, and creator health, "
+                            "computed from the Phase 1 tables. No single score; see the cards and watchouts."),
+            "clarification": None,
+        }
     # Metric detection, specific before generic.
     metric = None
     if "two-way" in q or "two way" in q or "reciprocal conversation" in q:
