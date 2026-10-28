@@ -312,5 +312,43 @@
       2876,
       2823
     ]
+  },
+  {
+    "id": "b36",
+    "category": "segments",
+    "question": "What was DAU for whatsapp over the last 28 days?",
+    "expected_type": "series",
+    "expected_metric": "dau_mean_daily",
+    "min_rows": 28,
+    "expected_values": [
+      2852,
+      2854,
+      2804,
+      3150,
+      3304,
+      2939,
+      2966,
+      2900,
+      2925,
+      2914,
+      3263,
+      3241,
+      2908,
+      2883,
+      2829,
+      2810,
+      2885,
+      3195,
+      3214,
+      2910,
+      2872,
+      2808,
+      2850,
+      2830,
+      3131,
+      3277,
+      2876,
+      2823
+    ]
   }
 ]

@@ -169,6 +169,13 @@ def _series_or_scalar(q: str):
         return "scalar"
     if "trend" in q or "over time" in q or "daily" in q or "per day" in q:
         return "series"
+    # Changed 2026-10-27 (user decision): naming a period means "show
+    # me each day in that period", not "average over that period".
+    # "What was DAU for whatsapp over the last 28 days?" used to
+    # return 1 averaged row; it now returns 28 daily rows. Explicit
+    # "mean"/"average" still returns the scalar, as above.
+    if re.search(r"over the (last|past)|last (7|28|90) days|past (7|28|90) days|last week|last month", q):
+        return "series"
     return "scalar"
 
 

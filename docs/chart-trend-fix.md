@@ -28,6 +28,23 @@ daily values (2,808, 2,850, 2,830, 3,131, 3,277, 2,876, 2,823)
 average to 2,942.14, exactly the scalar answer. If those two ever
 disagree again, one of them is wrong.
 
+## Follow-up: "over the last N days" now means a daily series (2026-10-27)
+
+After the chart fix, the user pointed out the deeper expectation:
+"What was DAU for whatsapp over the last 28 days?" should show 28
+daily values, not one averaged dot. The planner used to treat a
+period phrase as only a date filter, returning the scalar
+`dau_mean_daily` unless the question also said "trend", "daily",
+or had a breakdown.
+
+Changed `_series_or_scalar` in the planner: an explicit period
+("over the last/past", "last/past 7/28/90 days", "last week",
+"last month") now returns a daily series for DAU. Explicit
+"mean"/"average" still returns the scalar — that check runs first.
+Cross-check: the 28 Whatsapp daily values average to 2,971.89,
+exactly the old scalar answer. Benchmark b36 scores the new
+behaviour with all 28 values. Benchmark is now 36/36.
+
 ## Tests
 
 - `tests/test_planner.py::test_dau_series_respects_app_filter`:

@@ -1,4 +1,4 @@
-"""Run the Phase 2 benchmark (35 questions) against Phase 1 data.
+"""Run the Phase 2 benchmark (36 questions) against Phase 1 data.
 
 Scoring: a question passes if the planner picks the expected metric (or
 expected plan type), the SQL guard passes, execution returns the expected

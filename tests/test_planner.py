@@ -65,6 +65,16 @@ def test_dau_series_respects_app_filter():
         assert abs(sum(vals) / len(vals) - 2942.14) < 1.0
 
 
+def test_dau_over_last_returns_series_not_average():
+    # Decision 2026-10-27: naming a period means a daily series.
+    p = plan("What was DAU for whatsapp over the last 28 days?")
+    assert p["type"] == "query" and p["grain"] == "user x day"
+    assert "GROUP BY date" in p["sql"] and "AVG(dau)" not in p["sql"]
+    # Explicit mean/average still returns the scalar.
+    p2 = plan("What is the mean daily DAU for whatsapp over the last 28 days?")
+    assert p2["grain"] == "user x day (averaged)" and "AVG(dau)" in p2["sql"]
+
+
 def test_planner_metrics_are_in_catalog():
     ids = catalog_metric_ids(Path(__file__).resolve().parents[1] / "catalog/measures.yaml")
     assert len(ids) == 20
