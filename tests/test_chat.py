@@ -87,6 +87,30 @@ def test_brief_has_pm_and_eng_points():
     assert r["brief"]["caveats"]
 
 
+def test_drilldown_options_advance_instead_of_looping():
+    """Bug 2026-10-28: drill-down options used to re-offer the same
+    drill-downs, so clicking a) Creators opened the same panel again.
+    After a drill-down, the first button must now advance the flow."""
+    s = _stub_session()
+    s.respond("What's happening with Instagram?")
+    d = s.respond("creators")
+    assert d["type"] == "drilldown"
+    assert d["options"], "drill-down must offer next-step buttons"
+    # The buttons themselves must not re-offer a creators drill-down.
+    labels = " ".join(o["label"] for o in d["options"])
+    assert "Diagnosis" in labels and "Experiment recommendation" in labels and "PM/Eng brief" in labels
+    # Clicking the first button (via its send text) must diagnose, not
+    # re-open the creators drill-down.
+    diag = s.respond(d["options"][0]["send"])
+    assert diag["type"] == "diagnosis"
+    # And the letter shortcut must do the same, not loop.
+    s2 = _stub_session()
+    s2.respond("What's happening with Instagram?")
+    s2.respond("creators")
+    diag2 = s2.respond("a")
+    assert diag2["type"] == "diagnosis"
+
+
 def test_past_experiment_evaluation_clarifies():
     s = _stub_session()
     s.respond("What's happening with Instagram?")

@@ -183,7 +183,7 @@ async function sendChatMsg(text){
   if(d.options && d.options.length){
     html += '<p>' + d.options.map(o=>{
       const apps = ['instagram','whatsapp','facebook'];
-      const sendText = apps.includes(o.topic) ? `What's happening with ${o.topic}?` : o.topic;
+      const sendText = o.send || (apps.includes(o.topic) ? `What's happening with ${o.topic}?` : o.topic);
       return `<button data-chat-send="${esc(sendText)}">${esc(o.key)}) ${esc(o.label)}</button>`;
     }).join('') + '</p>';
   }

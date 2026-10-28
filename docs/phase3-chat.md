@@ -15,7 +15,11 @@ a deterministic state machine in `src/socialpulse_nlq/chat.py`.
    shows daily creators vs prior, penetration, orphan rate (whole
    window, level only), top-1% share, and creations by month
    (Instagram: Jan 37,268 posts → Feb 24,171 → Mar 16,372 — supply
-   falling over the window).
+   falling over the window). The buttons after a drill-down are the
+   NEXT steps (diagnosis, recommendation, brief), not the same
+   drill-downs again — re-offering "creators" there looped back to the
+   same panel when clicked (bug fixed 2026-10-28). Typing another topic
+   name still switches drill-downs.
 3. **Diagnosis.** "What's the diagnosis?" picks the first problematic
    topic in a documented priority order — creators (orphan > 20% or
    supply down), then retention, then growth, then engagement — and

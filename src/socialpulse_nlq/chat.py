@@ -188,9 +188,29 @@ class ChatSession:
         return [{"date": str(r[0]), "dau": r[1]} for r in rows]
 
     # -- Turn routing -----------------------------------------------------
-    def _set_options(self, topics):
-        self.options = [{"key": chr(ord("a") + i), "label": TOPIC_LABELS[t], "topic": t}
-                        for i, t in enumerate(topics)]
+    def _set_options(self, items):
+        """Set the option buttons for the next turn.
+
+        Each item is either a drill-down topic string (label from
+        TOPIC_LABELS, send = the topic name) or a dict with label/send/
+        topic. The send text is the exact message the button sends, so a
+        button can advance the conversation (diagnosis, recommendation,
+        brief) instead of re-offering the same drill-down.
+
+        Bug fixed 2026-10-28: the drill-down turn used to re-offer the
+        same drill-down topics, so clicking a) Creators after a creators
+        drill-down just opened the same panel again and again. Options
+        after a drill-down are now the NEXT steps, not the same topics.
+        """
+        out = []
+        for i, item in enumerate(items):
+            if isinstance(item, str):
+                out.append({"key": chr(ord("a") + i), "label": TOPIC_LABELS[item],
+                            "topic": item, "send": item})
+            else:
+                out.append({"key": chr(ord("a") + i), "label": item["label"],
+                            "topic": item.get("topic"), "send": item.get("send", item.get("topic"))})
+        self.options = out
         return self.options
 
     def _weather_turn(self, app):
@@ -273,9 +293,15 @@ class ChatSession:
                     f"(whole window, level only), top-1% creator share {_fmt(t['current'], 'share')} "
                     "(whole window). Attention is concentrated and many posts get nothing — "
                     "those two levels rhyme, but neither proves the other causes it.")
-        self._set_options(["creators", "retention", "growth", "messaging"])
-        text += ("\n\nNext: ask for a diagnosis, an experiment recommendation, or the PM/Eng brief — "
-                 "or pick another drill-down.")
+        # Next steps, not the same drill-downs again: offering "creators"
+        # here would loop back to this same panel when clicked.
+        self._set_options([
+            {"label": "Diagnosis — what's problematic?", "send": "what's the diagnosis?", "topic": topic},
+            {"label": "Experiment recommendation — hypothesis to test", "send": "what experiment would you recommend?", "topic": topic},
+            {"label": "PM/Eng brief — talking points for a meeting", "send": "give me the PM/Eng brief", "topic": topic},
+        ])
+        text += ("\n\nNext: use the buttons below for a diagnosis, an experiment recommendation, or the PM/Eng brief — "
+                 "or type another topic name (retention, growth, messaging) to switch drill-downs.")
         return self._reply("drilldown", text, drilldown={"topic": topic, "evidence": evidence})
 
     def _diagnosis_turn(self):
@@ -329,9 +355,13 @@ class ChatSession:
             e = cards["engagement_rate"]
             detail = (f"The problematic metric is engagement for {self.app}: engagement rate {_fmt(e['current'], 'share')} "
                       f"({e['direction']}).")
+        self._set_options([
+            {"label": "Experiment recommendation — hypothesis to test", "send": "what experiment would you recommend?", "topic": primary},
+            {"label": "PM/Eng brief — talking points for a meeting", "send": "give me the PM/Eng brief", "topic": primary},
+        ])
         text = (detail + f"\n\nGood cards: {', '.join(good) if good else 'none'}. "
                 f"Bad cards: {', '.join(bad) if bad else 'none'}. "
-                "Next: ask for an experiment recommendation, or the PM/Eng brief.")
+                "Next: use the buttons below for an experiment recommendation or the PM/Eng brief.")
         return self._reply("diagnosis", text, diagnosis={"primary_topic": primary, "problems": problems})
 
     def _recommendation_turn(self):
@@ -359,7 +389,10 @@ class ChatSession:
                 f"Population: {rec['population']}.\n"
                 f"Primary metric: {rec['primary_metric']}. Guardrails: {', '.join(rec['guardrails'])}.\n"
                 f"What would change my mind: {recommendation['what_would_change_mind']}\n"
-                "Next: ask for the PM/Eng brief to take this into a meeting.")
+                "Next: use the button below for the PM/Eng brief to take this into a meeting.")
+        self._set_options([
+            {"label": "PM/Eng brief — talking points for a meeting", "send": "give me the PM/Eng brief", "topic": topic},
+        ])
         return self._reply("recommendation", text, recommendation=recommendation)
 
     def _diagnosis_topic(self):
@@ -403,6 +436,10 @@ class ChatSession:
         ]
         brief = {"pm_points": pm_points, "eng_points": eng_points, "caveats": caveats, "topic": topic}
         self.stage = "brief"
+        self._set_options([
+            {"label": f"What's happening with {a}?", "send": f"What's happening with {a}?", "topic": a}
+            for a in APPS
+        ])
         text = ("PM/Eng brief — what to say in the meeting:\n\nFor the PM:\n" +
                 "\n".join(f"- {p}" for p in pm_points) +
                 "\n\nFor Eng:\n" + "\n".join(f"- {p}" for p in eng_points) +
@@ -425,11 +462,16 @@ class ChatSession:
         q = (message or "").strip().lower()
         if not q:
             return self._clarify("Ask something — for example, \"What's happening with Instagram?\"")
-        # Letter / number choice for the offered drill-downs.
+        # Letter / number choice for the offered options. The option's
+        # send text is what is actually sent, so a letter after a
+        # drill-down advances to diagnosis/recommendation/brief instead
+        # of re-opening the same drill-down.
         if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and self.weather:
             idx = ord(q) - ord("a") if q.isalpha() else int(q) - 1
             if 0 <= idx < len(self.options):
-                return self._drilldown_turn(self.options[idx]["topic"])
+                send = self.options[idx].get("send") or self.options[idx].get("topic")
+                if send and send.lower() != q:
+                    return self.respond(send)
         # App switch / opening question, anywhere in the conversation.
         for app in APPS:
             if _word(q, app) and ("how is" in q or "happening" in q or "doing" in q or "weather" in q or "health" in q):
@@ -438,9 +480,11 @@ class ChatSession:
             if self.app:
                 return self._weather_turn(self.app)
             self.stage = "clarification"
-            # Options here are apps, not drill-down topics: the UI sends the
-            # app name back, which the app-switch branch above handles.
-            self.options = [{"key": chr(ord("a") + i), "label": a, "topic": a} for i, a in enumerate(APPS)]
+            # Options here are apps, with a full question as send text so
+            # clicking one opens that app's weather report.
+            self._set_options([
+                {"label": a, "send": f"What's happening with {a}?", "topic": a} for a in APPS
+            ])
             return self._reply("clarification",
                                "Which app? Reply instagram, whatsapp, or facebook — "
                                "for example, \"What's happening with Instagram?\"")
