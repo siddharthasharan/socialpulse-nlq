@@ -8,7 +8,7 @@ experiments:
     start_date: "2026-02-01"
     end_date: "2026-02-28"
     arms: [control, treatment]
-    primary_metric: reels_watch_time_per_viewer
+    primary_metric: reels_watch_time_per_viewer_day
     guardrails: [creator_penetration, report_rate]
   - id: exp_new_creator_boost_v1
     name: New creator discovery boost
