@@ -34,12 +34,20 @@ canvas{border:1px solid #ddd;width:100%;height:260px}
 <div id="out"></div>
 
 <h2>Phase 3 chat — multi-turn assistant</h2>
-<p class="small">Deterministic, no LLM: the chat keeps the app and topic in state, so a follow-up means something. Start with "What's happening with Instagram?", pick a drill-down, then ask for a diagnosis, an experiment recommendation (labelled HYPOTHESIS, never a forecast), or the PM/Eng brief. Restarting app.py resets chat history.</p>
+<p class="small">Deterministic, no LLM: the chat keeps the app and topic in state, so a follow-up means something. Start with "What's happening with Instagram?", pick a drill-down, then ask for a diagnosis, an experiment recommendation (labelled HYPOTHESIS, never a forecast), or the PM/Eng brief. If a step is wrong, correct it in chat — for example "you are not looking at retention" or "show daily, not average" — and it re-runs that step and prompts the next one. Restarting app.py resets chat history.</p>
 <p><button onclick="sendChatMsg(`What's happening with Instagram?`)">What's happening with Instagram?</button></p>
 <label for="chatq">Chat</label>
 <input type="text" id="chatq" placeholder="What's happening with Instagram?">
 <p><button onclick="sendChatMsg(document.getElementById('chatq').value)">Send</button></p>
 <div id="chatlog" style="white-space:pre-wrap"></div>
+
+<h2>Questions editor — chat flow + evals, in one place</h2>
+<p class="small">Both in one: the <b>Flow</b> tab edits what the chat asks and recommends (labels, diagnosis order, recommendation hypotheses) in <code>chat/questions.json</code>; the <b>Single-shot evals</b> and <b>Conversation evals</b> tabs edit what the chat is graded on in <code>evals/benchmark_phase2.json</code> and <code>evals/conversation_phase3.json</code>. Saves are validated and written to those files only — they never change code or SQL. Edited flow takes effect for a <b>new</b> chat session, not the one already open. Flow and evals are separate tabs on purpose: editing the flow changes what the bot does, editing an eval changes what you expect it to do, and mixing them would let you grade the bot on a question you just taught it. To add a single-shot eval, fill in the question and the expected metric, then run the benchmark and copy the actual value into the gold field if it differs — the benchmark runner, not the editor, is what computes golds.</p>
+<p><button data-qtab="flow">Flow</button><button data-qtab="bench">Single-shot evals</button><button data-qtab="conv">Conversation evals</button><button onclick="newChatWithQuestions()">Start new chat with updated questions</button></p>
+<div id="qstatus" class="small"></div>
+<div id="qflow"></div>
+<div id="qbench" style="display:none"></div>
+<div id="qconv" style="display:none"></div>
 
 <h2>Experiments (registry only in Phase 2)</h2>
 <p class="small">Assignment tables arrive in Phase 3, so this list is descriptive. The planner will not invent a lift for an experiment without assignments.</p>
@@ -189,6 +197,125 @@ async function sendChatMsg(text){
   }
   log.innerHTML += html;
 }
+// Questions editor (both-in-one: flow + evals). Form fields, not raw
+// JSON, for the common edits; gold values and card maps stay as
+// editable text fields so a typo is caught by the server validator
+// (which rejects the whole save and writes nothing) instead of
+// silently breaking a benchmark file.
+let qData = null, qTab = 'flow';
+function qStatus(msg, isErr){
+  const el = document.getElementById('qstatus');
+  el.innerHTML = isErr ? `<div class="warn">${esc(msg)}</div>` : `<div class="note">${esc(msg)}</div>`;
+}
+async function saveQuestions(kind, data){
+  const r = await fetch('/api/questions', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({kind, data})});
+  const d = await r.json();
+  if(!d.ok){ qStatus('Save rejected: ' + (d.error||'unknown'), true); return; }
+  qStatus('Saved ' + d.saved + ' — start a new chat to see flow changes.');
+  await loadQuestions();
+}
+function showQTab(tab){
+  qTab = tab;
+  ['flow','bench','conv'].forEach(t=>{ document.getElementById('q'+t).style.display = t===tab ? '' : 'none'; });
+  if(tab==='flow') renderFlow(); else if(tab==='bench') renderBench(); else renderConv();
+}
+document.querySelectorAll('[data-qtab]').forEach(b=>b.addEventListener('click', ()=>showQTab(b.getAttribute('data-qtab'))));
+function renderFlow(){
+  const f = qData.flow; let html = '<p class="small">Diagnosis order (comma-separated): <input type="text" id="qpriority" value="' + esc((f.diagnosis_priority||[]).join(', ')) + '"></p>';
+  for(const [topic, spec] of Object.entries(f.topics)){
+    const rec = f.recommendations[topic] || {hypothesis:'', intervention:'', primary_metric:'', guardrails:[], population:''};
+    html += `<div><h3>${esc(topic)}</h3><p class="small">Label: <input type="text" data-flow-topic="${esc(topic)}" data-field="label" value="${esc(spec.label)}"> &nbsp; Cards (read-only): ${esc((spec.cards||[]).join(', '))}</p>`;
+    html += `<p>Hypothesis: <input type="text" data-flow-topic="${esc(topic)}" data-field="hypothesis" value="${esc(rec.hypothesis)}"></p>`;
+    html += `<p>Intervention: <input type="text" data-flow-topic="${esc(topic)}" data-field="intervention" value="${esc(rec.intervention)}"></p>`;
+    html += `<p>Primary metric: <input type="text" data-flow-topic="${esc(topic)}" data-field="primary_metric" value="${esc(rec.primary_metric)}"> &nbsp; Guardrails (comma-separated): <input type="text" data-flow-topic="${esc(topic)}" data-field="guardrails" value="${esc((rec.guardrails||[]).join(', '))}"></p>`;
+    html += `<p>Population: <input type="text" data-flow-topic="${esc(topic)}" data-field="population" value="${esc(rec.population)}"></p></div>`;
+  }
+  html += '<p><button onclick="saveFlow()">Save flow</button></p>';
+  document.getElementById('qflow').innerHTML = html;
+}
+function saveFlow(){
+  const flow = JSON.parse(JSON.stringify(qData.flow));
+  flow.diagnosis_priority = document.getElementById('qpriority').value.split(',').map(s=>s.trim()).filter(Boolean);
+  document.querySelectorAll('#qflow [data-flow-topic]').forEach(el=>{
+    const topic = el.getAttribute('data-flow-topic'), field = el.getAttribute('data-field');
+    if(field==='label') flow.topics[topic].label = el.value;
+    else if(field==='guardrails') flow.recommendations[topic].guardrails = el.value.split(',').map(s=>s.trim()).filter(Boolean);
+    else flow.recommendations[topic][field] = el.value;
+  });
+  saveQuestions('flow', flow);
+}
+const BENCH_TYPES = ['scalar','series','series_by_dim','breakdown','clarification','refusal','experiment_list','experiment_info','weather_report'];
+const CONV_TYPES = ['weather','drilldown','diagnosis','recommendation','brief','clarification'];
+function renderBench(){
+  let html = qData.benchmark.map((c,i)=>`<div><h3>${esc(c.id)}</h3>
+    <p>Question: <input type="text" data-bench="${i}" data-field="question" value="${esc(c.question)}"></p>
+    <p>Type: <select data-bench="${i}" data-field="expected_type">${BENCH_TYPES.map(t=>`<option ${t===c.expected_type?'selected':''}>${t}</option>`).join('')}</select>
+    &nbsp; Category: <input type="text" data-bench="${i}" data-field="category" value="${esc(c.category||'')}"> &nbsp; Metric: <input type="text" data-bench="${i}" data-field="expected_metric" value="${esc(c.expected_metric||'')}"></p>
+    <p>Gold value: <input type="text" data-bench="${i}" data-field="expected_value" value="${c.expected_value===undefined?'':c.expected_value}"> &nbsp; Min rows: <input type="text" data-bench="${i}" data-field="min_rows" value="${c.min_rows===undefined?'':c.min_rows}"> &nbsp; Expected rows: <input type="text" data-bench="${i}" data-field="expected_rows" value="${c.expected_rows===undefined?'':c.expected_rows}"></p>
+    <p>Gold series / cards (JSON, leave blank if unused): <input type="text" data-bench="${i}" data-field="expected_values" value="${esc(c.expected_values===undefined?'':JSON.stringify(c.expected_values))}"> <input type="text" data-bench="${i}" data-field="expected_cards" value="${esc(c.expected_cards===undefined?'':JSON.stringify(c.expected_cards))}"></p>
+    <p>Must contain / watchouts (comma-separated): <input type="text" data-bench="${i}" data-field="expected_contains" value="${esc(c.expected_contains||'')}"> <input type="text" data-bench="${i}" data-field="expected_watchouts_contains" value="${esc((c.expected_watchouts_contains||[]).join(', '))}"></p>
+    <p><button data-bench-del="${i}">Delete this case</button></p></div>`).join('');
+  html += '<p><button onclick="addBench()">Add single-shot case</button> <button onclick="saveBench()">Save single-shot evals</button></p>';
+  document.getElementById('qbench').innerHTML = html;
+  document.querySelectorAll('[data-bench-del]').forEach(b=>b.addEventListener('click', ()=>{ qData.benchmark.splice(Number(b.getAttribute('data-bench-del')),1); renderBench(); }));
+}
+function collectBench(){
+  const out = JSON.parse(JSON.stringify(qData.benchmark));
+  document.querySelectorAll('#qbench [data-bench]').forEach(el=>{
+    const c = out[Number(el.getAttribute('data-bench'))], field = el.getAttribute('data-field'), v = el.value;
+    if(field==='expected_value' || field==='min_rows' || field==='expected_rows'){
+      if(v==='') delete c[field]; else c[field] = Number(v);
+    } else if(field==='expected_values' || field==='expected_cards'){
+      if(v==='') delete c[field]; else { try{ c[field] = JSON.parse(v); }catch(e){ c[field] = '__BAD_JSON__'; } }
+    } else if(field==='expected_watchouts_contains'){
+      c[field] = v.split(',').map(s=>s.trim()).filter(Boolean);
+    } else c[field] = v;
+  });
+  return out;
+}
+function addBench(){
+  const nums = qData.benchmark.map(c=>parseInt(String(c.id).replace(/\D/g,''))||0).filter(n=>!isNaN(n));
+  qData.benchmark.push({id:'b'+(Math.max(...nums)+1), category:'simple', question:'New question?', expected_type:'scalar', expected_metric:'dau_mean_daily', expected_value:0});
+  renderBench();
+}
+function saveBench(){ saveQuestions('benchmark', collectBench()); }
+function renderConv(){
+  let html = qData.conversations.map((conv,ci)=>`<div><h3>${esc(conv.id)}</h3>
+    <p>Description: <input type="text" data-conv="${ci}" data-field="description" value="${esc(conv.description||'')}"></p>` +
+    conv.turns.map((t,ti)=>`<p>Turn ${ti+1}: <input type="text" data-conv-turn="${ci}:${ti}" data-field="user" value="${esc(t.user)}">
+    &nbsp; Expect: <select data-conv-turn="${ci}:${ti}" data-field="expect_type">${CONV_TYPES.map(x=>`<option ${x===t.expect_type?'selected':''}>${x}</option>`).join('')}</select>
+    &nbsp; Topic/app: <input type="text" data-conv-turn="${ci}:${ti}" data-field="expect_topic" value="${esc(t.expect_topic||t.expect_app||'')}"></p>`).join('') +
+    `<p><button data-conv-addturn="${ci}">Add turn</button> <button data-conv-del="${ci}">Delete conversation</button></p></div>`).join('');
+  html += '<p><button onclick="addConv()">Add conversation</button> <button onclick="saveConv()">Save conversation evals</button></p>';
+  document.getElementById('qconv').innerHTML = html;
+  document.querySelectorAll('[data-conv-del]').forEach(b=>b.addEventListener('click', ()=>{ qData.conversations.splice(Number(b.getAttribute('data-conv-del')),1); renderConv(); }));
+  document.querySelectorAll('[data-conv-addturn]').forEach(b=>b.addEventListener('click', ()=>{ qData.conversations[Number(b.getAttribute('data-conv-addturn'))].turns.push({user:'New turn?', expect_type:'drilldown'}); renderConv(); }));
+}
+function collectConv(){
+  const out = JSON.parse(JSON.stringify(qData.conversations));
+  document.querySelectorAll('#qconv [data-conv]').forEach(el=>{ out[Number(el.getAttribute('data-conv'))].description = el.value; });
+  document.querySelectorAll('#qconv [data-conv-turn]').forEach(el=>{
+    const [ci, ti] = el.getAttribute('data-conv-turn').split(':').map(Number);
+    const t = out[ci].turns[ti], field = el.getAttribute('data-field');
+    if(field==='expect_topic'){ if(el.value) t.expect_topic = el.value; delete t.expect_app; }
+    else t[field] = el.value;
+  });
+  return out;
+}
+function addConv(){
+  const nums = qData.conversations.map(c=>parseInt(String(c.id).replace(/\D/g,''))||0).filter(n=>!isNaN(n));
+  qData.conversations.push({id:'c'+(Math.max(...nums)+1), description:'New conversation', turns:[{user:'New turn?', expect_type:'weather'}]});
+  renderConv();
+}
+function saveConv(){ saveQuestions('conversation', collectConv()); }
+async function loadQuestions(){
+  const r = await fetch('/api/questions'); qData = await r.json(); showQTab(qTab);
+}
+function newChatWithQuestions(){
+  chatSessionId = null;
+  document.getElementById('chatlog').innerHTML = '<div>New chat started — edited flow questions will load for this session.</div>';
+}
+loadQuestions();
 fetch('/api/experiments').then(r=>r.json()).then(d=>{
   document.getElementById('exps').innerHTML = d.experiments.map(e=>
     `<p><b>${e.name}</b> (${e.id}) — ${e.app}, ${e.status}, ${e.start_date} to ${e.end_date}, primary metric: ${e.primary_metric}</p>`).join('');

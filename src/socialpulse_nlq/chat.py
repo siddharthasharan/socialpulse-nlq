@@ -42,6 +42,7 @@ Honesty rules, carried from Phase 2 and Raven-style scoring:
 import re
 from pathlib import Path
 
+from .questions import load_flow
 from .weather import compute_weather
 
 APPS = ["instagram", "whatsapp", "facebook"]
@@ -134,17 +135,41 @@ def _cards(weather):
     return {c["id"]: c for c in weather["cards"]}
 
 
+def _find_repo_root(data_dir):
+    """Find the repo root from a data dir, for chat/questions.json."""
+    for parent in [Path(data_dir)] + list(Path(data_dir).parents):
+        if (parent / "chat" / "questions.json").exists() or (parent / "catalog" / "measures.yaml").exists():
+            return parent
+    return Path(__file__).resolve().parents[2]
+
+
 class ChatSession:
     """One multi-turn conversation. Create one per UI session id."""
 
     def __init__(self, data_dir):
         self.data_dir = Path(data_dir)
+        self.repo_root = _find_repo_root(data_dir)
+        # Flow questions come from chat/questions.json when it exists
+        # (the Questions editor writes it); otherwise the hardcoded
+        # defaults in questions.py, which match chat.py's old constants.
+        # A new session loads the file again, so editing questions in
+        # the editor takes effect for the next chat, not just on restart.
+        self.flow = load_flow(self.repo_root)
+        self.topic_labels = {t: spec["label"] for t, spec in self.flow["topics"].items()}
+        self.recommendations = self.flow["recommendations"]
+        self.diagnosis_priority = self.flow.get("diagnosis_priority") or ["creators", "retention", "growth", "engagement"]
         self.app = None
         self.stage = "start"
         self.weather = None
         self.topic = None
         self.options = []
         self.history = []
+        # Correction state (see _correction_turn): the last grain the
+        # user asked for, filters they corrected to, and the log of
+        # corrections so the next step can say what changed.
+        self.grain_preference = None
+        self.filters = {}
+        self.corrections = []
 
     # -- DuckDB helpers (same tables as weather.py, read-only views) ----
     def _connect(self):
@@ -173,19 +198,90 @@ class ChatSession:
         # DATE_TRUNC returns a timestamp; monthly labels are YYYY-MM only.
         return [{"month": str(r[0])[:7], "posts": r[1], "creators": r[2]} for r in rows]
 
-    def _daily_dau_series(self):
-        """Daily DAU over the weather current period, scoped to the app."""
+    def _user_filter_sql(self, alias, filters):
+        """Allowlisted user filters only (country/platform/acquisition).
+        Values come from the planner's allowlists, never from raw text,
+        so a correction cannot inject a new filter or a new table."""
+        conds = []
+        if filters.get("country"):
+            conds.append(f"{alias}.country = '{filters['country']}'")
+        if filters.get("platform"):
+            conds.append(f"{alias}.platform = '{filters['platform']}'")
+        if filters.get("acquisition"):
+            conds.append(f"{alias}.acquisition_source = '{filters['acquisition']}'")
+        return conds
+
+    def _daily_dau_series(self, filters=None):
+        """Daily DAU over the weather current period, scoped to the app
+        and to any corrected user filters (country/platform/acquisition)."""
         if not self.weather:
             return []
         start, end = self.weather["current_period"]
         con = self._connect()
         app_filter = f" AND u.primary_app = '{self.app}'" if self.app else ""
+        extra = ""
+        for c in self._user_filter_sql("u", filters or {}):
+            extra += f" AND {c}"
         rows = con.execute(
             "SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau "
             "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
-            f"WHERE CAST(s.start_time AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter} "
+            f"WHERE CAST(s.start_time AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter}{extra} "
             "GROUP BY d ORDER BY d").fetchall()
         return [{"date": str(r[0]), "dau": r[1]} for r in rows]
+
+    def _daily_series_for_topic(self, topic, filters=None):
+        """Daily series for a drill-down topic, or None if Phase 3 has
+        no daily series for that topic. Used by grain corrections:
+        'daily, not average' needs actual daily values, not a summary."""
+        if not self.weather or topic not in ("growth", "creators", "messaging"):
+            return None
+        start, end = self.weather["current_period"]
+        con = self._connect()
+        filters = filters or {}
+        if topic == "growth":
+            return self._daily_dau_series(filters)
+        if topic == "creators":
+            app_filter = f" AND c.app = '{self.app}'" if self.app else ""
+            surf = f" AND c.surface = '{filters['surface']}'" if filters.get("surface") else ""
+            extra = ""
+            for c in self._user_filter_sql("u", filters):
+                extra += f" AND {c}"
+            rows = con.execute(
+                "SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS creators "
+                "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                "JOIN dim_users u ON u.user_id = f.creator_id "
+                f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter}{surf}{extra} "
+                "GROUP BY d ORDER BY d").fetchall()
+            return [{"date": str(r[0]), "value": r[1]} for r in rows]
+        # messaging
+        app_filter = f" AND u.primary_app = '{self.app}'" if self.app else ""
+        extra = ""
+        for c in self._user_filter_sql("u", filters):
+            extra += f" AND {c}"
+        rows = con.execute(
+            "SELECT CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS senders "
+            "FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id "
+            f"WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter}{extra} "
+            "GROUP BY d ORDER BY d").fetchall()
+        return [{"date": str(r[0]), "value": r[1]} for r in rows]
+
+    def _grain_and_filter_note(self, topic):
+        """Text appended to a drill-down when a correction changed its
+        grain or filters. States what changed and what did NOT change:
+        weather cards stay app-scoped only; only the series is filtered."""
+        notes = []
+        if self.grain_preference == "daily":
+            series = self._daily_series_for_topic(topic, self.filters)
+            if series:
+                key = "dau" if topic == "growth" else "value"
+                vals = ", ".join(f"{s['date']}: {s[key]:,}" for s in series)
+                notes.append(f"Daily values (corrected grain, current period): {vals}.")
+            else:
+                notes.append("Daily grain requested, but Phase 3 has no daily series for this topic — showing the averaged cards instead.")
+        if self.filters:
+            filt = ", ".join(f"{k}={v}" for k, v in self.filters.items())
+            notes.append(f"Filtered by: {filt}. Note: weather cards are app-scoped only; this series is filtered, the cards are not.")
+        return ("\n" + "\n".join(notes)) if notes else ""
 
     # -- Turn routing -----------------------------------------------------
     def _set_options(self, items):
@@ -205,7 +301,7 @@ class ChatSession:
         out = []
         for i, item in enumerate(items):
             if isinstance(item, str):
-                out.append({"key": chr(ord("a") + i), "label": TOPIC_LABELS[item],
+                out.append({"key": chr(ord("a") + i), "label": self.topic_labels.get(item, TOPIC_LABELS.get(item, item)),
                             "topic": item, "send": item})
             else:
                 out.append({"key": chr(ord("a") + i), "label": item["label"],
@@ -293,6 +389,10 @@ class ChatSession:
                     f"(whole window, level only), top-1% creator share {_fmt(t['current'], 'share')} "
                     "(whole window). Attention is concentrated and many posts get nothing — "
                     "those two levels rhyme, but neither proves the other causes it.")
+        # Grain / filter corrections change what the drill-down shows:
+        # daily values instead of an averaged summary, and a filtered
+        # series instead of the app-wide one. The note states both.
+        text += self._grain_and_filter_note(topic)
         # Next steps, not the same drill-downs again: offering "creators"
         # here would loop back to this same panel when clicked.
         self._set_options([
@@ -309,15 +409,19 @@ class ChatSession:
             return self._clarify("Ask for a weather report first — for example, \"What's happening with Instagram?\" — "
                                  "so there is a report to diagnose.")
         cards = _cards(self.weather)
-        problems = []
+        problem_set = set()
         if cards["orphan_post_rate"]["current"] > 0.20 or cards["daily_creators"]["direction"] == "down" or cards["creator_penetration"]["direction"] == "down":
-            problems.append("creators")
+            problem_set.add("creators")
         if cards["d7_retention"]["direction"] == "down":
-            problems.append("retention")
+            problem_set.add("retention")
         if cards["dau"]["direction"] == "down":
-            problems.append("growth")
+            problem_set.add("growth")
         if cards["engagement_rate"]["direction"] == "down":
-            problems.append("engagement")
+            problem_set.add("engagement")
+        # Priority comes from the questions file, so editing the
+        # diagnosis order in the editor changes this, not code.
+        problems = [t for t in self.diagnosis_priority if t in problem_set]
+        problems += [t for t in sorted(problem_set) if t not in problems]
         primary = problems[0] if problems else None
         self.topic = primary or self.topic
         self.stage = "diagnosis"
@@ -368,7 +472,7 @@ class ChatSession:
         if not self.weather:
             return self._clarify("Ask for a weather report first, so the recommendation has a metric to target.")
         topic = self.topic or self._diagnosis_topic()
-        rec = RECOMMENDATIONS[topic]
+        rec = self.recommendations.get(topic) or RECOMMENDATIONS[topic]
         self.topic = topic
         self.stage = "recommendation"
         recommendation = {
@@ -397,19 +501,25 @@ class ChatSession:
 
     def _diagnosis_topic(self):
         cards = _cards(self.weather)
+        problem_set = set()
         if cards["orphan_post_rate"]["current"] > 0.20 or cards["daily_creators"]["direction"] == "down":
-            return "creators"
+            problem_set.add("creators")
         if cards["d7_retention"]["direction"] == "down":
-            return "retention"
+            problem_set.add("retention")
         if cards["dau"]["direction"] == "down":
-            return "growth"
+            problem_set.add("growth")
+        if cards["engagement_rate"]["direction"] == "down":
+            problem_set.add("engagement")
+        for t in self.diagnosis_priority:
+            if t in problem_set:
+                return t
         return "engagement"
 
     def _brief_turn(self):
         if not self.weather:
             return self._clarify("Ask for a weather report first, so the brief has numbers to quote.")
         topic = self.topic or self._diagnosis_topic()
-        rec = RECOMMENDATIONS[topic]
+        rec = self.recommendations.get(topic) or RECOMMENDATIONS[topic]
         cards = _cards(self.weather)
         app = self.app or "the product"
         pm_points = [
@@ -446,6 +556,123 @@ class ChatSession:
                 "\n\nCaveats to say out loud:\n" + "\n".join(f"- {p}" for p in caveats))
         return self._reply("brief", text, brief=brief)
 
+    def _correction_turn(self, q):
+        """Handle 'you are not looking at X / wrong grain / incorrect
+        parameter' corrections, conversationally, in the current turn.
+
+        Returns a reply dict if q is a correction, else None (so normal
+        routing continues). A correction always ends by prompting the
+        next step — it never leaves the user at a dead end.
+
+        What a correction can change in Phase 3 (honest scope):
+        - app: switches the weather report to that app.
+        - topic: switches the drill-down to that topic.
+        - grain: daily (full daily series) vs average (summary).
+        - filter: country (full name only, e.g. india, not the code
+          "in", which is also an English word), platform, surface,
+          acquisition — stored on the session and applied to the
+          drill-down SERIES only. Weather cards stay app-scoped; the
+          reply says so, instead of pretending the cards were filtered.
+        What it cannot change: an unrecognised parameter (france,
+        tiktok) clarifies with the allowlist, and a grain/filter for a
+        topic with no daily series says so instead of inventing one.
+        """
+        # "What's wrong?" is a diagnosis request, not a correction,
+        # unless it also says "instead" / "not looking at" / "should".
+        is_diagnosis_q = q.startswith("what's wrong") or q.startswith("what is wrong")
+        cue_phrases = ["not looking at", "wrong grain", "incorrect grain", "wrong parameter",
+                       "incorrect parameter", "that's wrong", "that is wrong", "that's off",
+                       "should look at", "should be looking at", "look at", "use"]
+        has_cue = any(p in q for p in cue_phrases) and ("instead" in q or "not looking" in q
+                                                       or "wrong" in q or "incorrect" in q
+                                                       or "should" in q or "that's" in q or "that is" in q)
+        if is_diagnosis_q and not ("instead" in q or "not looking" in q):
+            return None
+        if not has_cue:
+            return None
+        from .planner import ACQUISITIONS, COUNTRIES, PLATFORMS, SURFACES, INVALID_COUNTRIES
+        # Unrecognised parameters clarify with the allowlist, like the planner.
+        for bad in INVALID_COUNTRIES:
+            if _word(q, bad):
+                return self._clarify(f"'{bad}' is not a country in the synthetic data. "
+                                     "The countries are US, IN, BR, ID, MX, GB, and DE (use the full name, e.g. india). "
+                                     "Which parameter did you mean?")
+        if "tiktok" in q:
+            return self._clarify("TikTok is not in the Phase 1 synthetic universe. The apps are instagram, whatsapp, and facebook. "
+                                 "Which parameter did you mean?")
+        # Extract, in order: app, topic, grain, filter. At most one
+        # primary change per correction turn, so the reply stays clear.
+        for app in APPS:
+            if _word(q, app):
+                old = self.app
+                reply = self._weather_turn(app)
+                change = f"Corrected: switching app from {old or 'none'} to {app}."
+                self.corrections.append({"parameter": "app", "value": app, "applied": True})
+                reply["text"] = f"Got it — {change}\n\n{reply['text']}"
+                reply["correction"] = {"parameter": "app", "value": app, "applied": True}
+                return reply
+        for topic in self.topic_labels:
+            if _word(q, topic) or topic in q:
+                reply = self._drilldown_turn(topic) if self.weather else None
+                if reply is None:
+                    return self._clarify("Ask for a weather report first, then correct the topic.")
+                self.corrections.append({"parameter": "topic", "value": topic, "applied": True})
+                reply["text"] = f"Got it — corrected: looking at {topic} instead.\n\n{reply['text']}"
+                reply["correction"] = {"parameter": "topic", "value": topic, "applied": True}
+                return reply
+        grain = None
+        if "daily" in q or "per day" in q or "each day" in q:
+            grain = "daily"
+        elif "average" in q or "mean" in q or "averaged" in q:
+            grain = "average"
+        if grain:
+            self.grain_preference = grain
+            topic = self.topic or "growth"
+            if not self.weather:
+                return self._clarify("Ask for a weather report first, then tell me the grain you want.")
+            reply = self._drilldown_turn(topic)
+            self.corrections.append({"parameter": "grain", "value": grain, "applied": True})
+            reply["text"] = f"Got it — corrected: showing {grain} grain for {topic} instead of the summary.\n\n{reply['text']}"
+            reply["correction"] = {"parameter": "grain", "value": grain, "applied": True}
+            return reply
+        # Filters: full country names only (see scope note above).
+        for name, code in COUNTRIES.items():
+            if len(name) > 2 and _word(q, name):
+                self.filters["country"] = code
+                return self._filter_correction("country", code)
+        for plat in PLATFORMS:
+            if _word(q, plat):
+                self.filters["platform"] = plat
+                return self._filter_correction("platform", plat)
+        for surf in SURFACES:
+            if _word(q, surf):
+                self.filters["surface"] = surf
+                return self._filter_correction("surface", surf)
+        for acq in ACQUISITIONS:
+            if _word(q, acq):
+                self.filters["acquisition"] = acq
+                return self._filter_correction("acquisition", acq)
+        # Cue, but no recognisable parameter: prompt conversationally
+        # for the next step instead of guessing.
+        self._set_options(["creators", "retention", "growth", "messaging"])
+        return self._clarify("Got it — something is off, but I could not tell which parameter you mean. "
+                             "Tell me the app, topic, grain (daily vs average), or filter "
+                             "(country, platform, surface, acquisition) — for example, "
+                             "\"you are not looking at retention\" or \"show daily, not average\". "
+                             "Then I will re-run that step and prompt you for the next one.")
+
+    def _filter_correction(self, parameter, value):
+        if not self.weather:
+            return self._clarify("Ask for a weather report first, then tell me the filter to apply.")
+        topic = self.topic or "growth"
+        reply = self._drilldown_turn(topic)
+        self.corrections.append({"parameter": parameter, "value": value, "applied": True})
+        reply["text"] = (f"Got it — corrected: applying {parameter}={value} to the {topic} drill-down series. "
+                         "Note: weather cards are app-scoped only, so only the series is filtered, not the cards.\n\n"
+                         f"{reply['text']}")
+        reply["correction"] = {"parameter": parameter, "value": value, "applied": True}
+        return reply
+
     def _clarify(self, text):
         self.stage = "clarification"
         return self._reply("clarification", text)
@@ -472,6 +699,11 @@ class ChatSession:
                 send = self.options[idx].get("send") or self.options[idx].get("topic")
                 if send and send.lower() != q:
                     return self.respond(send)
+        # Correction first: "you are not looking at X" must change the
+        # current step, not be treated as a new weather question.
+        corrected = self._correction_turn(q)
+        if corrected is not None:
+            return corrected
         # App switch / opening question, anywhere in the conversation.
         for app in APPS:
             if _word(q, app) and ("how is" in q or "happening" in q or "doing" in q or "weather" in q or "health" in q):
@@ -504,7 +736,7 @@ class ChatSession:
             return self._diagnosis_turn()
         # Drill-down by topic name, once a weather report exists.
         if self.weather:
-            for topic in TOPIC_LABELS:
+            for topic in self.topic_labels:
                 if _word(q, topic) or topic in q:
                     return self._drilldown_turn(topic)
             if "look at" in q or "show me" in q or "drill" in q:

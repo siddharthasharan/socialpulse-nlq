@@ -138,6 +138,76 @@ def test_instagram_full_flow_on_seed42_data():
     print("instagram headline:", w["weather"]["headline"])
 
 
+def _real_session():
+    data = Path(__file__).resolve().parents[1] / "data/phase1"
+    if not (data / "dim_users.parquet").exists():
+        return None
+    return ChatSession(data)
+
+
+def test_correction_topic_switches_drilldown_and_prompts_next_step():
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's happening with Instagram?")
+    s.respond("creators")
+    r = s.respond("you are not looking at retention, look at retention instead")
+    assert r["type"] == "drilldown" and r["drilldown"]["topic"] == "retention"
+    assert r["correction"] == {"parameter": "topic", "value": "retention", "applied": True}
+    assert any("diagnosis" in o["send"] for o in r["options"])
+
+
+def test_correction_app_switch_without_how_is():
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's happening with Instagram?")
+    r = s.respond("you are not looking at whatsapp, use whatsapp instead")
+    assert r["type"] == "weather" and r["app"] == "whatsapp"
+    assert r["correction"] == {"parameter": "app", "value": "whatsapp", "applied": True}
+
+
+def test_correction_grain_daily_shows_daily_series_for_growth():
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's happening with Instagram?")
+    s.respond("growth")
+    r = s.respond("that's wrong, show daily not average")
+    assert r["type"] == "drilldown"
+    assert r["correction"] == {"parameter": "grain", "value": "daily", "applied": True}
+    assert "Daily values (corrected grain" in r["text"]
+    assert r["text"].count("2026-03-") >= 28
+
+
+def test_correction_filter_platform_is_applied_and_scoped_honestly():
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's happening with Instagram?")
+    s.respond("growth")
+    r = s.respond("you are not looking at android, use android instead")
+    assert r["correction"] == {"parameter": "platform", "value": "android", "applied": True}
+    assert "platform=android" in r["text"]
+    assert "weather cards are app-scoped only" in r["text"]
+
+
+def test_correction_without_parameter_prompts_for_parameter():
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's happening with Instagram?")
+    r = s.respond("that's wrong, you are not looking at the right thing")
+    assert r["type"] == "clarification"
+    assert "which parameter" in r["text"].lower()
+    # Diagnosis questions must NOT be hijacked as corrections.
+    s2 = _real_session()
+    s2.respond("What's happening with Instagram?")
+    s2.respond("creators")
+    r2 = s2.respond("what's the diagnosis?")
+    assert r2["type"] == "diagnosis"
+
+
 if __name__ == "__main__":
     for name, fn in list(globals().items()):
         if name.startswith("test_"):

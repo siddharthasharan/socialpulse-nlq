@@ -1,0 +1,122 @@
+{
+  "diagnosis_priority": [
+    "creators",
+    "retention",
+    "growth",
+    "engagement"
+  ],
+  "recommendations": {
+    "concentration": {
+      "guardrails": [
+        "daily_creators",
+        "d7_retention",
+        "top1_share"
+      ],
+      "hypothesis": "Attention is concentrated on a few creators, so new and small creators' posts get zero engagement.",
+      "intervention": "Surface first posts from new/small creators to likely engagers, as for the creators topic.",
+      "population": "new and small creators on the scoped app",
+      "primary_metric": "orphan_post_rate (lower is better)"
+    },
+    "creators": {
+      "guardrails": [
+        "orphan_post_rate",
+        "d7_retention",
+        "engagement_rate",
+        "top1_share"
+      ],
+      "hypothesis": "New and small creators' first posts are not reaching likely engagers, so too many posts get zero engagement and creator supply softens.",
+      "intervention": "Surface first posts from new/small creators to likely engagers, and prompt a first reply on those posts.",
+      "population": "new and small creators on the scoped app",
+      "primary_metric": "daily_creators and creator_penetration"
+    },
+    "engagement": {
+      "guardrails": [
+        "creator_penetration",
+        "d7_retention",
+        "reels_completion"
+      ],
+      "hypothesis": "Feed/Reels relevance is soft for low-engagement segments, so engagement per impression falls without DAU falling.",
+      "intervention": "Improve ranking relevance for low-engagement segments.",
+      "population": "low-engagement users on the scoped app",
+      "primary_metric": "engagement_rate"
+    },
+    "growth": {
+      "guardrails": [
+        "d7_retention",
+        "sessions_per_dau"
+      ],
+      "hypothesis": "Activation after signup is weak, so DAU growth is not keeping up with signups.",
+      "intervention": "Improve signup-to-first-session activation for new users.",
+      "population": "new signups on the scoped app",
+      "primary_metric": "dau"
+    },
+    "messaging": {
+      "guardrails": [
+        "d7_retention",
+        "dau"
+      ],
+      "hypothesis": "Messaging is not becoming a habit for new users, so messaging DAU lags overall DAU.",
+      "intervention": "Prompt a first message / reply in the first week, targeted at new users with no sent message yet.",
+      "population": "new users on the scoped app with no sent message yet",
+      "primary_metric": "messaging_dau"
+    },
+    "retention": {
+      "guardrails": [
+        "dau",
+        "messaging_dau",
+        "engagement_rate"
+      ],
+      "hypothesis": "New cohorts are not forming a first-week habit, so D7 retention falls even while DAU is up.",
+      "intervention": "Improve first-week onboarding and re-engagement for new cohorts, with a clear first-week return prompt.",
+      "population": "new signups on the scoped app",
+      "primary_metric": "d7_retention"
+    }
+  },
+  "topics": {
+    "concentration": {
+      "cards": [
+        "orphan_post_rate",
+        "top1_share"
+      ],
+      "label": "Concentration \u2014 orphan rate and top-1% share"
+    },
+    "creators": {
+      "cards": [
+        "daily_creators",
+        "creator_penetration",
+        "orphan_post_rate",
+        "top1_share"
+      ],
+      "label": "Creators \u2014 supply, orphan rate, concentration"
+    },
+    "engagement": {
+      "cards": [
+        "engagement_rate",
+        "reels_completion",
+        "reels_watch_time"
+      ],
+      "label": "Engagement \u2014 engagement rate and Reels"
+    },
+    "growth": {
+      "cards": [
+        "dau",
+        "wau"
+      ],
+      "label": "Growth \u2014 DAU and WAU"
+    },
+    "messaging": {
+      "cards": [
+        "messaging_dau"
+      ],
+      "label": "Messaging \u2014 messaging DAU"
+    },
+    "retention": {
+      "cards": [
+        "d7_retention",
+        "dau",
+        "wau"
+      ],
+      "label": "Retention \u2014 D7 and growth"
+    }
+  }
+}

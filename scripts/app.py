@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 from socialpulse_nlq.planner import plan, run_plan
 from socialpulse_nlq.weather import compute_weather
 from socialpulse_nlq.chat import ChatSession
+from socialpulse_nlq.questions import load_all_questions, save_questions
 import uuid
 
 CHAT_SESSIONS = {}
@@ -67,6 +68,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"metrics": ids})
         elif self.path == "/api/experiments":
             self._send_json({"experiments": parse_experiments()})
+        elif self.path == "/api/questions":
+            # Both-in-one editor read: flow (chat/questions.json) +
+            # single-shot evals + conversation evals, from their files.
+            self._send_json(load_all_questions(ROOT))
         elif self.path == "/api/weather" or self.path.startswith("/api/weather?"):
             try:
                 app = parse_qs(urlparse(self.path).query).get("app", [None])[0]
@@ -96,6 +101,17 @@ class Handler(BaseHTTPRequestHandler):
                 reply["weather"] = {"headline": reply["weather"]["headline"],
                                     "app": reply["weather"]["app"]}
             self._send_json(reply)
+            return
+        if self.path == "/api/questions":
+            # Editor save: validated, atomic, allowlisted files only
+            # (flow, benchmark, conversation). A bad save is rejected
+            # with its reason and writes nothing. Edited flow takes
+            # effect for a NEW chat session, not existing ones.
+            try:
+                path = save_questions(ROOT, body.get("kind"), body.get("data"))
+                self._send_json({"ok": True, "saved": str(path.relative_to(ROOT))})
+            except Exception as e:
+                self._send_json({"ok": False, "error": str(e)}, status=400)
             return
         if self.path != "/api/ask":
             self._send_json({"error": "not found"}, status=404)
