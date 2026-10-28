@@ -1,0 +1,144 @@
+# Canonical metrics, Phase 1 (20). Definitions are this project's own.
+# Grain and denominator are part of the definition; do not reuse a metric
+# with a different denominator without renaming it.
+metrics:
+  - id: dau_mean_daily
+    name: DAU (mean daily)
+    definition: Mean distinct users with at least one session per day.
+    grain: user x day
+    denominator: distinct users
+    source: fact_sessions
+    dax_like: "DAU := DISTINCTCOUNT(fact_sessions[user_id])"
+  - id: wau_mean_weekly
+    name: WAU (mean weekly)
+    definition: Mean distinct users with at least one session per ISO week.
+    grain: user x week
+    denominator: distinct users
+    source: fact_sessions
+    dax_like: "WAU := DISTINCTCOUNT(fact_sessions[user_id])"
+  - id: mau_march
+    name: MAU (March 2026)
+    definition: Distinct users with at least one session in March 2026.
+    grain: user x month
+    denominator: distinct users
+    source: fact_sessions
+    dax_like: "MAU := DISTINCTCOUNT(fact_sessions[user_id])"
+  - id: dau_mau_stickiness
+    name: DAU/MAU stickiness (March)
+    definition: Mean March DAU divided by March MAU.
+    grain: month
+    denominator: MAU
+    source: fact_sessions
+    dax_like: "Stickiness := [DAU] / [MAU]"
+  - id: new_users_in_window
+    name: New users in window
+    definition: Users whose signup_date falls in 2026-01-01 to 2026-03-31.
+    grain: user
+    denominator: registered users
+    source: dim_users
+    dax_like: "NewUsers := COUNTROWS(dim_users)"
+  - id: d7_exact_retention
+    name: D7 exact retention
+    definition: For cohorts signing up 2026-01-01 to 2026-02-21, share active on exactly signup_date + 7 days.
+    grain: cohort user
+    denominator: eligible cohort users
+    source: dim_users + fact_sessions
+    dax_like: "D7Retention := DIVIDE(retained_users, cohort_users)"
+  - id: d7_retention_by_acquisition
+    name: D7 exact retention by acquisition source
+    definition: Same as D7 exact retention, split by acquisition_source. Confounded by design (see synthetic-assumptions.md).
+    grain: cohort user x acquisition_source
+    denominator: eligible cohort users per source
+    source: dim_users + fact_sessions
+    dax_like: "D7Retention := DIVIDE(retained_users, cohort_users)"
+  - id: sessions_per_dau
+    name: Sessions per DAU
+    definition: Total sessions divided by total user-days with a session.
+    grain: session / user-day
+    denominator: user-days
+    source: fact_sessions
+    dax_like: "SessionsPerDAU := DIVIDE([Sessions], [UserDays])"
+  - id: median_session_duration_min
+    name: Median session duration (minutes)
+    definition: Median duration_minutes across sessions.
+    grain: session
+    denominator: sessions
+    source: fact_sessions
+    dax_like: "MedianDuration := MEDIAN(fact_sessions[duration_minutes])"
+  - id: daily_creators_mean
+    name: Daily creators (mean)
+    definition: Mean distinct creators publishing per day.
+    grain: creator x day
+    denominator: distinct creators
+    source: fact_content_creation
+    dax_like: "DailyCreators := DISTINCTCOUNT(fact_content_creation[creator_id])"
+  - id: creator_penetration
+    name: Creator penetration
+    definition: Daily creators divided by DAU, averaged over days.
+    grain: day
+    denominator: DAU
+    source: fact_content_creation + fact_sessions
+    dax_like: "CreatorPenetration := DIVIDE([DailyCreators], [DAU])"
+  - id: posts_per_creator_90d
+    name: Posts per creator (90 days)
+    definition: Total published items divided by distinct creators in window.
+    grain: creator
+    denominator: distinct creators
+    source: fact_content_creation
+    dax_like: "PostsPerCreator := DIVIDE([Posts], [Creators])"
+  - id: orphan_post_rate
+    name: Orphan post rate
+    definition: Share of published items with zero qualifying engagements in the window.
+    grain: content item
+    denominator: eligible published items
+    source: dim_content + fact_content_engagements
+    dax_like: "OrphanRate := DIVIDE(orphan_posts, eligible_posts)"
+  - id: top1_creator_impression_share
+    name: Top 1% creator impression share
+    definition: Sampled impressions on content from the top 1% of creators by impressions, divided by all sampled impressions.
+    grain: sampled impression
+    denominator: sampled impressions
+    source: fact_content_impressions + dim_content
+    dax_like: "Top1Share := DIVIDE(top1_impressions, all_impressions)"
+  - id: reels_completion_rate
+    name: Reels/video completion rate
+    definition: Share of video plays with completion_pct >= 0.95.
+    grain: video play
+    denominator: video plays
+    source: fact_video_plays
+    dax_like: "CompletionRate := DIVIDE(completed_plays, video_plays)"
+  - id: reels_watch_time_per_viewer_day
+    name: Watch time per video viewer per day
+    definition: Total watch minutes divided by viewer-days with a video play.
+    grain: viewer x day
+    denominator: viewer-days
+    source: fact_video_plays
+    dax_like: "WatchPerViewerDay := DIVIDE([WatchMinutes], [ViewerDays])"
+  - id: messaging_dau_mean
+    name: Messaging DAU (mean daily)
+    definition: Mean distinct users sending at least one message per day.
+    grain: user x day
+    denominator: distinct senders
+    source: fact_messages
+    dax_like: "MessagingDAU := DISTINCTCOUNT(fact_messages[sender_id])"
+  - id: two_way_conversation_rate
+    name: Two-way conversation rate
+    definition: Conversations with messages from both participants divided by eligible conversations.
+    grain: conversation
+    denominator: eligible conversations
+    source: fact_messages
+    dax_like: "TwoWayRate := DIVIDE(two_way_conversations, conversations)"
+  - id: commenter_penetration
+    name: Commenter penetration
+    definition: Distinct commenters per day divided by DAU, averaged over days.
+    grain: user x day
+    denominator: DAU
+    source: fact_content_engagements + fact_sessions
+    dax_like: "CommenterPenetration := DIVIDE([Commenters], [DAU])"
+  - id: engagement_rate_per_impression
+    name: Engagement rate per sampled impression
+    definition: Engagements divided by sampled impressions.
+    grain: sampled impression
+    denominator: sampled impressions
+    source: fact_content_engagements + fact_content_impressions
+    dax_like: "EngagementRate := DIVIDE([Engagements], [Impressions])"

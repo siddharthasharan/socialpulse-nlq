@@ -1,0 +1,30 @@
+# Experiment registry (Phase 1 list setup; assignment tables arrive Phase 3)
+# Status values are synthetic and illustrative only.
+experiments:
+  - id: exp_reels_ranking_v1
+    name: Reels ranking update
+    app: instagram
+    status: completed
+    start_date: "2026-02-01"
+    end_date: "2026-02-28"
+    arms: [control, treatment]
+    primary_metric: reels_watch_time_per_viewer
+    guardrails: [creator_penetration, report_rate]
+  - id: exp_new_creator_boost_v1
+    name: New creator discovery boost
+    app: instagram
+    status: running
+    start_date: "2026-03-01"
+    end_date: "2026-03-31"
+    arms: [control, treatment]
+    primary_metric: new_creator_d7_retention
+    guardrails: [orphan_post_rate, top1_creator_share]
+  - id: exp_messaging_reply_nudge_v1
+    name: Messaging reply nudge
+    app: whatsapp
+    status: planned
+    start_date: "2026-04-01"
+    end_date: "2026-04-30"
+    arms: [control, treatment]
+    primary_metric: two_way_conversation_rate
+    guardrails: [block_rate, messages_per_dau]
