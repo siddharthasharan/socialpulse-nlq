@@ -51,7 +51,8 @@ const samples = [
   "What is engagement rate by surface?",
   "Did the new creator discovery boost experiment improve creator retention?",
   "What was DAU in France?",
-  "How is the product doing?"
+  "How is the product doing?",
+  "How is Whatsapp doing recently?"
 ];
 document.getElementById('samples').innerHTML = samples.map(s =>
   `<button onclick="document.getElementById('q').value=${JSON.stringify(s)};ask()">${s}</button>`).join('');
@@ -65,7 +66,8 @@ function fmtVal(c){
 function renderWeather(w){
   if(w.error) return `<div class="warn">Weather report failed: ${w.error}. Generate the Phase 1 data first.</div>`;
   const arrow = {up:'↑', down:'↓', flat:'→'};
-  let html = `<div class="note"><b>${w.headline}</b></div>`;
+  let html = w.app ? `<p><b>Scope:</b> ${w.app} (all cards scoped to that app; top-1% share is within-app)</p>` : '';
+  html += `<div class="note"><b>${w.headline}</b></div>`;
   html += `<p class="small">Current: ${w.current_period.join(' to ')} &nbsp; Prior: ${w.prior_period.join(' to ')} &nbsp; Retention cohorts: ${w.retention_cohorts_current.join(' to ')} vs ${w.retention_cohorts_prior.join(' to ')}</p>`;
   html += '<table><tr><th>Metric</th><th>Current</th><th>Direction</th><th>Prior</th></tr>' + w.cards.map(c=>{
     const prior = c.prior === null || c.prior === undefined ? 'level only' : fmtVal({current:c.prior, unit:c.unit});

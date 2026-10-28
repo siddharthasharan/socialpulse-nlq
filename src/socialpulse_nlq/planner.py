@@ -475,6 +475,19 @@ def plan(question: str):
     # by a single metric. This must come before metric detection: "How
     # is the product doing?" contains no metric keyword, and without
     # this branch it used to clarify instead of answering.
+    # App-scoped variant: "How is Whatsapp doing recently?" is the
+    # same report, scoped to that app's users and content, not a
+    # clarification and not the global report.
+    for app_name in APPS:
+        if _word(q, app_name) and "how is" in q and "doing" in q:
+            return {
+                "type": "weather_report", "metric": None, "sql": None, "tables": [],
+                "grain": f"product health for {app_name} (last 28 days vs prior 28 days)",
+                "app": app_name,
+                "explanation": (f"Weather report for {app_name}: DAU, WAU, retention, and creator health, "
+                                "computed from the Phase 1 tables scoped to that app. No single score; see the cards and watchouts."),
+                "clarification": None,
+            }
     if (("how is" in q and "product" in q and "doing" in q)
             or "product health" in q or "weather report" in q
             or "executive summary" in q or "overall health" in q
@@ -482,6 +495,7 @@ def plan(question: str):
         return {
             "type": "weather_report", "metric": None, "sql": None, "tables": [],
             "grain": "product health (last 28 days vs prior 28 days)",
+            "app": None,
             "explanation": ("Weather report: DAU, WAU, retention, and creator health, "
                             "computed from the Phase 1 tables. No single score; see the cards and watchouts."),
             "clarification": None,

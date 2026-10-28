@@ -1,4 +1,4 @@
-"""Run the Phase 2 benchmark (36 questions) against Phase 1 data.
+"""Run the Phase 2 benchmark (37 questions) against Phase 1 data.
 
 Scoring: a question passes if the planner picks the expected metric (or
 expected plan type), the SQL guard passes, execution returns the expected
@@ -56,7 +56,7 @@ def main() -> None:
             if p["type"] != "weather_report" or p["sql"] is not None:
                 ok, detail = False, f"type {p['type']} != weather_report"
             elif "expected_cards" in c or "expected_watchouts_contains" in c:
-                w = compute_weather(args.data)
+                w = compute_weather(args.data, app=p.get("app"))
                 by_id = {card["id"]: card for card in w["cards"]}
                 for card_id, expected in c.get("expected_cards", {}).items():
                     if card_id not in by_id:

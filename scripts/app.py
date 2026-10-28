@@ -14,6 +14,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from urllib.parse import parse_qs, urlparse
+
 from socialpulse_nlq.planner import plan, run_plan
 from socialpulse_nlq.weather import compute_weather
 
@@ -61,9 +63,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"metrics": ids})
         elif self.path == "/api/experiments":
             self._send_json({"experiments": parse_experiments()})
-        elif self.path == "/api/weather":
+        elif self.path == "/api/weather" or self.path.startswith("/api/weather?"):
             try:
-                self._send_json(compute_weather(self.data_dir))
+                app = parse_qs(urlparse(self.path).query).get("app", [None])[0]
+                self._send_json(compute_weather(self.data_dir, app=app))
             except Exception as e:
                 self._send_json({"error": str(e)}, status=500)
         else:
@@ -82,7 +85,7 @@ class Handler(BaseHTTPRequestHandler):
             cols, rows, ms = run_plan(p, self.data_dir)
         elif p["type"] == "weather_report":
             try:
-                weather = compute_weather(self.data_dir)
+                weather = compute_weather(self.data_dir, app=p.get("app"))
             except Exception as e:
                 weather = {"error": str(e)}
         self._send_json({

@@ -350,5 +350,22 @@
       2876,
       2823
     ]
+  },
+  {
+    "id": "b37",
+    "category": "weather_report",
+    "question": "How is Whatsapp doing recently?",
+    "expected_type": "weather_report",
+    "expected_metric": null,
+    "expected_cards": {
+      "dau": 2971.89,
+      "d7_retention": 0.19106,
+      "daily_creators": 301.39,
+      "messaging_dau": 1275.79
+    },
+    "expected_watchouts_contains": [
+      "Retention falling",
+      "Creator problem"
+    ]
   }
 ]

@@ -35,6 +35,27 @@ def test_product_doing_routes_to_weather_not_clarification():
         assert p["sql"] is None
 
 
+def test_app_doing_routes_to_scoped_weather():
+    p = plan("How is Whatsapp doing recently?")
+    assert p["type"] == "weather_report" and p.get("app") == "whatsapp" and p["sql"] is None
+    p2 = plan("How is the product doing?")
+    assert p2["type"] == "weather_report" and p2.get("app") is None
+
+
+def test_whatsapp_weather_on_seed42_data():
+    data = Path(__file__).resolve().parents[1] / "data/phase1"
+    if not (data / "dim_users.parquet").exists():
+        return
+    w = compute_weather(data, app="whatsapp")
+    by_id = {c["id"]: c for c in w["cards"]}
+    assert abs(by_id["dau"]["current"] - 2971.89) < 1.0
+    assert abs(by_id["d7_retention"]["current"] - 0.19106) < 0.01
+    # Scoped retention falls while global retention is flat — the
+    # global report hides this split, which is the point of scoping.
+    assert by_id["d7_retention"]["direction"] == "down"
+    print("whatsapp headline:", w["headline"])
+
+
 def test_weather_on_seed42_data():
     data = Path(__file__).resolve().parents[1] / "data/phase1"
     if not (data / "dim_users.parquet").exists():

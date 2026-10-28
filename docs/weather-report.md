@@ -53,6 +53,28 @@ engagement, or creator supply. These thresholds are documented in
 them — which is the point. A weather report with hidden thresholds
 is just a score with extra steps.
 
+## App-scoped reports: "How is Whatsapp doing?"
+
+The same report, scoped to one app, is triggered by "How is
+[instagram|whatsapp|facebook] doing?" — including "How is Whatsapp
+doing recently?", where "recently" means the same last-28-days
+window. Every card is scoped: user metrics use
+`dim_users.primary_app`, content metrics use `dim_content.app`,
+impressions use their app column, and messaging uses the sender's
+primary_app. This is clean in this synthetic data because session
+app always equals primary_app (the cross-tab is diagonal), so the
+scoped DAU definition matches the global one. Top-1% share in
+scoped mode is within-app, not global.
+
+Scoping is not cosmetic: on seed-42 data, global D7 is flat
+(21.5%, +0.7 points), but Whatsapp D7 falls 2.0 points to 19.1%
+while Instagram D7 rises 2.6 points to 23.2%. The global report
+hides that split; the scoped report shows it. Whatsapp headline:
+growth up (DAU 2,972, +3.6%), retention down, creator supply
+down (301 daily creators, orphan rate 24.9%).
+
+Benchmark b37 scores the Whatsapp report end to end.
+
 ## Benchmarking the report
 
 Routing alone is not scored — the numbers are. Benchmark cases:

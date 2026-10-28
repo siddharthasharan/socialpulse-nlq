@@ -33,7 +33,7 @@ def main() -> None:
             print(p["explanation"])
         return
     if p["type"] == "weather_report":
-        w = compute_weather(args.data)
+        w = compute_weather(args.data, app=p.get("app"))
         if args.json:
             print(json.dumps(w, indent=2, default=str))
             return

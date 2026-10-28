@@ -72,8 +72,17 @@ def _card(card_id, label, current, prior, kind, unit, lower_is_better=False):
     }
 
 
-def compute_weather(data_dir):
-    """Compute the weather report from Phase 1 parquet. Returns a dict."""
+def compute_weather(data_dir, app=None):
+    """Compute the weather report from Phase 1 parquet. Returns a dict.
+
+    If app is given (instagram/whatsapp/facebook), every card is scoped
+    to that app: user metrics use dim_users.primary_app, content metrics
+    use dim_content.app, impressions use their app column, and messaging
+    uses the sender's primary_app. This is clean in this synthetic data
+    because session app always equals primary_app (verified: the
+    primary_app x session-app cross-tab is diagonal), so the scoped
+    DAU definition matches the global DAU definition. Top-1% share in
+    scoped mode is within-app, not global."""
     import duckdb
 
     con = duckdb.connect()
@@ -83,6 +92,9 @@ def compute_weather(data_dir):
         p = Path(data_dir) / f"{t}.parquet"
         if p.exists():
             con.execute(f"CREATE OR REPLACE VIEW {t} AS SELECT * FROM read_parquet('{p}')")
+    app_filter_u = f" AND u.primary_app = '{app}'" if app else ""
+    app_filter_c = f" AND c.app = '{app}'" if app else ""
+    app_filter_i = f" AND i.app = '{app}'" if app else ""
     end = con.execute("SELECT MAX(CAST(start_time AS DATE)) FROM fact_sessions").fetchone()[0]
     cur_start, cur_end = end - __import__("datetime").timedelta(days=27), end
     pri_start, pri_end = end - __import__("datetime").timedelta(days=55), end - __import__("datetime").timedelta(days=28)
@@ -95,8 +107,9 @@ def compute_weather(data_dir):
 
     def dau_mean(a, b):
         return one(
-            "SELECT AVG(dau) FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau "
-            "FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN ? AND ? GROUP BY d)", a, b)
+            "SELECT AVG(dau) FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau "
+            "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
+            f"WHERE CAST(s.start_time AS DATE) BETWEEN ? AND ?{app_filter_u} GROUP BY d)", a, b)
 
     def wau_mean(n_weeks, offset_weeks):
         # Weekly WAU series, most recent first, COMPLETE weeks only.
@@ -105,64 +118,71 @@ def compute_weather(data_dir):
         # understates WAU by ~10% — that was a real bug in the first
         # version of this report, caught by checking DAU vs WAU direction.
         rows = con.execute(
-            "SELECT DATE_TRUNC('week', CAST(start_time AS DATE)) AS w, COUNT(DISTINCT user_id) AS wau, "
-            "COUNT(DISTINCT CAST(start_time AS DATE)) AS days "
-            "FROM fact_sessions GROUP BY w HAVING days = 7 ORDER BY w DESC").fetchall()
+            "SELECT DATE_TRUNC('week', CAST(s.start_time AS DATE)) AS w, COUNT(DISTINCT s.user_id) AS wau, "
+            "COUNT(DISTINCT CAST(s.start_time AS DATE)) AS days "
+            f"FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE 1=1{app_filter_u} "
+            "GROUP BY w HAVING days = 7 ORDER BY w DESC").fetchall()
         block = [r[1] for r in rows[offset_weeks:offset_weeks + n_weeks]]
         return sum(block) / len(block) if block else None
 
     def sessions_per_dau(a, b):
         return one(
-            "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(start_time AS DATE))), 0) "
-            "FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN ? AND ?", a, b)
+            "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) "
+            "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
+            f"WHERE CAST(s.start_time AS DATE) BETWEEN ? AND ?{app_filter_u}", a, b)
 
     def daily_creators(a, b):
         return one(
-            "SELECT AVG(c) FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c "
-            "FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN ? AND ? GROUP BY d)", a, b)
+            "SELECT AVG(c) FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c "
+            "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+            f"WHERE CAST(f.published_at AS DATE) BETWEEN ? AND ?{app_filter_c} GROUP BY d)", a, b)
 
     def creator_penetration(a, b):
         return one(
             "SELECT AVG(c * 1.0 / NULLIF(dau, 0)) FROM "
-            "(SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation "
-            "WHERE CAST(published_at AS DATE) BETWEEN ? AND ? GROUP BY d) c JOIN "
-            "(SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions "
-            "WHERE CAST(start_time AS DATE) BETWEEN ? AND ? GROUP BY d) s USING (d)", a, b, a, b)
+            "(SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f "
+            f"JOIN dim_content c ON c.content_id = f.content_id WHERE CAST(f.published_at AS DATE) BETWEEN ? AND ?{app_filter_c} GROUP BY d) c JOIN "
+            "(SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s "
+            f"JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN ? AND ?{app_filter_u} GROUP BY d) s USING (d)", a, b, a, b)
 
     def messaging_dau(a, b):
         return one(
-            "SELECT AVG(s) FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS s "
-            "FROM fact_messages WHERE CAST(sent_at AS DATE) BETWEEN ? AND ? GROUP BY d)", a, b)
+            "SELECT AVG(s) FROM (SELECT CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS s "
+            "FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id "
+            f"WHERE CAST(m.sent_at AS DATE) BETWEEN ? AND ?{app_filter_u} GROUP BY d)", a, b)
 
     def engagement_rate(a, b):
-        imps = one("SELECT COUNT(*) FROM fact_content_impressions WHERE CAST(viewed_at AS DATE) BETWEEN ? AND ?", a, b)
-        engs = one("SELECT COUNT(*) FROM fact_content_engagements WHERE CAST(created_at AS DATE) BETWEEN ? AND ?", a, b)
+        imps = one(f"SELECT COUNT(*) FROM fact_content_impressions i WHERE CAST(i.viewed_at AS DATE) BETWEEN ? AND ?{app_filter_i}", a, b)
+        engs = one(
+            "SELECT COUNT(*) FROM fact_content_engagements e JOIN dim_content c ON c.content_id = e.content_id "
+            f"WHERE CAST(e.created_at AS DATE) BETWEEN ? AND ?{app_filter_c}", a, b)
         return (engs / imps) if imps else None
 
     def reels_completion(a, b):
         return one(
-            "SELECT AVG(CASE WHEN completion_pct >= 0.95 THEN 1.0 ELSE 0.0 END) FROM fact_video_plays "
-            "WHERE CAST(play_time AS DATE) BETWEEN ? AND ?", a, b)
+            "SELECT AVG(CASE WHEN v.completion_pct >= 0.95 THEN 1.0 ELSE 0.0 END) FROM fact_video_plays v "
+            f"JOIN dim_content c ON c.content_id = v.content_id WHERE CAST(v.play_time AS DATE) BETWEEN ? AND ?{app_filter_c}", a, b)
 
     def reels_watch(a, b):
         return one(
-            "SELECT SUM(watch_ms) / 60000.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(play_time AS DATE))), 0) "
-            "FROM fact_video_plays WHERE CAST(play_time AS DATE) BETWEEN ? AND ?", a, b)
+            "SELECT SUM(v.watch_ms) / 60000.0 / NULLIF(COUNT(DISTINCT (v.user_id, CAST(v.play_time AS DATE))), 0) "
+            "FROM fact_video_plays v JOIN dim_content c ON c.content_id = v.content_id "
+            f"WHERE CAST(v.play_time AS DATE) BETWEEN ? AND ?{app_filter_c}", a, b)
 
     def d7(a, b):
         return one(
             "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) FROM ("
             "SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id "
             "AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained "
-            "FROM dim_users u WHERE u.signup_date BETWEEN ? AND ?)", a, b)
+            f"FROM dim_users u WHERE u.signup_date BETWEEN ? AND ?{app_filter_u})", a, b)
 
     orphan = one(
         "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) FROM ("
         "SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged "
-        "FROM dim_content c)")
+        f"FROM dim_content c WHERE 1=1{app_filter_c})")
     top1 = one(
         "WITH creator_imps AS (SELECT c.creator_id, COUNT(*) AS imps FROM fact_content_impressions i "
-        "JOIN dim_content c ON c.content_id = i.content_id GROUP BY c.creator_id), "
+        f"JOIN dim_content c ON c.content_id = i.content_id WHERE 1=1{app_filter_c} GROUP BY c.creator_id), "
         "ranked AS (SELECT creator_id, imps, NTILE(100) OVER (ORDER BY imps DESC) AS tile FROM creator_imps) "
         "SELECT SUM(CASE WHEN tile = 1 THEN imps ELSE 0 END) * 1.0 / NULLIF(SUM(imps), 0) FROM ranked")
 
@@ -195,8 +215,9 @@ def compute_weather(data_dir):
         return {"up": "↑", "down": "↓", "flat": "→"}[c["direction"]]
 
     dau, ret, creators, pen = by_id["dau"], by_id["d7_retention"], by_id["daily_creators"], by_id["creator_penetration"]
+    scope = f"{app.capitalize()} growth" if app else "Growth"
     headline = (
-        f"Growth is {dau['direction']}: mean daily DAU {fmt(dau['current'], 'users/day')} in {cur_start} to {cur_end}, "
+        f"{scope} is {dau['direction']}: mean daily DAU {fmt(dau['current'], 'users/day')} in {cur_start} to {cur_end}, "
         f"{dau['change_pct']:+.1f}% vs the prior 28 days. "
         f"Retention is {ret['direction']}: D7 {fmt(ret['current'], 'share')} for cohorts {ret_cur_start} to {ret_cur_end}, "
         f"{ret['change_pp']:+.1f} points vs prior cohorts. "
@@ -221,6 +242,7 @@ def compute_weather(data_dir):
     if not watchouts:
         watchouts = ["No watchouts fired on these thresholds. That is a statement about this synthetic data, not a guarantee."]
     return {
+        "app": app,
         "current_period": [str(cur_start), str(cur_end)],
         "prior_period": [str(pri_start), str(pri_end)],
         "retention_cohorts_current": [str(ret_cur_start), str(ret_cur_end)],
