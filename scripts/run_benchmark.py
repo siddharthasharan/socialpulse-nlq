@@ -1,4 +1,4 @@
-"""Run the Phase 2 benchmark (32 questions) against Phase 1 data.
+"""Run the Phase 2 benchmark (34 questions) against Phase 1 data.
 
 Scoring: a question passes if the planner picks the expected metric (or
 expected plan type), the SQL guard passes, execution returns the expected
@@ -6,6 +6,13 @@ shape, and scalar/breakdown values match gold values within 2% (or 0.01
 absolute for rates, whichever is larger). Ambiguous/invalid questions pass
 by clarifying, not by returning a number. Gold scalar values come from
 scripts/validate_phase1.py (canonical queries on seed 42 data).
+Weather-report cases are scored the same way, but against the report's
+cards: expected_cards maps a card id to its expected current value, and
+expected_watchouts_contains lists phrases that must appear in the
+watchouts. Weather gold values come from src/socialpulse_nlq/weather.py
+on seed 42 data, and differ from the canonical whole-window values where
+the report uses different periods (for example, weather D7 uses recent
+complete cohorts, not the Jan 1–Feb 21 cohort window).
 """
 import argparse
 import json
@@ -16,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from socialpulse_nlq.planner import guard_sql, plan, run_plan
+from socialpulse_nlq.weather import compute_weather
 
 
 def close(actual, expected):
@@ -45,7 +53,24 @@ def main() -> None:
         elif c["expected_type"] == "experiment_info":
             ok = p["type"] == "experiment_info" and p.get("metric") == c["expected_metric"]
         elif c["expected_type"] == "weather_report":
-            ok = p["type"] == "weather_report" and p["sql"] is None
+            if p["type"] != "weather_report" or p["sql"] is not None:
+                ok, detail = False, f"type {p['type']} != weather_report"
+            elif "expected_cards" in c or "expected_watchouts_contains" in c:
+                w = compute_weather(args.data)
+                by_id = {card["id"]: card for card in w["cards"]}
+                for card_id, expected in c.get("expected_cards", {}).items():
+                    if card_id not in by_id:
+                        ok, detail = False, f"weather card {card_id} missing"
+                        break
+                    if not close(float(by_id[card_id]["current"]), expected):
+                        ok, detail = False, f"weather {card_id}: {by_id[card_id]['current']} != {expected}"
+                        break
+                if ok:
+                    joined = " ".join(w["watchouts"]).lower()
+                    for phrase in c.get("expected_watchouts_contains", []):
+                        if phrase.lower() not in joined:
+                            ok, detail = False, f"watchout missing {phrase!r}"
+                            break
         else:
             if p["type"] != "query" or p.get("metric") != c["expected_metric"]:
                 ok, detail = False, f"metric {p.get('metric')} != {c['expected_metric']} (type {p['type']})"

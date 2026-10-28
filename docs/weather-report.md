@@ -53,6 +53,32 @@ engagement, or creator supply. These thresholds are documented in
 them — which is the point. A weather report with hidden thresholds
 is just a score with extra steps.
 
+## Benchmarking the report
+
+Routing alone is not scored — the numbers are. Benchmark cases:
+
+- **b32** — "How is the product doing?" must route to a
+  `weather_report` plan with no SQL. Routing only.
+- **b33** — "Show me the weather report" must also produce the
+  growth/retention numbers: DAU 10,054.57, WAU 32,685.25, D7
+  0.21532, messaging DAU 4,340.29.
+- **b34** — "What is product health?" must produce the creator
+  numbers (daily creators 1,015.57, creator penetration 0.10128,
+  orphan rate 0.24588, top-1% share 0.09535) and all three
+  watchouts ("Creator problem", "Creator supply softening",
+  "Concentration watch").
+
+The runner (`scripts/run_benchmark.py`) compares card values with
+the same tolerance as other cases: 2% or 0.01 absolute, whichever
+is larger. Weather D7 golds differ from the canonical D7 gold
+(0.22053) on purpose: the report uses recent complete cohorts,
+not the Jan 1–Feb 21 cohort window. A tampered gold value was
+verified to fail b33 (33/34), so this scoring is not decorative —
+it actually catches a wrong number.
+
+Run: `python scripts/run_benchmark.py --data data/phase1`
+(expect 34/34 on seed-42 data).
+
 ## Limitations
 
 - Descriptive, not causal. Nothing here says *why* creators fell;

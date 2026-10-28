@@ -264,5 +264,36 @@
     "expected_type": "weather_report",
     "id": "b32",
     "question": "How is the product doing?"
+  },
+  {
+    "id": "b33",
+    "category": "weather_report",
+    "question": "Show me the weather report",
+    "expected_type": "weather_report",
+    "expected_metric": null,
+    "expected_cards": {
+      "dau": 10054.57,
+      "wau": 32685.25,
+      "d7_retention": 0.21532,
+      "messaging_dau": 4340.29
+    }
+  },
+  {
+    "id": "b34",
+    "category": "weather_report",
+    "question": "What is product health?",
+    "expected_type": "weather_report",
+    "expected_metric": null,
+    "expected_cards": {
+      "daily_creators": 1015.57,
+      "creator_penetration": 0.10128,
+      "orphan_post_rate": 0.24588,
+      "top1_share": 0.09535
+    },
+    "expected_watchouts_contains": [
+      "Creator problem",
+      "Creator supply softening",
+      "Concentration watch"
+    ]
   }
 ]
