@@ -33,6 +33,14 @@ canvas{border:1px solid #ddd;width:100%;height:260px}
 
 <div id="out"></div>
 
+<h2>Phase 3 chat — multi-turn assistant</h2>
+<p class="small">Deterministic, no LLM: the chat keeps the app and topic in state, so a follow-up means something. Start with "What's happening with Instagram?", pick a drill-down, then ask for a diagnosis, an experiment recommendation (labelled HYPOTHESIS, never a forecast), or the PM/Eng brief. Restarting app.py resets chat history.</p>
+<p><button onclick="sendChatMsg(`What's happening with Instagram?`)">What's happening with Instagram?</button></p>
+<label for="chatq">Chat</label>
+<input type="text" id="chatq" placeholder="What's happening with Instagram?">
+<p><button onclick="sendChatMsg(document.getElementById('chatq').value)">Send</button></p>
+<div id="chatlog" style="white-space:pre-wrap"></div>
+
 <h2>Experiments (registry only in Phase 2)</h2>
 <p class="small">Assignment tables arrive in Phase 3, so this list is descriptive. The planner will not invent a lift for an experiment without assignments.</p>
 <div id="exps"></div>
@@ -143,6 +151,26 @@ function drawChart(d){
     ci++;
   }
   ctx.fillStyle = '#555'; ctx.fillText('value (last column)', 40, H-8);
+}
+let chatSessionId = null;
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+async function sendChatMsg(text){
+  text = (text||'').trim(); if(!text) return;
+  const log = document.getElementById('chatlog');
+  log.innerHTML += `<div><b>You:</b> ${esc(text)}</div>`;
+  document.getElementById('chatq').value = '';
+  const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: chatSessionId, message: text})});
+  const d = await r.json();
+  chatSessionId = d.session_id;
+  let html = `<div><b>Assistant [${esc(d.type)}]:</b> ${esc(d.text)}</div>`;
+  if(d.options && d.options.length){
+    html += '<p>' + d.options.map(o=>{
+      const apps = ['instagram','whatsapp','facebook'];
+      const sendText = apps.includes(o.topic) ? `What's happening with ${o.topic}?` : o.topic;
+      return `<button onclick="sendChatMsg(${JSON.stringify(sendText)})">${esc(o.key)}) ${esc(o.label)}</button>`;
+    }).join('') + '</p>';
+  }
+  log.innerHTML += html;
 }
 fetch('/api/experiments').then(r=>r.json()).then(d=>{
   document.getElementById('exps').innerHTML = d.experiments.map(e=>

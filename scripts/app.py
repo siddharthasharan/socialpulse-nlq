@@ -18,6 +18,10 @@ from urllib.parse import parse_qs, urlparse
 
 from socialpulse_nlq.planner import plan, run_plan
 from socialpulse_nlq.weather import compute_weather
+from socialpulse_nlq.chat import ChatSession
+import uuid
+
+CHAT_SESSIONS = {}
 
 
 def parse_experiments():
@@ -73,11 +77,29 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({"error": "not found"}, status=404)
 
     def do_POST(self):  # noqa: N802
+        length = int(self.headers.get("Content-Length", 0))
+        body = json.loads(self.rfile.read(length) or b"{}")
+        if self.path == "/api/chat":
+            # Phase 3: one ChatSession per client session id, kept in
+            # memory on this server process. Restarting app.py resets
+            # chat history — that is intentional for a local demo.
+            sid = body.get("session_id") or str(uuid.uuid4())
+            if sid not in CHAT_SESSIONS:
+                CHAT_SESSIONS[sid] = ChatSession(self.data_dir)
+            reply = CHAT_SESSIONS[sid].respond(str(body.get("message", "")))
+            reply = dict(reply)
+            reply["session_id"] = sid
+            # Weather/drill-down evidence can be large; the UI renders
+            # text + options, so strip the full weather dict from the
+            # chat reply and keep only the headline for reference.
+            if reply.get("weather"):
+                reply["weather"] = {"headline": reply["weather"]["headline"],
+                                    "app": reply["weather"]["app"]}
+            self._send_json(reply)
+            return
         if self.path != "/api/ask":
             self._send_json({"error": "not found"}, status=404)
             return
-        length = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(length) or b"{}")
         p = plan(str(body.get("question", "")))
         cols, rows, ms = [], [], 0
         weather = None
