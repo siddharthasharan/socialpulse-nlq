@@ -15,6 +15,23 @@ table{border-collapse:collapse;width:100%} td,th{border:1px solid #ddd;padding:.
 .warn{background:#fdecea;border:1px solid #d66;padding:.8rem}
 canvas{border:1px solid #ddd;width:100%;height:260px}
 .small{color:#555;font-size:.9rem}
+/* Bottom-docked chat window (2026-10-28): everything on the page
+stays where it is; the chat lives in a fixed window at the bottom,
+like a Muse/ChatGPT input bar, so the conversation is always at hand
+while you scroll the dashboard above it. Collapsing it leaves only
+its header bar at the bottom. */
+#docked{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#fff;border-top:2px solid #1a1a1a;box-shadow:0 -4px 16px rgba(0,0,0,.12)}
+#docked header{display:flex;align-items:center;gap:.5rem;padding:.5rem 1rem;cursor:pointer}
+#docked header b{flex:1}
+#dockedbody{max-height:340px;display:flex;flex-direction:column;padding:0 1rem 1rem}
+#docked.collapsed #dockedbody{display:none}
+#dockedlog{overflow:auto;max-height:220px;padding:.5rem 0}
+.msg{margin:.4rem 0;padding:.5rem .8rem;border-radius:12px;max-width:85%;white-space:pre-wrap}
+.msg-user{background:#e8f0fe;margin-left:auto;text-align:right}
+.msg-assistant{background:#f4f4f4;margin-right:auto}
+.chiprow{margin:.3rem 0}
+body.docked-open{padding-bottom:430px}
+body:not(.docked-open){padding-bottom:60px}
 </style>
 </head>
 <body>
@@ -55,6 +72,15 @@ canvas{border:1px solid #ddd;width:100%;height:260px}
 
 <h2>Catalog metrics</h2>
 <div id="metrics" class="small"></div>
+
+<div id="docked">
+  <header onclick="toggleDocked()"><b>SocialPulse chat — multi-turn assistant</b><span class="small">Select a drill-down, or update a parameter in chat (e.g. "you are not looking at retention"). Click to collapse/expand.</span><button type="button" onclick="event.stopPropagation(); newDockedChat()">New chat</button><button type="button" onclick="event.stopPropagation(); document.getElementById('qflow').scrollIntoView()">Edit questions</button><span id="dockedtoggle">▾</span></header>
+  <div id="dockedbody">
+    <div id="dockedlog"></div>
+    <p><input type="text" id="dockedq" placeholder="What's happening with Instagram?"></p>
+    <p><button onclick="sendDockedMsg(document.getElementById('dockedq').value)">Send</button> <span class="small">Enter also sends. Same session as the chat section above, so a conversation started there continues here, and vice versa.</span></p>
+  </div>
+</div>
 
 <script>
 const samples = [
@@ -184,9 +210,13 @@ async function sendChatMsg(text){
   const log = document.getElementById('chatlog');
   log.innerHTML += `<div><b>You:</b> ${esc(text)}</div>`;
   document.getElementById('chatq').value = '';
+  // Shared transcript: in-page sends also appear in the docked
+  // window, so the conversation continues across both boxes.
+  if (typeof chatHistory !== 'undefined') chatHistory.push({role:'user', text});
   const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: chatSessionId, message: text})});
   const d = await r.json();
   chatSessionId = d.session_id;
+  if (typeof chatHistory !== 'undefined') { chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || []}); renderDockedLog(); }
   let html = `<div><b>Assistant [${esc(d.type)}]:</b> ${esc(d.text)}</div>`;
   if(d.options && d.options.length){
     html += '<p>' + d.options.map(o=>{
@@ -316,6 +346,62 @@ function newChatWithQuestions(){
   document.getElementById('chatlog').innerHTML = '<div>New chat started — edited flow questions will load for this session.</div>';
 }
 loadQuestions();
+// Bottom-docked chat window: same session id as the in-page chat
+// section, so the conversation continues across both. A shared
+// client-side transcript (chatHistory) mirrors every message into
+// the docked window, whichever box it was sent from, so switching
+// between scrolling the dashboard and typing at the bottom never
+// loses the thread. Option chips in the docked window are the same
+// server options (select a drill-down / next step); "update" is the
+// correction turn in chat ("you are not looking at retention",
+// "show daily, not average") or the Edit questions button, which
+// scrolls to the editor section above.
+let chatHistory = [];
+document.body.classList.add('docked-open');
+function toggleDocked(){
+  const d = document.getElementById('docked');
+  d.classList.toggle('collapsed');
+  document.body.classList.toggle('docked-open', !d.classList.contains('collapsed'));
+  document.getElementById('dockedtoggle').textContent = d.classList.contains('collapsed') ? '▴' : '▾';
+}
+function renderDockedLog(){
+  const log = document.getElementById('dockedlog');
+  log.innerHTML = chatHistory.map(m=>{
+    let html = `<div class="msg ${m.role==='user' ? 'msg-user' : 'msg-assistant'}"><b>${m.role==='user' ? 'You' : 'Assistant' + (m.type ? ' [' + esc(m.type) + ']' : '')}:</b> ${esc(m.text)}</div>`;
+    if(m.options && m.options.length){
+      html += '<div class="chiprow">' + m.options.map(o=>{
+        const apps = ['instagram','whatsapp','facebook'];
+        const sendText = o.send || (apps.includes(o.topic) ? `What's happening with ${o.topic}?` : o.topic);
+        return `<button data-docked-send="${esc(sendText)}">${esc(o.key)}) ${esc(o.label)}</button>`;
+      }).join('') + '</div>';
+    }
+    return html;
+  }).join('');
+  log.scrollTop = log.scrollHeight;
+}
+document.getElementById('dockedlog').addEventListener('click', (e)=>{
+  const btn = e.target.closest('button[data-docked-send]');
+  if (btn) sendDockedMsg(btn.getAttribute('data-docked-send'));
+});
+async function sendDockedMsg(text){
+  text = (text||'').trim(); if(!text) return;
+  chatHistory.push({role:'user', text});
+  document.getElementById('dockedq').value = '';
+  renderDockedLog();
+  const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: chatSessionId, message: text})});
+  const d = await r.json();
+  chatSessionId = d.session_id;
+  chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || []});
+  renderDockedLog();
+  // Mirror into the in-page chat log too, so both views stay in sync.
+  const log = document.getElementById('chatlog');
+  log.innerHTML += `<div><b>You:</b> ${esc(text)}</div><div><b>Assistant [${esc(d.type)}]:</b> ${esc(d.text)}</div>`;
+}
+function newDockedChat(){
+  chatSessionId = null; chatHistory = []; renderDockedLog();
+  document.getElementById('chatlog').innerHTML = '<div>New chat started — the docked window and the chat section above share this session.</div>';
+}
+document.getElementById('dockedq').addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendDockedMsg(document.getElementById('dockedq').value); });
 fetch('/api/experiments').then(r=>r.json()).then(d=>{
   document.getElementById('exps').innerHTML = d.experiments.map(e=>
     `<p><b>${e.name}</b> (${e.id}) — ${e.app}, ${e.status}, ${e.start_date} to ${e.end_date}, primary metric: ${e.primary_metric}</p>`).join('');
