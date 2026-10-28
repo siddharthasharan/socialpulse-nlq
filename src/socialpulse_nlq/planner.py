@@ -194,10 +194,15 @@ def build_sql(metric: str, f: dict, breakdown, q: str):
                     f"JOIN dim_users u ON u.user_id = s.user_id WHERE {where} "
                     f"GROUP BY {dim}, date ORDER BY {dim}, date"), tables, grain
         if _series_or_scalar(q) == "series":
+            # Bug fixed 2026-10-27: this branch used to ignore the user
+            # filters entirely (fact_sessions only, no dim_users join),
+            # so "DAU trend for Whatsapp" returned all-app DAU (~9,500/day
+            # instead of ~2,900). It now uses the same join + where as
+            # the averaged branch.
             grain = "user x day"
-            return (f"SELECT CAST(start_time AS DATE) AS date, COUNT(DISTINCT user_id) AS dau "
-                    f"FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '{ds}' AND DATE '{de}' "
-                    f"GROUP BY date ORDER BY date"), ["fact_sessions"], grain
+            return (f"SELECT CAST(s.start_time AS DATE) AS date, COUNT(DISTINCT s.user_id) AS dau "
+                    f"FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE {where} "
+                    f"GROUP BY date ORDER BY date"), tables, grain
         grain = "user x day (averaged)"
         inner = (f"SELECT CAST(s.start_time AS DATE) AS date, COUNT(DISTINCT s.user_id) AS dau "
                  f"FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE {where} GROUP BY date")

@@ -103,6 +103,7 @@ async function ask(){
   let html = `<p><b>Metric:</b> ${d.metric} &nbsp; <b>Grain:</b> ${d.grain} &nbsp; <b>Runtime:</b> ${d.runtime_ms} ms &nbsp; <b>Rows:</b> ${d.row_count}</p>`;
   html += `<p><b>Tables:</b> ${(d.tables||[]).join(', ')} &nbsp; <b>Filters:</b> ${JSON.stringify(d.filters)} &nbsp; <b>Breakdown:</b> ${d.breakdown||'none'}</p>`;
   html += `<pre>${d.sql}</pre>`;
+  if(d.row_count === 1) html += '<p class="small">Chart note: this result is a single averaged value, so the chart below is a single dot, not a line. For a daily series, ask with "trend" — for example, "What is the DAU trend for Whatsapp over the last 7 days?"</p>';
   html += '<canvas id="chart"></canvas>';
   html += '<table><tr>' + d.columns.map(c=>`<th>${c}</th>`).join('') + '</tr>' +
     d.rows.slice(0,50).map(row=>'<tr>'+row.map(v=>`<td>${v}</td>`).join('')+'</tr>').join('') + '</table>';
@@ -125,10 +126,19 @@ function drawChart(d){
   const colors = ['#1f77b4','#d62728','#2ca02c','#ff7f0e','#9467bd'];
   let ci = 0;
   for(const [k, series] of Object.entries(groups)){
-    ctx.strokeStyle = colors[ci++ % colors.length]; ctx.beginPath();
-    series.forEach((v,i)=>{ const x = 40 + (W-60) * (series.length===1?0:i/(series.length-1)); const y = H-30 - (H-60) * ((v-min)/((max-min)||1)); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+    ctx.strokeStyle = colors[ci % colors.length]; ctx.beginPath();
+    // Bug fixed 2026-10-27: a series with one point used to be only a
+    // moveTo with no lineTo, so stroke() drew nothing and scalar
+    // results showed an empty chart. Single points are now drawn as
+    // a dot with their value, and every point gets a dot so short
+    // series are visible too.
+    const pts = series.map((v,i)=>{ const x = series.length===1 ? W/2 : 40 + (W-60) * (i/(series.length-1)); const y = H-30 - (H-60) * ((v-min)/((max-min)||1)); return [x,y,v]; });
+    pts.forEach(([x,y],i)=>{ i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
     ctx.stroke();
-    ctx.fillStyle = ctx.strokeStyle; ctx.fillText(k, 40, 20 + ci*14);
+    ctx.fillStyle = ctx.strokeStyle;
+    pts.forEach(([x,y,v])=>{ ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill(); ctx.fillText(String(v), x+8, y-8); });
+    ctx.fillText(k, 40, 20 + ci*14);
+    ci++;
   }
   ctx.fillStyle = '#555'; ctx.fillText('value (last column)', 40, H-8);
 }

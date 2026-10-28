@@ -48,6 +48,23 @@ def test_experiment_list():
     assert p["type"] == "experiment_list"
 
 
+def test_dau_series_respects_app_filter():
+    # Regression 2026-10-27: the DAU series branch used to drop the
+    # app filter and return all-app DAU (~9,500/day for Whatsapp's
+    # last 7 days, instead of ~2,900). SQL must contain the filter.
+    p = plan("What is the DAU trend for Whatsapp over the last 7 days?")
+    assert p["type"] == "query"
+    assert "whatsapp" in p["sql"] and "dim_users" in p["sql"]
+    data = Path(__file__).resolve().parents[1] / "data/phase1"
+    if (data / "fact_sessions.parquet").exists():
+        from socialpulse_nlq.planner import run_plan
+        cols, rows, _ = run_plan(p, data)
+        assert len(rows) == 7
+        vals = [r[-1] for r in rows]
+        assert all(v < 5000 for v in vals), vals  # all-app would be ~9,500+
+        assert abs(sum(vals) / len(vals) - 2942.14) < 1.0
+
+
 def test_planner_metrics_are_in_catalog():
     ids = catalog_metric_ids(Path(__file__).resolve().parents[1] / "catalog/measures.yaml")
     assert len(ids) == 20

@@ -1,4 +1,4 @@
-"""Run the Phase 2 benchmark (34 questions) against Phase 1 data.
+"""Run the Phase 2 benchmark (35 questions) against Phase 1 data.
 
 Scoring: a question passes if the planner picks the expected metric (or
 expected plan type), the SQL guard passes, execution returns the expected
@@ -88,6 +88,11 @@ def main() -> None:
                     elif c["expected_type"] == "series":
                         if len(rows) < c["min_rows"]:
                             ok, detail = False, f"only {len(rows)} rows, expected >= {c['min_rows']}"
+                        elif "expected_values" in c:
+                            got = [float(r[-1]) for r in rows]
+                            if len(got) != len(c["expected_values"]) or any(
+                                    not close(g, e) for g, e in zip(got, c["expected_values"])):
+                                ok, detail = False, f"series values {got} != {c['expected_values']}"
                     elif c["expected_type"] == "series_by_dim":
                         dims = {r[0] for r in rows}
                         if len(rows) < c["min_rows"] or len(dims) != c["expected_dim_count"]:

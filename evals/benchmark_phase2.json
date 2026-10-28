@@ -295,5 +295,22 @@
       "Creator supply softening",
       "Concentration watch"
     ]
+  },
+  {
+    "id": "b35",
+    "category": "segments",
+    "question": "What is the DAU trend for Whatsapp over the last 7 days?",
+    "expected_type": "series",
+    "expected_metric": "dau_mean_daily",
+    "min_rows": 7,
+    "expected_values": [
+      2808,
+      2850,
+      2830,
+      3131,
+      3277,
+      2876,
+      2823
+    ]
   }
 ]
