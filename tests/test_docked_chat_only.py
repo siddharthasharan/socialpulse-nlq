@@ -27,6 +27,18 @@ def test_hide_dashboard_toggle_present():
         assert marker in html, f"dashboard section deleted, not hidden: {marker}"
 
 
+def test_chat_only_is_default_on_load():
+    """Chat-only default (2026-10-29): the user said the dashboard
+    background is not needed, so the page must load chat-only, not
+    with the dashboard visible behind a docked chat. The dashboard
+    is still in the HTML (hidden by CSS), and the header button
+    starts as "Show dashboard" because it is already hidden.
+    """
+    html = HTML.read_text()
+    assert '<body class="chat-only">' in html
+    assert '>Show dashboard</button>' in html
+
+
 def test_no_grey_placeholder_question_in_chat_inputs():
     html = HTML.read_text()
     assert 'placeholder="What\'s happening with Instagram?"' not in html

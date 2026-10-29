@@ -42,17 +42,18 @@ as it was, with the transcript intact. Charts from a chat drill-down
 render inside the docked log only (see renderDockedLog): they are
 never mirrored to the dashboard Ask section or the in-page chat log. */
 #docked.fullscreen{display:flex;flex-direction:column;top:0;bottom:0;left:0;right:0;height:100vh;max-height:none;z-index:100;border-top:none;box-shadow:none;border-radius:0}
-/* Hide dashboard / chat-only (2026-10-29): the "Hide dashboard"
-button removes the older dashboard page from view, instead of just
-covering it as full screen does. When it is on, exiting full screen
-(↩ Dock) does NOT bring the dashboard back — the chat stays the only
-interface until "Show dashboard" is clicked. The dashboard is hidden
-with CSS only, never deleted from the page, so Show dashboard
-restores it exactly as it was, with the transcript intact. Edit
-questions exits chat-only first, so the editor it scrolls to is
-actually visible. In chat-only the docked window fills the viewport,
-so it has square corners like full screen, not the rounded top
-corners of the bottom-docked window. */
+/* Hide dashboard / chat-only (2026-10-29): the dashboard page is
+not needed as a background, so the page loads chat-only
+(<body class="chat-only">) and the dashboard is hidden from view,
+instead of just being covered as full screen does. When it is on,
+exiting full screen (↩ Dock) does NOT bring the dashboard back —
+the chat stays the only interface until "Show dashboard" is clicked.
+The dashboard is hidden with CSS only, never deleted from the page,
+so Show dashboard restores it exactly as it was, with the transcript
+intact. Edit questions exits chat-only first, so the editor it
+scrolls to is actually visible. In chat-only the docked window fills
+the viewport, so it has square corners like full screen, not the
+rounded top corners of the bottom-docked window. */
 body.chat-only > *:not(#docked){display:none}
 body.chat-only{padding-bottom:0;overflow:hidden}
 body.chat-only #docked{position:fixed;top:0;left:0;right:0;bottom:0;height:100vh;display:flex;flex-direction:column;z-index:100;border-top:none;border-radius:0;box-shadow:none}
@@ -73,7 +74,7 @@ body.docked-full{overflow:hidden;padding-bottom:0}
 .dockchart-note{color:#555;font-size:.9rem;margin:.3rem 0 0}
 </style>
 </head>
-<body>
+<body class="chat-only">
 <h1>SocialPulse NLQ</h1>
 <p class="small">Independent synthetic product analytics. Not affiliated with Meta. Ask in plain English; the planner maps your question to a catalog metric, builds SQL from an allowlisted template, checks it with a read-only guard, and returns a receipt.</p>
 
@@ -113,7 +114,7 @@ body.docked-full{overflow:hidden;padding-bottom:0}
 <div id="metrics" class="small"></div>
 
 <div id="docked">
-  <header onclick="toggleDocked()"><b>SocialPulse chat — multi-turn assistant</b><span class="small">Select a drill-down, or update a parameter in chat (e.g. "you are not looking at retention"). Click to collapse/expand.</span><button type="button" onclick="event.stopPropagation(); newDockedChat()">New chat</button><button type="button" onclick="event.stopPropagation(); editQuestionsFromDocked()">Edit questions</button><button type="button" id="dockedfullbtn" title="Expand to full screen — chat data and charts stay in this window" onclick="event.stopPropagation(); toggleDockedFullscreen()">⛶ Full screen</button><button type="button" id="dockedhidebtn" title="Hide the dashboard sections so only the chat remains; click again to show them" onclick="event.stopPropagation(); toggleChatOnly()">Hide dashboard</button><span id="dockedtoggle">▾</span></header>
+  <header onclick="toggleDocked()"><b>SocialPulse chat — multi-turn assistant</b><span class="small">Select a drill-down, or update a parameter in chat (e.g. "you are not looking at retention"). Click to collapse/expand.</span><button type="button" onclick="event.stopPropagation(); newDockedChat()">New chat</button><button type="button" onclick="event.stopPropagation(); editQuestionsFromDocked()">Edit questions</button><button type="button" id="dockedfullbtn" title="Expand to full screen — chat data and charts stay in this window" onclick="event.stopPropagation(); toggleDockedFullscreen()">⛶ Full screen</button><button type="button" id="dockedhidebtn" title="Show the dashboard sections again; the chat stays where it is" onclick="event.stopPropagation(); toggleChatOnly()">Show dashboard</button><span id="dockedtoggle">▾</span></header>
   <div id="dockedbody">
     <div id="dockedlog"></div>
     <p><input type="text" id="dockedq"></p>
