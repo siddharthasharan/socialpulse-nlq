@@ -40,6 +40,27 @@ def test_docked_charts_render_in_docked_log_only():
     assert "dockchart" in docked_section
 
 
+def test_pinned_input_in_fullscreen():
+    """Pinned input (2026-10-29, user choice): in full screen the input
+    stays at the bottom and only the log scrolls above it.
+
+    Regression for the bug seen on Render 2026-10-29 13:51 PDT: after
+    several turns the input bar was off-screen, because #docked was
+    height:100vh but not display:flex, so #dockedbody's flex:1 did
+    nothing, the log grew, and the input was pushed below the viewport
+    while body scroll was locked. The fix is a flex column on the
+    full-screen window: header and input rows shrink-proof, log flexes
+    with min-height:0 and its own scroll.
+    """
+    html = HTML.read_text()
+    block = html.split("#docked.fullscreen{")[1].split("}")[0]
+    assert "display:flex" in block, "fullscreen window must be a flex column"
+    assert "flex-direction:column" in block
+    assert "#docked.fullscreen header{flex-shrink:0}" in html
+    assert "#docked.fullscreen #dockedlog{max-height:none;flex:1;min-height:0;overflow:auto}" in html
+    assert "#docked.fullscreen #dockedbody > p{flex-shrink:0}" in html
+
+
 def test_dashboard_and_docked_still_present():
     html = HTML.read_text()
     for marker in ('id="docked"', 'id="dockedlog"', 'id="dockedq"',

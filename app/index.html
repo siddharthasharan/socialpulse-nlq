@@ -41,10 +41,12 @@ removed or moved, they are simply covered until you exit full screen
 as it was, with the transcript intact. Charts from a chat drill-down
 render inside the docked log only (see renderDockedLog): they are
 never mirrored to the dashboard Ask section or the in-page chat log. */
-#docked.fullscreen{top:0;bottom:0;left:0;right:0;height:100vh;max-height:none;z-index:100;border-top:none;box-shadow:none}
+#docked.fullscreen{display:flex;flex-direction:column;top:0;bottom:0;left:0;right:0;height:100vh;max-height:none;z-index:100;border-top:none;box-shadow:none}
+#docked.fullscreen header{flex-shrink:0}
 #docked.fullscreen #dockedbody{max-height:none;flex:1;min-height:0;overflow:hidden}
-#docked.fullscreen #dockedlog{max-height:none;flex:1;min-height:0}
-#docked.fullscreen.collapsed{height:auto}
+#docked.fullscreen #dockedlog{max-height:none;flex:1;min-height:0;overflow:auto}
+#docked.fullscreen #dockedbody > p{flex-shrink:0}
+#docked.fullscreen.collapsed{display:block;height:auto}
 #docked.fullscreen.collapsed #dockedbody{display:none}
 body.docked-full{overflow:hidden;padding-bottom:0}
 .dockchart{width:100%;height:220px;border:1px solid #ddd;background:#fff}
