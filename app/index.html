@@ -32,6 +32,23 @@ its header bar at the bottom. */
 .chiprow{margin:.3rem 0}
 body.docked-open{padding-bottom:430px}
 body:not(.docked-open){padding-bottom:60px}
+/* Full-screen docked chat (2026-10-29): the ⛶ button expands the docked
+window to fill the viewport, with its background opaque and the page
+behind it unscrollable, so the chat is the only interface visible —
+a clean, ChatGPT/Muse-style view. The dashboard sections are not
+removed or moved, they are simply covered until you exit full screen
+(↩ Dock, or Escape), which restores the bottom-docked window exactly
+as it was, with the transcript intact. Charts from a chat drill-down
+render inside the docked log only (see renderDockedLog): they are
+never mirrored to the dashboard Ask section or the in-page chat log. */
+#docked.fullscreen{top:0;bottom:0;left:0;right:0;height:100vh;max-height:none;z-index:100;border-top:none;box-shadow:none}
+#docked.fullscreen #dockedbody{max-height:none;flex:1;min-height:0;overflow:hidden}
+#docked.fullscreen #dockedlog{max-height:none;flex:1;min-height:0}
+#docked.fullscreen.collapsed{height:auto}
+#docked.fullscreen.collapsed #dockedbody{display:none}
+body.docked-full{overflow:hidden;padding-bottom:0}
+.dockchart{width:100%;height:220px;border:1px solid #ddd;background:#fff}
+.dockchart-note{color:#555;font-size:.9rem;margin:.3rem 0 0}
 </style>
 </head>
 <body>
@@ -74,7 +91,7 @@ body:not(.docked-open){padding-bottom:60px}
 <div id="metrics" class="small"></div>
 
 <div id="docked">
-  <header onclick="toggleDocked()"><b>SocialPulse chat — multi-turn assistant</b><span class="small">Select a drill-down, or update a parameter in chat (e.g. "you are not looking at retention"). Click to collapse/expand.</span><button type="button" onclick="event.stopPropagation(); newDockedChat()">New chat</button><button type="button" onclick="event.stopPropagation(); document.getElementById('qflow').scrollIntoView()">Edit questions</button><span id="dockedtoggle">▾</span></header>
+  <header onclick="toggleDocked()"><b>SocialPulse chat — multi-turn assistant</b><span class="small">Select a drill-down, or update a parameter in chat (e.g. "you are not looking at retention"). Click to collapse/expand.</span><button type="button" onclick="event.stopPropagation(); newDockedChat()">New chat</button><button type="button" onclick="event.stopPropagation(); document.getElementById('qflow').scrollIntoView()">Edit questions</button><button type="button" id="dockedfullbtn" title="Expand to full screen — chat data and charts stay in this window" onclick="event.stopPropagation(); toggleDockedFullscreen()">⛶ Full screen</button><span id="dockedtoggle">▾</span></header>
   <div id="dockedbody">
     <div id="dockedlog"></div>
     <p><input type="text" id="dockedq" placeholder="What's happening with Instagram?"></p>
@@ -216,7 +233,7 @@ async function sendChatMsg(text){
   const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: chatSessionId, message: text})});
   const d = await r.json();
   chatSessionId = d.session_id;
-  if (typeof chatHistory !== 'undefined') { chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || []}); renderDockedLog(); }
+  if (typeof chatHistory !== 'undefined') { chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || [], drilldown: d.drilldown || null}); renderDockedLog(); }
   let html = `<div><b>Assistant [${esc(d.type)}]:</b> ${esc(d.text)}</div>`;
   if(d.options && d.options.length){
     html += '<p>' + d.options.map(o=>{
@@ -361,13 +378,77 @@ document.body.classList.add('docked-open');
 function toggleDocked(){
   const d = document.getElementById('docked');
   d.classList.toggle('collapsed');
+  // Collapsing while full-screen would leave a full-height header bar,
+  // so collapsing exits full screen first, then collapses as before.
+  if(d.classList.contains('collapsed') && d.classList.contains('fullscreen')){
+    d.classList.remove('fullscreen');
+    document.body.classList.remove('docked-full');
+    document.getElementById('dockedfullbtn').textContent = '⛶ Full screen';
+  }
   document.body.classList.toggle('docked-open', !d.classList.contains('collapsed'));
   document.getElementById('dockedtoggle').textContent = d.classList.contains('collapsed') ? '▴' : '▾';
 }
+function toggleDockedFullscreen(){
+  const d = document.getElementById('docked');
+  const full = d.classList.toggle('fullscreen');
+  document.body.classList.toggle('docked-full', full);
+  // Going full screen must show the chat, so un-collapse if needed.
+  if(full && d.classList.contains('collapsed')){
+    d.classList.remove('collapsed');
+    document.body.classList.add('docked-open');
+    document.getElementById('dockedtoggle').textContent = '▾';
+  }
+  document.getElementById('dockedfullbtn').textContent = full ? '↩ Dock' : '⛶ Full screen';
+  renderDockedLog();
+}
+document.addEventListener('keydown', (e)=>{
+  const d = document.getElementById('docked');
+  if(e.key === 'Escape' && d && d.classList.contains('fullscreen')) toggleDockedFullscreen();
+});
+function drawDockedLine(cv, vals, label){
+  if(!cv || !vals.length) return;
+  const ctx = cv.getContext('2d'); const W = cv.width = 900, H = cv.height = 220;
+  ctx.clearRect(0,0,W,H);
+  const max = Math.max(...vals), min = Math.min(...vals);
+  const pts = vals.map((v,i)=>{ const x = vals.length===1 ? W/2 : 40 + (W-60) * (i/(vals.length-1)); const y = H-30 - (H-60) * ((v-min)/((max-min)||1)); return [x,y,v]; });
+  ctx.strokeStyle = '#1f77b4'; ctx.beginPath();
+  pts.forEach(([x,y],i)=>{ i?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke();
+  ctx.fillStyle = '#1f77b4';
+  pts.forEach(([x,y,v])=>{ ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fill(); });
+  ctx.fillStyle = '#555'; ctx.fillText(label + ' — low ' + min.toLocaleString() + ', high ' + max.toLocaleString(), 40, 20);
+}
+function drawDockedBars(cv, months){
+  if(!cv || !months.length) return;
+  const ctx = cv.getContext('2d'); const W = cv.width = 900, H = cv.height = 220;
+  ctx.clearRect(0,0,W,H);
+  const max = Math.max(...months.map(m=>m.posts), 1);
+  const bw = Math.min(120, (W-80) / months.length * 0.5);
+  months.forEach((m,i)=>{
+    const x = 40 + i * ((W-80) / months.length) + ((W-80) / months.length - bw) / 2;
+    const h = (H-60) * (m.posts / max);
+    ctx.fillStyle = '#1f77b4'; ctx.fillRect(x, H-30-h, bw, h);
+    ctx.fillStyle = '#1a1a1a'; ctx.fillText(String(m.posts.toLocaleString()), x, H-30-h-6);
+    ctx.fillStyle = '#555'; ctx.fillText(m.month, x, H-12);
+  });
+  ctx.fillStyle = '#555'; ctx.fillText('Posts per month', 40, 20);
+}
 function renderDockedLog(){
   const log = document.getElementById('dockedlog');
-  log.innerHTML = chatHistory.map(m=>{
+  // Charts from a chat drill-down render inside the docked log ONLY.
+  // The server already returns drilldown evidence (growth: daily DAU
+  // series; creators: monthly creations); other topics are scalars, so
+  // they honestly get text only, never an invented chart. The in-page
+  // chat log and the dashboard Ask section are not given these
+  // canvases, so in full-screen mode the chat is the only place data
+  // and charts appear.
+  log.innerHTML = chatHistory.map((m, idx)=>{
     let html = `<div class="msg ${m.role==='user' ? 'msg-user' : 'msg-assistant'}"><b>${m.role==='user' ? 'You' : 'Assistant' + (m.type ? ' [' + esc(m.type) + ']' : '')}:</b> ${esc(m.text)}</div>`;
+    const ev = m.drilldown && m.drilldown.evidence;
+    if(ev && ev.daily_dau_series && ev.daily_dau_series.length > 1){
+      html += `<p class="dockchart-note">Chart — daily DAU from this chat's growth drill-down, shown here only.</p><canvas class="dockchart" id="dockchart-${idx}"></canvas>`;
+    } else if(ev && ev.monthly_creations && ev.monthly_creations.length > 1){
+      html += `<p class="dockchart-note">Chart — posts per month from this chat's creators drill-down, shown here only.</p><canvas class="dockchart" id="dockchart-${idx}"></canvas>`;
+    }
     if(m.options && m.options.length){
       html += '<div class="chiprow">' + m.options.map(o=>{
         const apps = ['instagram','whatsapp','facebook'];
@@ -377,6 +458,13 @@ function renderDockedLog(){
     }
     return html;
   }).join('');
+  chatHistory.forEach((m, idx)=>{
+    const cv = document.getElementById('dockchart-' + idx);
+    if(!cv) return;
+    const ev = m.drilldown && m.drilldown.evidence;
+    if(ev && ev.daily_dau_series) drawDockedLine(cv, ev.daily_dau_series.map(s=>s.dau), 'Daily DAU');
+    else if(ev && ev.monthly_creations) drawDockedBars(cv, ev.monthly_creations);
+  });
   log.scrollTop = log.scrollHeight;
 }
 document.getElementById('dockedlog').addEventListener('click', (e)=>{
@@ -391,9 +479,10 @@ async function sendDockedMsg(text){
   const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: chatSessionId, message: text})});
   const d = await r.json();
   chatSessionId = d.session_id;
-  chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || []});
+  chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || [], drilldown: d.drilldown || null});
   renderDockedLog();
   // Mirror into the in-page chat log too, so both views stay in sync.
+  // Text only: the drill-down chart stays in the docked log only.
   const log = document.getElementById('chatlog');
   log.innerHTML += `<div><b>You:</b> ${esc(text)}</div><div><b>Assistant [${esc(d.type)}]:</b> ${esc(d.text)}</div>`;
 }
