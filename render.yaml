@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: socialpulse-nlq
+    runtime: python
+    plan: free
+    region: oregon
+    buildCommand: pip install -r requirements.txt && python scripts/generate_phase1.py --seed 42 --out data/phase1
+    startCommand: python scripts/app.py --port $PORT
+    healthCheckPath: /api/metrics
