@@ -56,6 +56,24 @@ TOPIC_LABELS = {
     "concentration": "Concentration — orphan rate and top-1% share",
 }
 
+# Turn-by-turn Step 1 (2026-10-29): intent phrasings, not a keyword
+# list per turn. A weather intent is an app slot plus any of these
+# phrases — "current state", "status", "overview" mean the same as
+# "what's happening", which is why "What is the current state of
+# Instagram" used to clarify. Follow-up prefixes ("what about",
+# "and", "same for") mean "same intent, swap one slot" (see
+# respond()). These live here, not in questions.json yet; the
+# editor gains the intent table in Step 4 of the design.
+WEATHER_PHRASES = (
+    "how is", "happening", "doing", "weather", "health",
+    "current state", "state of", "status", "overview", "summary",
+    "report", "update on", "how's", "how is it going",
+    "what's up with", "what is up with", "how are things",
+)
+FOLLOWUP_PREFIXES = (
+    "what about", "how about", "and", "also", "same for", "switch to",
+)
+
 # Intervention hypotheses. Each is a test to run, not a result.
 # Primary metric and guardrails are the pre-registered success criteria:
 # if the primary moves and a guardrail breaches, the experiment does
@@ -119,6 +137,36 @@ RECOMMENDATIONS = {
 
 def _word(q, w):
     return re.search(rf"\b{re.escape(w)}\b", q) is not None
+
+
+def _find_segment(q):
+    """A segment slot in a follow-up turn, or None.
+
+    Only fires on a segment cue ("only", "just", "in", "for", "on"),
+    so "India is growing" is not silently read as a filter, and so a
+    first-turn weather question ("what's happening with Instagram in
+    India") is not hijacked — the weather branch runs first there
+    because no weather report exists yet. Full country names only,
+    as in the correction turn (the code "in" is also an English word).
+    """
+    cue = (q.startswith("only ") or q.startswith("just ") or " only " in q
+           or " just " in q or " in " in q or " for " in q or " on " in q)
+    if not cue:
+        return None
+    from .planner import ACQUISITIONS, COUNTRIES, PLATFORMS, SURFACES
+    for name, code in COUNTRIES.items():
+        if len(name) > 2 and _word(q, name):
+            return ("country", code)
+    for plat in PLATFORMS:
+        if _word(q, plat):
+            return ("platform", plat)
+    for surf in SURFACES:
+        if _word(q, surf):
+            return ("surface", surf)
+    for acq in ACQUISITIONS:
+        if _word(q, acq):
+            return ("acquisition", acq)
+    return None
 
 
 def _fmt(v, unit):
@@ -556,6 +604,138 @@ class ChatSession:
                 "\n\nCaveats to say out loud:\n" + "\n".join(f"- {p}" for p in caveats))
         return self._reply("brief", text, brief=brief)
 
+    def _breakdown_rows(self, topic, dimension):
+        """One decomposition query, current weather period only.
+
+        Returns a list of {label, count, extra, share} sorted by count
+        descending, or None if this topic/dimension pair has no query
+        in Step 1. Country uses the user's country (dim_users);
+        surface uses the content's surface (dim_content), so surface
+        only exists for content topics (creators, engagement).
+        """
+        if not self.weather:
+            return None
+        start, end = self.weather["current_period"]
+        con = self._connect()
+        app_filter_u = f" AND u.primary_app = '{self.app}'" if self.app else ""
+        app_filter_c = f" AND c.app = '{self.app}'" if self.app else ""
+        rows = None
+        if dimension == "country":
+            if topic == "growth":
+                rows = con.execute(
+                    "SELECT u.country, COUNT(DISTINCT s.user_id) AS n "
+                    "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
+                    f"WHERE CAST(s.start_time AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_u} "
+                    "GROUP BY u.country ORDER BY n DESC").fetchall()
+                rows = [{"label": r[0], "count": r[1], "extra": None} for r in rows]
+            elif topic == "creators":
+                rows = con.execute(
+                    "SELECT u.country, COUNT(DISTINCT f.creator_id) AS creators, COUNT(*) AS posts "
+                    "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                    "JOIN dim_users u ON u.user_id = f.creator_id "
+                    f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_c} "
+                    "GROUP BY u.country ORDER BY creators DESC").fetchall()
+                rows = [{"label": r[0], "count": r[1], "extra": f"{r[2]:,} posts"} for r in rows]
+            elif topic == "messaging":
+                rows = con.execute(
+                    "SELECT u.country, COUNT(DISTINCT m.sender_id) AS n "
+                    "FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id "
+                    f"WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_u} "
+                    "GROUP BY u.country ORDER BY n DESC").fetchall()
+                rows = [{"label": r[0], "count": r[1], "extra": None} for r in rows]
+        elif dimension == "surface" and topic in ("creators", "engagement"):
+            rows = con.execute(
+                "SELECT c.surface, COUNT(*) AS posts, COUNT(DISTINCT f.creator_id) AS creators "
+                "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_c} "
+                "GROUP BY c.surface ORDER BY posts DESC").fetchall()
+            rows = [{"label": r[0], "count": r[1], "extra": f"{r[2]:,} creators"} for r in rows]
+        if not rows:
+            return None
+        total = sum(r["count"] for r in rows) or 1
+        for r in rows:
+            r["share"] = r["count"] / total
+        return rows
+
+    def _breakdown_turn(self, topic, dimension):
+        """Decomposition turn: where the numbers sit, never why.
+
+        Country/surface was chosen (2026-10-29) as the first
+        decomposition, ahead of creator cohorts, because it needs no
+        generator change — the cuts already exist in the tables.
+        """
+        if not self.weather:
+            return self._clarify("Ask for a weather report first, then ask for a breakdown — "
+                                 "for example, \"creators by country\".")
+        rows = self._breakdown_rows(topic, dimension)
+        if rows is None:
+            return self._clarify(f"I cannot break {topic} down by {dimension} from the Phase 1 tables. "
+                                 "Try creators by country, creators by surface, growth by country, "
+                                 "or messaging by country.")
+        self.topic = topic
+        self.stage = "breakdown"
+        start, end = self.weather["current_period"]
+        lines = []
+        for r in rows:
+            extra = f" ({r['extra']})" if r.get("extra") else ""
+            lines.append(f"- {r['label']}: {r['count']:,}{extra} ({r['share'] * 100:.1f}% of the total)")
+        self._set_options([
+            {"label": "Diagnosis — what's problematic?", "send": "what's the diagnosis?", "topic": topic},
+            {"label": "Experiment recommendation — hypothesis to test", "send": "what experiment would you recommend?", "topic": topic},
+            {"label": "PM/Eng brief — talking points for a meeting", "send": "give me the PM/Eng brief", "topic": topic},
+        ])
+        text = (f"Breakdown for {self.app}: {topic} by {dimension}, current period {start} to {end}:\n" +
+                "\n".join(lines) +
+                "\n\nThis is a decomposition, not a cause: it shows where the numbers sit, "
+                "not why they moved. Next: use the buttons below for a diagnosis, "
+                "an experiment recommendation, or the PM/Eng brief.")
+        return self._reply("breakdown", text,
+                           breakdown={"topic": topic, "dimension": dimension, "rows": rows})
+
+    def _why_turn(self, topic):
+        """Why-evidence turn, answered only as a decomposition.
+
+        Creators gets both country and surface (the first decomposition
+        the user chose); growth/messaging get country. Anything else
+        clarifies with the breakdown options instead of inventing a cause.
+        """
+        if not self.weather:
+            return self._clarify("Ask for a weather report first, then ask what is driving a topic — "
+                                 "for example, \"what's driving the creator drop?\"")
+        if topic == "creators":
+            country = self._breakdown_rows("creators", "country") or []
+            surface = self._breakdown_rows("creators", "surface") or []
+            if not country and not surface:
+                return self._clarify("I cannot break creators down from the Phase 1 tables right now.")
+            self.topic = "creators"
+            self.stage = "breakdown"
+            start, end = self.weather["current_period"]
+
+            def _lines(rows):
+                return "\n".join(
+                    f"- {r['label']}: {r['count']:,}" +
+                    (f" ({r['extra']})" if r.get("extra") else "") +
+                    f" ({r['share'] * 100:.1f}%)" for r in rows)
+            self._set_options([
+                {"label": "Diagnosis — what's problematic?", "send": "what's the diagnosis?", "topic": "creators"},
+                {"label": "Experiment recommendation — hypothesis to test", "send": "what experiment would you recommend?", "topic": "creators"},
+            ])
+            text = (f"What's behind the creator numbers for {self.app} — as a decomposition, not a cause "
+                    f"(current period {start} to {end}):\n\nBy country:\n{_lines(country)}\n\nBy surface:\n{_lines(surface)}\n\n"
+                    "That shows where creator supply sits; it does not prove why it fell. "
+                    "Next: use the buttons below for a diagnosis or an experiment recommendation.")
+            return self._reply("breakdown", text,
+                               breakdown={"topic": "creators", "dimension": "country+surface",
+                                          "rows": country, "surface_rows": surface})
+        if topic in ("growth", "messaging"):
+            return self._breakdown_turn(topic, "country")
+        self._set_options([
+            {"label": "Creators by country", "send": "creators by country", "topic": "creators"},
+            {"label": "Creators by surface", "send": "creators by surface", "topic": "creators"},
+        ])
+        return self._clarify(f"I can break creators down by country or surface, but not {topic} by itself. "
+                             "Pick one of the breakdowns below, or ask about creators.")
+
     def _correction_turn(self, q):
         """Handle 'you are not looking at X / wrong grain / incorrect
         parameter' corrections, conversationally, in the current turn.
@@ -704,11 +884,73 @@ class ChatSession:
         corrected = self._correction_turn(q)
         if corrected is not None:
             return corrected
-        # App switch / opening question, anywhere in the conversation.
-        for app in APPS:
-            if _word(q, app) and ("how is" in q or "happening" in q or "doing" in q or "weather" in q or "health" in q):
-                return self._weather_turn(app)
-        if "how is" in q and "product" in q and "doing" in q or "weather report" in q or "what's happening" in q or "what is happening" in q:
+        # -- Turn-by-turn Step 1: intent + slots + context -----------------
+        # Slots found in this turn, before any intent is chosen.
+        app_found = next((a for a in APPS if _word(q, a)), None)
+        topic_found = next((t for t in self.topic_labels
+                            if _word(q, t) or t in q), None)
+        # Follow-up: "what about X?", "and X", "same for X" means the
+        # same intent with one slot swapped, inherited from context.
+        stripped = q
+        for prefix in FOLLOWUP_PREFIXES:
+            if q.startswith(prefix + " "):
+                stripped = q[len(prefix) + 1:].strip()
+                break
+        stripped_clean = stripped.rstrip("?!.").strip()
+        if stripped_clean in APPS:
+            if q.startswith("same for") and self.topic and self.weather:
+                # Same drill-down, different app: weather the new app
+                # first (so its numbers are the receipt), then re-run
+                # the same drill-down on it.
+                old_topic = self.topic
+                self._weather_turn(stripped_clean)
+                reply = self._drilldown_turn(old_topic)
+                reply["text"] = (f"Same drill-down, switched app to {stripped_clean}.\n\n"
+                                 f"{reply['text']}")
+                return reply
+            return self._weather_turn(stripped_clean)
+        if stripped_clean in self.topic_labels:
+            if self.weather:
+                return self._drilldown_turn(stripped_clean)
+            return self._clarify("Ask for a weather report first — for example, "
+                                 "\"What's happening with Instagram?\" — then pick a topic.")
+        # Breakdown: "creators by country", "creators by surface".
+        # This is the country/surface decomposition the user chose
+        # first (2026-10-29), ahead of creator cohorts.
+        if " by country" in q or " by surface" in q:
+            dimension = "country" if " by country" in q else "surface"
+            topic = topic_found or self.topic or "creators"
+            return self._breakdown_turn(topic, dimension)
+        # Why-evidence: "what's driving the creator drop?", "why is
+        # retention down?" — answered as a decomposition, never a cause.
+        if ("driving" in q or "why is" in q or "why are" in q or "causing" in q
+                or "what's behind" in q or "what is behind" in q):
+            topic = topic_found or self.topic or "creators"
+            return self._why_turn(topic)
+        # Segment follow-up, once a weather report exists: "only
+        # India", "creators in India", "for android". A surface filter
+        # only makes sense for a content drill-down; anything else
+        # clarifies instead of pretending the series was filtered.
+        segment = _find_segment(q)
+        if segment and self.weather:
+            dim, value = segment
+            if dim == "surface" and (topic_found or self.topic) not in ("creators", "engagement"):
+                return self._clarify("Surface only filters the creators drill-down — "
+                                     "ask \"creators by surface\", or switch to creators first.")
+            if topic_found:
+                self.filters[dim] = value
+                reply = self._drilldown_turn(topic_found)
+                reply["correction"] = {"parameter": dim, "value": value, "applied": True}
+                reply["text"] = (f"Filtered: {dim}={value} for the {topic_found} drill-down. "
+                                 "Note: weather cards are app-scoped only, so only the series "
+                                 "is filtered, not the cards.\n\n" + reply["text"])
+                return reply
+            return self._filter_correction(dim, value)
+        # Weather intent: an app slot plus any weather phrase. This is
+        # the fix for "What is the current state of Instagram".
+        if app_found and any(p in q for p in WEATHER_PHRASES):
+            return self._weather_turn(app_found)
+        if any(p in q for p in WEATHER_PHRASES):
             if self.app:
                 return self._weather_turn(self.app)
             self.stage = "clarification"
@@ -720,6 +962,10 @@ class ChatSession:
             return self._reply("clarification",
                                "Which app? Reply instagram, whatsapp, or facebook — "
                                "for example, \"What's happening with Instagram?\"")
+        # Bare app name: "instagram" alone, after a conversation has
+        # started or as an opening question, is a weather request.
+        if q.rstrip("?!.").strip() in APPS:
+            return self._weather_turn(q.rstrip("?!.").strip())
         # Evaluating a past experiment is the one question this bot must
         # refuse to answer without assignment data.
         if ("experiment" in q and ("did" in q or "lift" in q or "improve" in q or "effect" in q or "work" in q)
@@ -742,5 +988,6 @@ class ChatSession:
             if "look at" in q or "show me" in q or "drill" in q:
                 return self._clarify("Pick a drill-down from the last message (a/b/c/d), or name a topic: "
                                      "creators, retention, growth, messaging, or engagement.")
-        return self._clarify("I could not map that to a chat turn. Try: \"What's happening with Instagram?\", "
+        return self._clarify("I could not map that to a chat turn. Try: \"What is the current state of Instagram?\", "
+                             "\"What about WhatsApp?\", \"creators by country\", or \"what's driving the creator drop?\" — "
                              "then pick a drill-down, ask for a diagnosis, an experiment recommendation, or the PM/Eng brief.")

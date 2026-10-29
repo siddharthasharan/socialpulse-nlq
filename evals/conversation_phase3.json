@@ -1,1 +1,181 @@
-[{"checks":{"brief_eng_points_min":3,"brief_pm_points_min":3,"drilldown_daily_creators":455.79,"drilldown_orphan":0.2444,"recommendation_label":"HYPOTHESIS — not a forecast","recommendation_must_not_contain":"will increase","weather_dau":4543.71,"weather_dau_tolerance":10.0},"description":"Instagram full flow: weather -> creators drill-down -> diagnosis -> hypothesis recommendation -> PM/Eng brief. The demo flow from Phase 3 planning.","id":"c1","turns":[{"expect_app":"instagram","expect_type":"weather","user":"What's happening with Instagram?"},{"expect_topic":"creators","expect_type":"drilldown","user":"creators"},{"expect_topic":"creators","expect_type":"diagnosis","user":"what's the diagnosis?"},{"expect_topic":"creators","expect_type":"recommendation","user":"what experiment would you recommend?"},{"expect_topic":"creators","expect_type":"brief","user":"give me the PM/Eng brief"}]},{"checks":{"diagnosis_text_must_not_contain":"creator-specific problem hiding inside healthy growth","weather_d7":0.19106,"weather_d7_tolerance":0.01},"description":"Whatsapp: growth up, retention down, creators down. Diagnosis priority is creators first (documented), retention second — the diagnosis text must not claim creator-only when retention also fired.","id":"c2","turns":[{"expect_app":"whatsapp","expect_type":"weather","user":"How is Whatsapp doing?"},{"expect_topic":"retention","expect_type":"drilldown","user":"retention"},{"expect_topic":"creators","expect_type":"diagnosis","user":"what's the diagnosis?"}]},{"checks":{},"description":"Negative case: evaluating a past experiment without assignment tables must clarify, not invent a lift — even mid-conversation.","id":"c3","turns":[{"expect_app":"instagram","expect_type":"weather","user":"What's happening with Instagram?"},{"expect_type":"clarification","user":"did the new creator experiment improve retention?"}]},{"checks":{},"description":"Letter choice: after Instagram weather, 'a' picks the first offered drill-down (creators).","id":"c4","turns":[{"expect_app":"instagram","expect_type":"weather","user":"What's happening with Instagram?"},{"expect_topic":"creators","expect_type":"drilldown","user":"a"}]}]
+[
+  {
+    "checks": {
+      "brief_eng_points_min": 3,
+      "brief_pm_points_min": 3,
+      "drilldown_daily_creators": 455.79,
+      "drilldown_orphan": 0.2444,
+      "recommendation_label": "HYPOTHESIS \u2014 not a forecast",
+      "recommendation_must_not_contain": "will increase",
+      "weather_dau": 4543.71,
+      "weather_dau_tolerance": 10.0
+    },
+    "description": "Instagram full flow: weather -> creators drill-down -> diagnosis -> hypothesis recommendation -> PM/Eng brief. The demo flow from Phase 3 planning.",
+    "id": "c1",
+    "turns": [
+      {
+        "expect_app": "instagram",
+        "expect_type": "weather",
+        "user": "What's happening with Instagram?"
+      },
+      {
+        "expect_topic": "creators",
+        "expect_type": "drilldown",
+        "user": "creators"
+      },
+      {
+        "expect_topic": "creators",
+        "expect_type": "diagnosis",
+        "user": "what's the diagnosis?"
+      },
+      {
+        "expect_topic": "creators",
+        "expect_type": "recommendation",
+        "user": "what experiment would you recommend?"
+      },
+      {
+        "expect_topic": "creators",
+        "expect_type": "brief",
+        "user": "give me the PM/Eng brief"
+      }
+    ]
+  },
+  {
+    "checks": {
+      "diagnosis_text_must_not_contain": "creator-specific problem hiding inside healthy growth",
+      "weather_d7": 0.19106,
+      "weather_d7_tolerance": 0.01
+    },
+    "description": "Whatsapp: growth up, retention down, creators down. Diagnosis priority is creators first (documented), retention second \u2014 the diagnosis text must not claim creator-only when retention also fired.",
+    "id": "c2",
+    "turns": [
+      {
+        "expect_app": "whatsapp",
+        "expect_type": "weather",
+        "user": "How is Whatsapp doing?"
+      },
+      {
+        "expect_topic": "retention",
+        "expect_type": "drilldown",
+        "user": "retention"
+      },
+      {
+        "expect_topic": "creators",
+        "expect_type": "diagnosis",
+        "user": "what's the diagnosis?"
+      }
+    ]
+  },
+  {
+    "checks": {},
+    "description": "Negative case: evaluating a past experiment without assignment tables must clarify, not invent a lift \u2014 even mid-conversation.",
+    "id": "c3",
+    "turns": [
+      {
+        "expect_app": "instagram",
+        "expect_type": "weather",
+        "user": "What's happening with Instagram?"
+      },
+      {
+        "expect_type": "clarification",
+        "user": "did the new creator experiment improve retention?"
+      }
+    ]
+  },
+  {
+    "checks": {},
+    "description": "Letter choice: after Instagram weather, 'a' picks the first offered drill-down (creators).",
+    "id": "c4",
+    "turns": [
+      {
+        "expect_app": "instagram",
+        "expect_type": "weather",
+        "user": "What's happening with Instagram?"
+      },
+      {
+        "expect_topic": "creators",
+        "expect_type": "drilldown",
+        "user": "a"
+      }
+    ]
+  },
+  {
+    "id": "c5",
+    "description": "Turn-by-turn Step 1: 'current state' phrasing maps to weather, 'what about WhatsApp?' inherits the weather intent with a new app, 'creators by country' is a breakdown, and a why question is a decomposition, not a cause.",
+    "checks": {
+      "weather_dau": 4543.71,
+      "weather_dau_tolerance": 10.0
+    },
+    "turns": [
+      {
+        "user": "What is the current state of Instagram",
+        "expect_type": "weather",
+        "expect_app": "instagram"
+      },
+      {
+        "user": "What about WhatsApp?",
+        "expect_type": "weather",
+        "expect_app": "whatsapp"
+      },
+      {
+        "user": "creators by country",
+        "expect_type": "breakdown",
+        "expect_topic": "creators"
+      },
+      {
+        "user": "what's driving the creator drop?",
+        "expect_type": "breakdown",
+        "expect_topic": "creators"
+      }
+    ]
+  },
+  {
+    "id": "c6",
+    "description": "Turn-by-turn Step 1: same drill-down, different app ('same for whatsapp' after a creators drill-down), then creators by surface.",
+    "checks": {},
+    "turns": [
+      {
+        "user": "What's happening with Instagram?",
+        "expect_type": "weather",
+        "expect_app": "instagram"
+      },
+      {
+        "user": "creators",
+        "expect_type": "drilldown",
+        "expect_topic": "creators"
+      },
+      {
+        "user": "same for whatsapp",
+        "expect_type": "drilldown",
+        "expect_app": "whatsapp",
+        "expect_topic": "creators"
+      },
+      {
+        "user": "creators by surface",
+        "expect_type": "breakdown",
+        "expect_topic": "creators"
+      }
+    ]
+  },
+  {
+    "id": "c7",
+    "description": "Turn-by-turn Step 1: segment follow-up 'creators in India' filters the drill-down, and the past-experiment refusal still holds after new turns.",
+    "checks": {},
+    "turns": [
+      {
+        "user": "What's happening with Instagram?",
+        "expect_type": "weather",
+        "expect_app": "instagram"
+      },
+      {
+        "user": "creators in India",
+        "expect_type": "drilldown",
+        "expect_topic": "creators"
+      },
+      {
+        "user": "did the new creator experiment improve retention?",
+        "expect_type": "clarification"
+      }
+    ]
+  }
+]

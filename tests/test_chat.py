@@ -111,6 +111,31 @@ def test_drilldown_options_advance_instead_of_looping():
     assert diag2["type"] == "diagnosis"
 
 
+def test_current_state_phrasing_maps_to_weather():
+    """Turn-by-turn Step 1, the reported screenshot: 'What is the
+    current state of Instagram' must be Instagram weather, not a
+    clarification, even though it uses none of the old weather words."""
+    s = _stub_session()
+    r = s.respond("What is the current state of Instagram")
+    assert r["type"] == "weather" and r["app"] == "instagram"
+
+
+def test_what_about_inherits_weather_intent_with_new_app():
+    s = _stub_session()
+    s.respond("What is the current state of Instagram")
+    r = s.respond("What about WhatsApp?")
+    assert r["type"] == "weather" and r["app"] == "whatsapp"
+
+
+def test_same_for_app_reruns_same_drilldown():
+    s = _stub_session()
+    s.respond("What's happening with Instagram?")
+    s.respond("creators")
+    r = s.respond("same for whatsapp")
+    assert r["type"] == "drilldown" and r["app"] == "whatsapp"
+    assert r["drilldown"]["topic"] == "creators"
+
+
 def test_past_experiment_evaluation_clarifies():
     s = _stub_session()
     s.respond("What's happening with Instagram?")
@@ -206,6 +231,41 @@ def test_correction_without_parameter_prompts_for_parameter():
     s2.respond("creators")
     r2 = s2.respond("what's the diagnosis?")
     assert r2["type"] == "diagnosis"
+
+
+def test_breakdown_by_country_and_surface_on_seed42_data():
+    """Turn-by-turn Step 1, country/surface first decomposition
+    (chosen 2026-10-29, ahead of creator cohorts): breakdowns are
+    real queries over the current period, sorted, with shares, and
+    a why question returns the same breakdown type, never a cause."""
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's happening with Instagram?")
+    b = s.respond("creators by country")
+    assert b["type"] == "breakdown" and b["breakdown"]["topic"] == "creators"
+    assert b["breakdown"]["dimension"] == "country"
+    rows = b["breakdown"]["rows"]
+    assert rows and all(r["label"] and r["count"] > 0 for r in rows)
+    assert [r["count"] for r in rows] == sorted((r["count"] for r in rows), reverse=True)
+    assert abs(sum(r["share"] for r in rows) - 1.0) < 0.01
+    assert "not a cause" in b["text"]
+    bs = s.respond("creators by surface")
+    assert bs["type"] == "breakdown" and bs["breakdown"]["dimension"] == "surface"
+    assert {r["label"] for r in bs["breakdown"]["rows"]} <= {"reels", "feed", "stories"}
+    why = s.respond("what's driving the creator drop?")
+    assert why["type"] == "breakdown" and why["breakdown"]["topic"] == "creators"
+    assert "does not prove why" in why["text"]
+
+
+def test_segment_followup_filters_drilldown():
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's happening with Instagram?")
+    r = s.respond("creators in India")
+    assert r["type"] == "drilldown" and r["drilldown"]["topic"] == "creators"
+    assert r["correction"] == {"parameter": "country", "value": "IN", "applied": True}
 
 
 if __name__ == "__main__":
