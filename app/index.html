@@ -7,20 +7,20 @@
 <style>
 body{font-family:system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1a1a1a}
 h1{font-size:1.6rem} h2{font-size:1.1rem;margin-top:2rem}
-input[type=text]{width:100%;padding:.6rem;font-size:1rem}
-button{padding:.5rem .9rem;margin:.25rem .25rem .25rem 0;cursor:pointer}
+input[type=text]{width:100%;padding:.6rem;font-size:1rem;border-radius:8px}
+button{padding:.5rem .9rem;margin:.25rem .25rem .25rem 0;cursor:pointer;border-radius:8px}
 pre{background:#f4f4f4;padding:1rem;overflow:auto;white-space:pre-wrap}
 table{border-collapse:collapse;width:100%} td,th{border:1px solid #ddd;padding:.4rem;text-align:left}
 .note{background:#fff8e1;border:1px solid #e6c200;padding:.8rem}
 .warn{background:#fdecea;border:1px solid #d66;padding:.8rem}
-canvas{border:1px solid #ddd;width:100%;height:260px}
+canvas{border:1px solid #ddd;width:100%;height:260px;border-radius:12px}
 .small{color:#555;font-size:.9rem}
 /* Bottom-docked chat window (2026-10-28): everything on the page
 stays where it is; the chat lives in a fixed window at the bottom,
 like a Muse/ChatGPT input bar, so the conversation is always at hand
 while you scroll the dashboard above it. Collapsing it leaves only
 its header bar at the bottom. */
-#docked{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#fff;border-top:2px solid #1a1a1a;box-shadow:0 -4px 16px rgba(0,0,0,.12)}
+#docked{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#fff;border-top:2px solid #1a1a1a;box-shadow:0 -4px 16px rgba(0,0,0,.12);border-radius:16px 16px 0 0}
 #docked header{display:flex;align-items:center;gap:.5rem;padding:.5rem 1rem;cursor:pointer}
 #docked header b{flex:1}
 #dockedbody{max-height:340px;display:flex;flex-direction:column;padding:0 1rem 1rem}
@@ -41,7 +41,27 @@ removed or moved, they are simply covered until you exit full screen
 as it was, with the transcript intact. Charts from a chat drill-down
 render inside the docked log only (see renderDockedLog): they are
 never mirrored to the dashboard Ask section or the in-page chat log. */
-#docked.fullscreen{display:flex;flex-direction:column;top:0;bottom:0;left:0;right:0;height:100vh;max-height:none;z-index:100;border-top:none;box-shadow:none}
+#docked.fullscreen{display:flex;flex-direction:column;top:0;bottom:0;left:0;right:0;height:100vh;max-height:none;z-index:100;border-top:none;box-shadow:none;border-radius:0}
+/* Hide dashboard / chat-only (2026-10-29): the "Hide dashboard"
+button removes the older dashboard page from view, instead of just
+covering it as full screen does. When it is on, exiting full screen
+(↩ Dock) does NOT bring the dashboard back — the chat stays the only
+interface until "Show dashboard" is clicked. The dashboard is hidden
+with CSS only, never deleted from the page, so Show dashboard
+restores it exactly as it was, with the transcript intact. Edit
+questions exits chat-only first, so the editor it scrolls to is
+actually visible. In chat-only the docked window fills the viewport,
+so it has square corners like full screen, not the rounded top
+corners of the bottom-docked window. */
+body.chat-only > *:not(#docked){display:none}
+body.chat-only{padding-bottom:0;overflow:hidden}
+body.chat-only #docked{position:fixed;top:0;left:0;right:0;bottom:0;height:100vh;display:flex;flex-direction:column;z-index:100;border-top:none;border-radius:0;box-shadow:none}
+body.chat-only #docked header{flex-shrink:0}
+body.chat-only #dockedbody{max-height:none;flex:1;min-height:0;overflow:hidden}
+body.chat-only #dockedlog{max-height:none;flex:1;min-height:0;overflow:auto}
+body.chat-only #dockedbody > p{flex-shrink:0}
+body.chat-only #docked.collapsed{display:block;height:auto}
+body.chat-only #docked.collapsed #dockedbody{display:none}
 #docked.fullscreen header{flex-shrink:0}
 #docked.fullscreen #dockedbody{max-height:none;flex:1;min-height:0;overflow:hidden}
 #docked.fullscreen #dockedlog{max-height:none;flex:1;min-height:0;overflow:auto}
@@ -49,7 +69,7 @@ never mirrored to the dashboard Ask section or the in-page chat log. */
 #docked.fullscreen.collapsed{display:block;height:auto}
 #docked.fullscreen.collapsed #dockedbody{display:none}
 body.docked-full{overflow:hidden;padding-bottom:0}
-.dockchart{width:100%;height:220px;border:1px solid #ddd;background:#fff}
+.dockchart{width:100%;height:220px;border:1px solid #ddd;background:#fff;border-radius:12px}
 .dockchart-note{color:#555;font-size:.9rem;margin:.3rem 0 0}
 </style>
 </head>
@@ -73,7 +93,7 @@ body.docked-full{overflow:hidden;padding-bottom:0}
 <p class="small">Deterministic, no LLM: the chat keeps the app and topic in state, so a follow-up means something. Start with "What's happening with Instagram?", pick a drill-down, then ask for a diagnosis, an experiment recommendation (labelled HYPOTHESIS, never a forecast), or the PM/Eng brief. If a step is wrong, correct it in chat — for example "you are not looking at retention" or "show daily, not average" — and it re-runs that step and prompts the next one. Restarting app.py resets chat history.</p>
 <p><button onclick="sendChatMsg(`What's happening with Instagram?`)">What's happening with Instagram?</button></p>
 <label for="chatq">Chat</label>
-<input type="text" id="chatq" placeholder="What's happening with Instagram?">
+<input type="text" id="chatq">
 <p><button onclick="sendChatMsg(document.getElementById('chatq').value)">Send</button></p>
 <div id="chatlog" style="white-space:pre-wrap"></div>
 
@@ -93,10 +113,10 @@ body.docked-full{overflow:hidden;padding-bottom:0}
 <div id="metrics" class="small"></div>
 
 <div id="docked">
-  <header onclick="toggleDocked()"><b>SocialPulse chat — multi-turn assistant</b><span class="small">Select a drill-down, or update a parameter in chat (e.g. "you are not looking at retention"). Click to collapse/expand.</span><button type="button" onclick="event.stopPropagation(); newDockedChat()">New chat</button><button type="button" onclick="event.stopPropagation(); document.getElementById('qflow').scrollIntoView()">Edit questions</button><button type="button" id="dockedfullbtn" title="Expand to full screen — chat data and charts stay in this window" onclick="event.stopPropagation(); toggleDockedFullscreen()">⛶ Full screen</button><span id="dockedtoggle">▾</span></header>
+  <header onclick="toggleDocked()"><b>SocialPulse chat — multi-turn assistant</b><span class="small">Select a drill-down, or update a parameter in chat (e.g. "you are not looking at retention"). Click to collapse/expand.</span><button type="button" onclick="event.stopPropagation(); newDockedChat()">New chat</button><button type="button" onclick="event.stopPropagation(); editQuestionsFromDocked()">Edit questions</button><button type="button" id="dockedfullbtn" title="Expand to full screen — chat data and charts stay in this window" onclick="event.stopPropagation(); toggleDockedFullscreen()">⛶ Full screen</button><button type="button" id="dockedhidebtn" title="Hide the dashboard sections so only the chat remains; click again to show them" onclick="event.stopPropagation(); toggleChatOnly()">Hide dashboard</button><span id="dockedtoggle">▾</span></header>
   <div id="dockedbody">
     <div id="dockedlog"></div>
-    <p><input type="text" id="dockedq" placeholder="What's happening with Instagram?"></p>
+    <p><input type="text" id="dockedq"></p>
     <p><button onclick="sendDockedMsg(document.getElementById('dockedq').value)">Send</button> <span class="small">Enter also sends. Same session as the chat section above, so a conversation started there continues here, and vice versa.</span></p>
   </div>
 </div>
@@ -407,6 +427,16 @@ document.addEventListener('keydown', (e)=>{
   const d = document.getElementById('docked');
   if(e.key === 'Escape' && d && d.classList.contains('fullscreen')) toggleDockedFullscreen();
 });
+function toggleChatOnly(){
+  const on = document.body.classList.toggle('chat-only');
+  document.getElementById('dockedhidebtn').textContent = on ? 'Show dashboard' : 'Hide dashboard';
+}
+function editQuestionsFromDocked(){
+  // The editor lives in the dashboard, so if it is hidden, show it
+  // first — otherwise scrollIntoView would scroll to a hidden section.
+  if(document.body.classList.contains('chat-only')) toggleChatOnly();
+  document.getElementById('qflow').scrollIntoView();
+}
 function drawDockedLine(cv, vals, label){
   if(!cv || !vals.length) return;
   const ctx = cv.getContext('2d'); const W = cv.width = 900, H = cv.height = 220;
