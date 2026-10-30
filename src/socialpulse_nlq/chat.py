@@ -692,6 +692,157 @@ class ChatSession:
         return self._reply("breakdown", text,
                            breakdown={"topic": topic, "dimension": dimension, "rows": rows})
 
+    def _ranking_rows(self, topic, dimension, days):
+        """Per-segment metric in a recent window vs the prior window
+        of the same length, both ending at the weather current end.
+
+        Returns (recent_label, prior_label, rows) where rows are
+        {label, current, prior, change, change_pct, extra} sorted by
+        change ascending (largest drop first — callers re-sort for
+        growth). Missing in a window counts as 0, so a segment that
+        appears only in one window still ranks, instead of vanishing.
+        """
+        if not self.weather:
+            return None
+        import datetime
+        if days == 28:
+            # Default: the weather's own current vs prior periods, so
+            # the ranking matches the weather numbers exactly.
+            recent = self.weather["current_period"]
+            prior = self.weather["prior_period"]
+        else:
+            end = datetime.date.fromisoformat(self.weather["current_period"][1])
+            recent_start = end - datetime.timedelta(days=days - 1)
+            prior_end = recent_start - datetime.timedelta(days=1)
+            prior_start = prior_end - datetime.timedelta(days=days - 1)
+            recent = [recent_start.isoformat(), end.isoformat()]
+            prior = [prior_start.isoformat(), prior_end.isoformat()]
+        con = self._connect()
+        app_filter_u = f" AND u.primary_app = '{self.app}'" if self.app else ""
+        app_filter_c = f" AND c.app = '{self.app}'" if self.app else ""
+
+        def _query(start, end):
+            if dimension == "country":
+                if topic == "growth":
+                    rows = con.execute(
+                        "SELECT u.country, COUNT(DISTINCT s.user_id) AS n, NULL AS e "
+                        "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
+                        f"WHERE CAST(s.start_time AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_u} "
+                        "GROUP BY u.country").fetchall()
+                elif topic == "creators":
+                    rows = con.execute(
+                        "SELECT u.country, COUNT(DISTINCT f.creator_id) AS n, COUNT(*) AS e "
+                        "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                        "JOIN dim_users u ON u.user_id = f.creator_id "
+                        f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_c} "
+                        "GROUP BY u.country").fetchall()
+                elif topic == "messaging":
+                    rows = con.execute(
+                        "SELECT u.country, COUNT(DISTINCT m.sender_id) AS n, NULL AS e "
+                        "FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id "
+                        f"WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_u} "
+                        "GROUP BY u.country").fetchall()
+                else:
+                    return {}
+            elif dimension == "surface" and topic in ("creators", "engagement"):
+                rows = con.execute(
+                    "SELECT c.surface, COUNT(*) AS n, COUNT(DISTINCT f.creator_id) AS e "
+                    "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                    f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_c} "
+                    "GROUP BY c.surface").fetchall()
+            else:
+                return {}
+            return {r[0]: (r[1], r[2]) for r in rows}
+
+        cur = _query(recent[0], recent[1])
+        pri = _query(prior[0], prior[1])
+        rows = []
+        # The extra column's meaning depends on the query: for
+        # creators by country it is posts, for creators by surface
+        # it is creators (the primary count there is posts). Labelling
+        # it "posts" in both cases was a bug caught in testing.
+        extra_label = "creators" if dimension == "surface" else ("posts" if topic == "creators" else None)
+        for label in sorted(set(cur) | set(pri)):
+            c, ce = cur.get(label, (0, None))
+            p, pe = pri.get(label, (0, None))
+            change = c - p
+            rows.append({
+                "label": label, "current": c, "prior": p, "change": change,
+                "change_pct": (change / p * 100.0) if p else None,
+                "extra": (f"{extra_label} {ce:,} (was {pe:,})"
+                          if extra_label and ce is not None and pe is not None else None),
+            })
+        rows.sort(key=lambda r: r["change"])
+        return (f"{recent[0]} to {recent[1]}", f"{prior[0]} to {prior[1]}", rows)
+
+    def _ranking_turn(self, topic, dimension, days, direction):
+        """'Which country had the most drop in the last 2 weeks?'
+
+        The turn the screenshot showed failing (2026-10-29 22:55 PDT):
+        a breakdown lists levels, it cannot answer a change question.
+        This turn ranks segments by change over two equal windows and
+        names the top segment in the first sentence, with the full
+        list behind it so the ranking can be checked — and so a
+        reader can see whether 'most drop' is absolute, percent, or
+        both (in the WhatsApp creators case it is both: ID, -12 and
+        -7.0%). A short window is labelled as such: a 14-day move is
+        not the Jan-Mar story, and small counts are noisy.
+        """
+        if not self.weather:
+            return self._clarify("Ask for a weather report first, then ask which segment dropped or grew most — "
+                                 "for example, \"which country had the most drop in the last 2 weeks?\"")
+        result = self._ranking_rows(topic, dimension, days)
+        if result is None or not result[2]:
+            return self._clarify(f"I cannot rank {topic} by {dimension} from the Phase 1 tables. "
+                                 "Try creators by country, creators by surface, growth by country, "
+                                 "or messaging by country.")
+        recent_label, prior_label, rows = result
+        if direction == "growth":
+            rows = sorted(rows, key=lambda r: -r["change"])
+        top = rows[0]
+        self.topic = topic
+        self.stage = "ranking"
+        total_cur = sum(r["current"] for r in rows)
+        total_pri = sum(r["prior"] for r in rows)
+        total_change = total_cur - total_pri
+        if direction == "drop" and top["change"] >= 0:
+            headline = (f"No {dimension} dropped in this window — the smallest increase is "
+                        f"{top['label']} ({top['current']:,} vs {top['prior']:,}, +{top['change']:,}).")
+        elif direction == "drop":
+            pct = f", {top['change_pct']:+.1f}%" if top["change_pct"] is not None else ""
+            headline = (f"The {dimension} with the largest drop is {top['label']}: "
+                        f"{top['current']:,} vs {top['prior']:,}, {top['change']:+,}{pct}.")
+        else:
+            pct = f", {top['change_pct']:+.1f}%" if top["change_pct"] is not None else ""
+            headline = (f"The {dimension} with the largest growth is {top['label']}: "
+                        f"{top['current']:,} vs {top['prior']:,}, {top['change']:+,}{pct}.")
+        lines = []
+        for r in rows:
+            pct = f", {r['change_pct']:+.1f}%" if r["change_pct"] is not None else ""
+            extra = f" ({r['extra']})" if r.get("extra") else ""
+            lines.append(f"- {r['label']}: {r['current']:,} (was {r['prior']:,}, {r['change']:+,}{pct}){extra}")
+        self._set_options([
+            {"label": "Diagnosis — what's problematic?", "send": "what's the diagnosis?", "topic": topic},
+            {"label": "Experiment recommendation — hypothesis to test", "send": "what experiment would you recommend?", "topic": topic},
+            {"label": "PM/Eng brief — talking points for a meeting", "send": "give me the PM/Eng brief", "topic": topic},
+        ])
+        if dimension == "surface":
+            metric = "posts"
+        else:
+            metric = {"creators": "creators", "growth": "active users", "messaging": "senders"}.get(topic, topic)
+        text = (f"Ranking for {self.app}: {topic} ({metric}) by {dimension}, "
+                f"last {days} days ({recent_label}) vs prior {days} days ({prior_label}), "
+                f"sorted by largest {'drop' if direction == 'drop' else 'growth'}:\n\n{headline}\n\n" +
+                "\n".join(lines) +
+                f"\n\nTotal: {total_cur:,} (was {total_pri:,}, {total_change:+,}). "
+                "This is a short-window change, not the 28-day weather trend or the Jan-Mar story — "
+                "small segment counts in a short window are noisy, so read small moves as noise, "
+                "not as a collapse. Next: use the buttons below for a diagnosis, "
+                "an experiment recommendation, or the PM/Eng brief.")
+        return self._reply("ranking", text,
+                           ranking={"topic": topic, "dimension": dimension, "days": days,
+                                    "direction": direction, "rows": rows})
+
     def _why_turn(self, topic):
         """Why-evidence turn, answered only as a decomposition.
 
@@ -921,6 +1072,47 @@ class ChatSession:
             dimension = "country" if " by country" in q else "surface"
             topic = topic_found or self.topic or "creators"
             return self._breakdown_turn(topic, dimension)
+        # Ranking by change: "which country had the most drop in the
+        # last 2 weeks?" — the turn that failed in the 2026-10-29
+        # 22:55 PDT screenshot. A breakdown lists levels; it cannot
+        # answer a change question, so this is its own intent.
+        # Period: an explicit "last N days/weeks" wins; otherwise the
+        # weather's current vs prior 28 days. Direction: drop words
+        # rank most-negative first, growth words most-positive first.
+        # Topic/dimension inherit from context when not named.
+        if ("most drop" in q or "most decline" in q or "dropped most" in q
+                or "biggest drop" in q or "largest drop" in q or "most fell" in q
+                or "most growth" in q or "grew most" in q or "biggest increase" in q
+                or "largest increase" in q or "increased most" in q):
+            direction = "growth" if any(w in q for w in
+                                         ("most growth", "grew most", "biggest increase",
+                                          "largest increase", "increased most")) else "drop"
+            dimension = "surface" if "surface" in q else "country"
+            # "Most growth" is a direction, not the growth topic: strip
+            # direction phrases before re-detecting the topic, or
+            # "which country had the most growth" would rank active
+            # users when the conversation was about creators.
+            q_nodir = q
+            for phrase in ("most growth", "grew most", "biggest increase",
+                           "largest increase", "increased most", "most drop",
+                           "most decline", "dropped most", "biggest drop",
+                           "largest drop", "most fell"):
+                q_nodir = q_nodir.replace(phrase, " ")
+            topic_nodir = next((t for t in self.topic_labels
+                                if _word(q_nodir, t) or t in q_nodir), None)
+            topic = topic_nodir or self.topic or "creators"
+            days = 28
+            m = re.search(r"last (\d+)\s*(week|weeks|day|days)", q)
+            if m:
+                days = int(m.group(1)) * 7 if "week" in m.group(2) else int(m.group(1))
+            elif "last week" in q:
+                days = 7
+            elif "last month" in q:
+                days = 28
+            if days < 1 or days > 90:
+                return self._clarify("I can rank changes over windows inside the Jan-Mar 2026 data "
+                                     "(up to 90 days). Try \"last 2 weeks\" or \"last month\".")
+            return self._ranking_turn(topic, dimension, days, direction)
         # Why-evidence: "what's driving the creator drop?", "why is
         # retention down?" — answered as a decomposition, never a cause.
         if ("driving" in q or "why is" in q or "why are" in q or "causing" in q

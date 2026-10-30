@@ -177,5 +177,27 @@
         "expect_type": "clarification"
       }
     ]
+  },
+  {
+    "id": "c8",
+    "description": "Turn-by-turn ranking (2026-10-29 22:55 PDT screenshot): after WhatsApp creators by country, 'which country had the most drop in the last 2 weeks' must rank by change, not clarify \u2014 ID is the largest drop on both absolute (-12) and percent (-7.0%) in Mar 18-31 vs Mar 4-17.",
+    "checks": {},
+    "turns": [
+      {
+        "user": "What's happening with WhatsApp?",
+        "expect_type": "weather",
+        "expect_app": "whatsapp"
+      },
+      {
+        "user": "creators by country",
+        "expect_type": "breakdown",
+        "expect_topic": "creators"
+      },
+      {
+        "user": "Which country had the most drop in the last 2 weeks",
+        "expect_type": "ranking",
+        "expect_topic": "creators"
+      }
+    ]
   }
 ]

@@ -30,7 +30,9 @@ def check_turn(conv, turn, reply, failures):
     if exp.get("expect_app") and reply.get("app") != exp["expect_app"]:
         failures.append(f"app: expected {exp['expect_app']}, got {reply.get('app')}")
     topic = None
-    if reply.get("breakdown"):
+    if reply.get("ranking"):
+        topic = reply["ranking"]["topic"]
+    elif reply.get("breakdown"):
         topic = reply["breakdown"]["topic"]
     elif reply.get("drilldown"):
         topic = reply["drilldown"]["topic"]

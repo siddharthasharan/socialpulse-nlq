@@ -258,6 +258,32 @@ def test_breakdown_by_country_and_surface_on_seed42_data():
     assert "does not prove why" in why["text"]
 
 
+def test_ranking_most_drop_last_2_weeks():
+    """The 2026-10-29 22:55 PDT screenshot failure: after a WhatsApp
+    creators breakdown, 'which country had the most drop in the last
+    2 weeks' must rank by change. Seed-42 answer is ID on both
+    measures (159 vs 171 creators, -12, -7.0%; posts 462 vs 510),
+    total creators 1,575 vs 1,551 — a small short-window move, not
+    the Jan-Mar decline, and the reply must say so."""
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's happening with WhatsApp?")
+    s.respond("creators by country")
+    r = s.respond("Which country had the most drop in the last 2 weeks")
+    assert r["type"] == "ranking" and r["ranking"]["topic"] == "creators"
+    assert r["ranking"]["dimension"] == "country" and r["ranking"]["days"] == 14
+    rows = {row["label"]: row for row in r["ranking"]["rows"]}
+    assert rows["ID"]["current"] == 159 and rows["ID"]["prior"] == 171 and rows["ID"]["change"] == -12
+    assert "largest drop is ID" in r["text"]
+    assert "short-window" in r["text"]
+    # 'Most growth' is a direction, not the growth topic: in a
+    # creators conversation it must still rank creators.
+    g = s.respond("Which country had the most growth in the last 2 weeks")
+    assert g["type"] == "ranking" and g["ranking"]["topic"] == "creators"
+    assert "largest growth is IN" in g["text"]
+
+
 def test_segment_followup_filters_drilldown():
     s = _real_session()
     if s is None:
