@@ -1,11 +1,10 @@
 # SocialPulse NLQ (independent synthetic project)
 
-**This is not Meta's tool, and it is not affiliated with Meta Platforms.**
-It is an independent, clean-room portfolio project inspired by the *idea* of a
-natural-language analytics tool: natural language is the interface, semantic
-correctness is the product. All data is synthetic, all code in this repo is
-original, and no internal code, data, dashboards, or metric definitions from
-any employer have been copied into it.
+An independently developed, deployed analytics application that enables natural-language exploration of synthetic social-platform data. Built with Python, DuckDB, deterministic query planning, multi-turn conversational context, and evaluation workflows.
+
+Project scope: 50K synthetic users, 12 tables, 90 days of activity, and 20 validated product metrics.
+
+Independent portfolio project using synthetic data; not affiliated with Meta Platforms.
 
 ## What Phase 1 is
 
