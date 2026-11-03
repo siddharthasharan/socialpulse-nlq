@@ -5,30 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SocialPulse NLQ — independent synthetic product analytics</title>
 <style>
-body{font-family:system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1a1a1a}
+/* Copilot palette (shared with the Experiment Copilot demo, so the two
+demos read as one portfolio): purple #6d28d9, light purple #ede9fe,
+ink #1f2937, muted #6b7280, line #e5e7eb, background #f9fafb.
+Restyle only: layout, ids, and docked-chat geometry are unchanged. */
+:root{--purple:#6d28d9;--purple-light:#ede9fe;--ink:#1f2937;--muted:#6b7280;--line:#e5e7eb;--bg:#f9fafb}
+body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem;color:#1f2937;background:#f9fafb}
 h1{font-size:1.6rem} h2{font-size:1.1rem;margin-top:2rem}
-input[type=text]{width:100%;padding:.6rem;font-size:1rem;border-radius:8px}
-button{padding:.5rem .9rem;margin:.25rem .25rem .25rem 0;cursor:pointer;border-radius:8px}
-pre{background:#f4f4f4;padding:1rem;overflow:auto;white-space:pre-wrap}
-table{border-collapse:collapse;width:100%} td,th{border:1px solid #ddd;padding:.4rem;text-align:left}
-.note{background:#fff8e1;border:1px solid #e6c200;padding:.8rem}
-.warn{background:#fdecea;border:1px solid #d66;padding:.8rem}
-canvas{border:1px solid #ddd;width:100%;height:260px;border-radius:12px}
-.small{color:#555;font-size:.9rem}
+input[type=text]{width:100%;padding:.6rem;font-size:1rem;border-radius:10px;border:1px solid #e5e7eb}
+button{padding:.5rem .9rem;margin:.25rem .25rem .25rem 0;cursor:pointer;border-radius:10px;background:#6d28d9;color:#fff;border:1px solid #6d28d9}
+button:hover{filter:brightness(1.1)}
+pre{background:#f3f4f6;padding:1rem;overflow:auto;white-space:pre-wrap;border-radius:12px}
+table{border-collapse:collapse;width:100%} td,th{border:1px solid #e5e7eb;padding:.4rem;text-align:left}
+.note{background:#f5f0ff;border:1px solid #ede9fe;padding:.8rem;border-radius:12px}
+.warn{background:#fef2f2;border:1px solid #fecaca;padding:.8rem;border-radius:12px}
+canvas{border:1px solid #e5e7eb;width:100%;height:260px;border-radius:12px}
+.small{color:#6b7280;font-size:.9rem}
+.copilot-link a{display:inline-block;background:#6d28d9;color:#fff;padding:.5rem .9rem;border-radius:10px;text-decoration:none;font-weight:600}
+.card{border:1px solid #e5e7eb;border-radius:14px;padding:14px;background:#fff;cursor:pointer}
+.card:hover{border-color:#6d28d9}
+.card .tag{display:inline-block;margin-top:8px;font-size:11px;background:#ede9fe;color:#6d28d9;padding:2px 8px;border-radius:20px}
+details{border:1px solid #e5e7eb;border-radius:14px;padding:12px;background:#fff;margin:1rem 0}
+details summary{cursor:pointer;font-weight:600;color:#6d28d9}
 /* Bottom-docked chat window (2026-10-28): everything on the page
 stays where it is; the chat lives in a fixed window at the bottom,
 like a Muse/ChatGPT input bar, so the conversation is always at hand
 while you scroll the dashboard above it. Collapsing it leaves only
 its header bar at the bottom. */
-#docked{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#fff;border-top:2px solid #1a1a1a;box-shadow:0 -4px 16px rgba(0,0,0,.12);border-radius:16px 16px 0 0}
+#docked{position:fixed;left:0;right:0;bottom:0;z-index:50;background:#fff;border-top:2px solid #6d28d9;box-shadow:0 -4px 16px rgba(0,0,0,.12);border-radius:16px 16px 0 0}
 #docked header{display:flex;align-items:center;gap:.5rem;padding:.5rem 1rem;cursor:pointer}
 #docked header b{flex:1}
 #dockedbody{max-height:340px;display:flex;flex-direction:column;padding:0 1rem 1rem}
 #docked.collapsed #dockedbody{display:none}
 #dockedlog{overflow:auto;max-height:220px;padding:.5rem 0}
 .msg{margin:.4rem 0;padding:.5rem .8rem;border-radius:12px;max-width:85%;white-space:pre-wrap}
-.msg-user{background:#e8f0fe;margin-left:auto;text-align:right}
-.msg-assistant{background:#f4f4f4;margin-right:auto}
+.msg-user{background:#ede9fe;color:#312e81;margin-left:auto;text-align:right}
+.msg-assistant{background:#f3f4f6;margin-right:auto}
 .chiprow{margin:.3rem 0}
 body.docked-open{padding-bottom:430px}
 body:not(.docked-open){padding-bottom:60px}
@@ -70,12 +82,13 @@ body.chat-only #docked.collapsed #dockedbody{display:none}
 #docked.fullscreen.collapsed{display:block;height:auto}
 #docked.fullscreen.collapsed #dockedbody{display:none}
 body.docked-full{overflow:hidden;padding-bottom:0}
-.dockchart{width:100%;height:220px;border:1px solid #ddd;background:#fff;border-radius:12px}
-.dockchart-note{color:#555;font-size:.9rem;margin:.3rem 0 0}
+.dockchart{width:100%;height:220px;border:1px solid #e5e7eb;background:#fff;border-radius:12px}
+.dockchart-note{color:#6b7280;font-size:.9rem;margin:.3rem 0 0}
 </style>
 </head>
 <body class="chat-only">
 <h1>SocialPulse NLQ</h1>
+<p class="copilot-link"><a href="https://experiment-copilot-platform.onrender.com">Try Experiment Copilot →</a> <span class="small">Companion experimentation demo: chat-first A/B testing with launch decisions. A separate demo in the same portfolio — this page stays the product-analytics demo.</span></p>
 <p class="small">Independent synthetic product analytics. Not affiliated with Meta. Ask in plain English; the planner maps your question to a catalog metric, builds SQL from an allowlisted template, checks it with a read-only guard, and returns a receipt.</p>
 
 <h2>Product health — weather report</h2>
@@ -89,6 +102,10 @@ body.docked-full{overflow:hidden;padding-bottom:0}
 <p id="samples"></p>
 
 <div id="out"></div>
+
+<h2>SQL scenario gallery</h2>
+<p class="small">Preset cards that run through the same Ask planner path — no new data, no new metrics. Each card shows its result plus the "Show the working" panel (exact SQL, tables, metric definition, deterministic trace). The last card is the aggregate-routing demo: a raw row-list request, re-routed to pre-aggregated totals, with both SQL statements shown.</p>
+<div id="gallery"></div>
 
 <h2>Phase 3 chat — multi-turn assistant</h2>
 <p class="small">Deterministic, no LLM: the chat keeps the app and topic in state, so a follow-up means something. Start with "What's happening with Instagram?", pick a drill-down, then ask for a diagnosis, an experiment recommendation (labelled HYPOTHESIS, never a forecast), or the PM/Eng brief. If a step is wrong, correct it in chat — for example "you are not looking at retention" or "show daily, not average" — and it re-runs that step and prompts the next one. Restarting app.py resets chat history.</p>
@@ -176,6 +193,36 @@ async function showWeather(){
   const r = await fetch('/api/weather'); const w = await r.json();
   el.innerHTML = renderWeather(w);
 }
+function renderWorking(d){
+  const w = d.working || {};
+  let h = '<details><summary>Show the working</summary>';
+  h += `<p class="small">${esc(w.deterministic_note || 'Deterministic working trace: produced by the planner from allowlisted templates and the executed result. No live LLM, no API key, no external call.')}</p>`;
+  if(w.metric_definition) h += `<p><b>Metric definition:</b> ${esc(w.metric_definition.definition)} Grain: ${esc(w.metric_definition.grain)}. Denominator: ${esc(w.metric_definition.denominator)}.</p>`;
+  if(d.tables && d.tables.length) h += `<p><b>Tables scanned:</b> ${esc(d.tables.join(', '))}</p>`;
+  if(w.routed){
+    h += `<div class="warn"><b>Re-routed to a pre-aggregated table.</b> ${esc(w.routing_explanation || '')}</div>`;
+    if(!w.can_list_rows) h += `<p><b>Cannot list individual rows:</b> pre-aggregated tables answer counts, sums, and averages, but they cannot list individual event rows. The result below is the aggregated alternative, not the row list.</p>`;
+    if(d.raw_sql) h += `<p><b>Implied raw SQL — NOT executed:</b></p><pre>${esc(d.raw_sql)}</pre>`;
+    if(d.sql) h += `<p><b>Aggregate SQL — actually executed:</b></p><pre>${esc(d.sql)}</pre>`;
+    if(w.alternative) h += `<p><b>Alternative that ran:</b> ${esc(w.alternative)}</p>`;
+  } else if(d.sql){
+    h += `<p><b>Exact SQL executed:</b></p><pre>${esc(d.sql)}</pre>`;
+  } else {
+    h += `<p class="small">No SQL was run for this answer.</p>`;
+  }
+  if(d.trace && d.trace.length){
+    h += '<p><b>Working trace (deterministic, no live LLM):</b></p><ol>' + d.trace.map(s=>`<li><b>${esc(s.title)}:</b> ${esc(s.text)}</li>`).join('') + '</ol>';
+  }
+  h += '</details>';
+  return h;
+}
+function renderChatWorking(w){
+  if(!w) return '';
+  return '<details><summary>Show the working</summary>'
+    + `<p class="small">SQL behind the series/breakdown query in this turn (deterministic, no LLM). Weather, diagnosis, recommendation, and brief turns run many queries or none, so they honestly show no single SQL here.</p>`
+    + `<p><b>Tables:</b> ${esc((w.tables || []).join(', '))} &nbsp; <b>Rows:</b> ${w.row_count}</p>`
+    + `<pre>${esc(w.sql)}</pre></details>`;
+}
 async function ask(){
   const question = document.getElementById('q').value;
   const out = document.getElementById('out');
@@ -183,11 +230,11 @@ async function ask(){
   const r = await fetch('/api/ask', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({question})});
   const d = await r.json();
   if(d.type === 'weather_report'){
-    out.innerHTML = renderWeather(d.weather);
+    out.innerHTML = renderWeather(d.weather) + renderWorking(d);
     return;
   }
   if(d.type === 'clarification' || d.type === 'refusal'){
-    out.innerHTML = `<div class="warn"><b>Clarification — no SQL was run.</b><br>${d.clarification}</div>`;
+    out.innerHTML = `<div class="warn"><b>Clarification — no SQL was run.</b><br>${d.clarification}</div>` + renderWorking(d);
     return;
   }
   if(d.type === 'experiment_list' || d.type === 'experiment_info'){
@@ -196,7 +243,7 @@ async function ask(){
   }
   let html = `<p><b>Metric:</b> ${d.metric} &nbsp; <b>Grain:</b> ${d.grain} &nbsp; <b>Runtime:</b> ${d.runtime_ms} ms &nbsp; <b>Rows:</b> ${d.row_count}</p>`;
   html += `<p><b>Tables:</b> ${(d.tables||[]).join(', ')} &nbsp; <b>Filters:</b> ${JSON.stringify(d.filters)} &nbsp; <b>Breakdown:</b> ${d.breakdown||'none'}</p>`;
-  html += `<pre>${d.sql}</pre>`;
+  html += renderWorking(d);
   if(d.row_count === 1) html += '<p class="small">Chart note: this result is a single averaged value, so the chart below is a single dot, not a line. For a daily series, ask with "trend" — for example, "What is the DAU trend for Whatsapp over the last 7 days?"</p>';
   html += '<canvas id="chart"></canvas>';
   html += '<table><tr>' + d.columns.map(c=>`<th>${c}</th>`).join('') + '</tr>' +
@@ -217,7 +264,7 @@ function drawChart(d){
   // Group by first column if there are 3+ columns (e.g. app x date), else single series.
   const groups = {};
   d.rows.forEach(r=>{ const k = d.columns.length>=3 ? r[0] : 'series'; (groups[k]=groups[k]||[]).push(parseFloat(r[valIdx])); });
-  const colors = ['#1f77b4','#d62728','#2ca02c','#ff7f0e','#9467bd'];
+  const colors = ['#6d28d9','#d62728','#2ca02c','#ff7f0e','#9467bd'];
   let ci = 0;
   for(const [k, series] of Object.entries(groups)){
     ctx.strokeStyle = colors[ci % colors.length]; ctx.beginPath();
@@ -256,8 +303,8 @@ async function sendChatMsg(text){
   const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: chatSessionId, message: text})});
   const d = await r.json();
   chatSessionId = d.session_id;
-  if (typeof chatHistory !== 'undefined') { chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || [], drilldown: d.drilldown || null}); renderDockedLog(); }
-  let html = `<div><b>Assistant [${esc(d.type)}]:</b> ${esc(d.text)}</div>`;
+  if (typeof chatHistory !== 'undefined') { chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || [], drilldown: d.drilldown || null, working: d.working || null}); renderDockedLog(); }
+  let html = `<div><b>Assistant [${esc(d.type)}]:</b> ${esc(d.text)}</div>` + renderChatWorking(d.working);
   if(d.options && d.options.length){
     html += '<p>' + d.options.map(o=>{
       const apps = ['instagram','whatsapp','facebook'];
@@ -444,9 +491,9 @@ function drawDockedLine(cv, vals, label){
   ctx.clearRect(0,0,W,H);
   const max = Math.max(...vals), min = Math.min(...vals);
   const pts = vals.map((v,i)=>{ const x = vals.length===1 ? W/2 : 40 + (W-60) * (i/(vals.length-1)); const y = H-30 - (H-60) * ((v-min)/((max-min)||1)); return [x,y,v]; });
-  ctx.strokeStyle = '#1f77b4'; ctx.beginPath();
+  ctx.strokeStyle = '#6d28d9'; ctx.beginPath();
   pts.forEach(([x,y],i)=>{ i?ctx.lineTo(x,y):ctx.moveTo(x,y); }); ctx.stroke();
-  ctx.fillStyle = '#1f77b4';
+  ctx.fillStyle = '#6d28d9';
   pts.forEach(([x,y,v])=>{ ctx.beginPath(); ctx.arc(x,y,4,0,Math.PI*2); ctx.fill(); });
   ctx.fillStyle = '#555'; ctx.fillText(label + ' — low ' + min.toLocaleString() + ', high ' + max.toLocaleString(), 40, 20);
 }
@@ -459,11 +506,11 @@ function drawDockedBars(cv, months){
   months.forEach((m,i)=>{
     const x = 40 + i * ((W-80) / months.length) + ((W-80) / months.length - bw) / 2;
     const h = (H-60) * (m.posts / max);
-    ctx.fillStyle = '#1f77b4'; ctx.fillRect(x, H-30-h, bw, h);
-    ctx.fillStyle = '#1a1a1a'; ctx.fillText(String(m.posts.toLocaleString()), x, H-30-h-6);
-    ctx.fillStyle = '#555'; ctx.fillText(m.month, x, H-12);
+    ctx.fillStyle = '#6d28d9'; ctx.fillRect(x, H-30-h, bw, h);
+    ctx.fillStyle = '#1f2937'; ctx.fillText(String(m.posts.toLocaleString()), x, H-30-h-6);
+    ctx.fillStyle = '#6b7280'; ctx.fillText(m.month, x, H-12);
   });
-  ctx.fillStyle = '#555'; ctx.fillText('Posts per month', 40, 20);
+  ctx.fillStyle = '#6b7280'; ctx.fillText('Posts per month', 40, 20);
 }
 function renderDockedLog(){
   const log = document.getElementById('dockedlog');
@@ -475,7 +522,7 @@ function renderDockedLog(){
   // canvases, so in full-screen mode the chat is the only place data
   // and charts appear.
   log.innerHTML = chatHistory.map((m, idx)=>{
-    let html = `<div class="msg ${m.role==='user' ? 'msg-user' : 'msg-assistant'}"><b>${m.role==='user' ? 'You' : 'Assistant' + (m.type ? ' [' + esc(m.type) + ']' : '')}:</b> ${esc(m.text)}</div>`;
+    let html = `<div class="msg ${m.role==='user' ? 'msg-user' : 'msg-assistant'}"><b>${m.role==='user' ? 'You' : 'Assistant' + (m.type ? ' [' + esc(m.type) + ']' : '')}:</b> ${esc(m.text)}</div>` + renderChatWorking(m.working);
     const ev = m.drilldown && m.drilldown.evidence;
     if(ev && ev.daily_dau_series && ev.daily_dau_series.length > 1){
       html += `<p class="dockchart-note">Chart — daily DAU from this chat's growth drill-down, shown here only.</p><canvas class="dockchart" id="dockchart-${idx}"></canvas>`;
@@ -512,7 +559,7 @@ async function sendDockedMsg(text){
   const r = await fetch('/api/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({session_id: chatSessionId, message: text})});
   const d = await r.json();
   chatSessionId = d.session_id;
-  chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || [], drilldown: d.drilldown || null});
+  chatHistory.push({role:'assistant', text: d.text, type: d.type, options: d.options || [], drilldown: d.drilldown || null, working: d.working || null});
   renderDockedLog();
   // Mirror into the in-page chat log too, so both views stay in sync.
   // Text only: the drill-down chart stays in the docked log only.
@@ -524,6 +571,14 @@ function newDockedChat(){
   document.getElementById('chatlog').innerHTML = '<div>New chat started — the docked window and the chat section above share this session.</div>';
 }
 document.getElementById('dockedq').addEventListener('keydown', (e)=>{ if(e.key==='Enter') sendDockedMsg(document.getElementById('dockedq').value); });
+fetch('/api/gallery').then(r=>r.json()).then(d=>{
+  document.getElementById('gallery').innerHTML = d.scenarios.map(s=>
+    `<div class="card" data-gallery-q="${esc(s.question)}"><b>${esc(s.title)}</b><p class="small">${esc(s.description)}</p><span class="tag">Run this SQL scenario</span></div>`).join('');
+});
+document.getElementById('gallery').addEventListener('click', (e)=>{
+  const card = e.target.closest('[data-gallery-q]');
+  if(card){ document.getElementById('q').value = card.getAttribute('data-gallery-q'); ask(); }
+});
 fetch('/api/experiments').then(r=>r.json()).then(d=>{
   document.getElementById('exps').innerHTML = d.experiments.map(e=>
     `<p><b>${e.name}</b> (${e.id}) — ${e.app}, ${e.status}, ${e.start_date} to ${e.end_date}, primary metric: ${e.primary_metric}</p>`).join('');

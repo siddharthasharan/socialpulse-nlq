@@ -78,6 +78,224 @@ def catalog_metric_ids(catalog_path: Path):
     return re.findall(r"-\s*id:\s*(\S+)", text)
 
 
+# Metric definitions, mirroring catalog/measures.yaml the same way the
+# SQL templates mirror it (the YAML is the human-readable contract;
+# tests check the ids stay in sync). Used only for display in the
+# "Show the working" panel and trace — never as a query source.
+METRIC_DEFINITIONS = {
+    "dau_mean_daily": ("Mean distinct users with at least one session per day.", "user x day", "distinct users"),
+    "wau_mean_weekly": ("Mean distinct users with at least one session per ISO week.", "user x week", "distinct users"),
+    "mau_march": ("Distinct users with at least one session in March 2026.", "user x month", "distinct users"),
+    "dau_mau_stickiness": ("Mean March DAU divided by March MAU.", "month", "MAU"),
+    "new_users_in_window": ("Users whose signup_date falls in 2026-01-01 to 2026-03-31.", "user", "registered users"),
+    "d7_exact_retention": ("For cohorts signing up 2026-01-01 to 2026-02-21, share active on exactly signup_date + 7 days.", "cohort user", "eligible cohort users"),
+    "d7_retention_by_acquisition": ("Same as D7 exact retention, split by acquisition_source.", "cohort user x acquisition_source", "eligible cohort users per source"),
+    "sessions_per_dau": ("Total sessions divided by total user-days with a session.", "session / user-day", "user-days"),
+    "median_session_duration_min": ("Median duration_minutes across sessions.", "session", "sessions"),
+    "daily_creators_mean": ("Mean distinct creators publishing per day.", "creator x day", "distinct creators"),
+    "creator_penetration": ("Daily creators divided by DAU, averaged over days.", "day", "DAU"),
+    "posts_per_creator_90d": ("Total published items divided by distinct creators in window.", "creator", "distinct creators"),
+    "orphan_post_rate": ("Share of published items with zero qualifying engagements in the window.", "content item", "eligible published items"),
+    "top1_creator_impression_share": ("Sampled impressions on content from the top 1% of creators by impressions, divided by all sampled impressions.", "sampled impression", "sampled impressions"),
+    "reels_completion_rate": ("Share of video plays with completion_pct >= 0.95.", "video play", "video plays"),
+    "reels_watch_time_per_viewer_day": ("Total watch minutes divided by viewer-days with a video play.", "viewer x day", "viewer-days"),
+    "messaging_dau_mean": ("Mean distinct users sending at least one message per day.", "user x day", "distinct senders"),
+    "two_way_conversation_rate": ("Conversations with messages from both participants divided by eligible conversations.", "conversation", "eligible conversations"),
+    "commenter_penetration": ("Distinct commenters per day divided by DAU, averaged over days.", "user x day", "DAU"),
+    "engagement_rate_per_impression": ("Engagements divided by sampled impressions.", "sampled impression", "sampled impressions"),
+}
+
+
+def metric_definition(metric):
+    """(definition, grain, denominator) for a catalog metric, or None."""
+    return METRIC_DEFINITIONS.get(metric)
+
+
+def build_trace(plan_dict, row_count, runtime_ms, first_row=None):
+    """Deterministic working trace for an /api/ask answer. Every step is
+    derived from the plan dict and the executed result only — no LLM,
+    no API key, no external call. Steps that cannot be derived are
+    omitted, never invented: a clarification plan has no SQL step and
+    no result step, and a routed plan says so explicitly.
+
+    Steps: (1) interpretation, (2) catalog mapping, (3) SQL, (4) result,
+    (5) interpretation of the result.
+    """
+    steps = []
+    ptype = plan_dict.get("type")
+    metric = plan_dict.get("metric")
+    steps.append({"step": 1, "title": "Interpreted the question",
+                  "text": (f"Deterministic keyword routing (no LLM): filters {plan_dict.get('filters', {})}, "
+                           f"breakdown {plan_dict.get('breakdown')}.")})
+    if metric and metric_definition(metric):
+        definition, grain, denom = metric_definition(metric)
+        steps.append({"step": 2, "title": "Mapped to a catalog metric",
+                      "text": f"{metric}: {definition} Grain: {grain}. Denominator: {denom}."})
+    elif metric:
+        steps.append({"step": 2, "title": "Mapped to a metric",
+                      "text": f"Mapped to {metric} (no catalog definition on file for this routed metric)."})
+    else:
+        steps.append({"step": 2, "title": "No metric mapped",
+                      "text": "No catalog metric was mapped, so no SQL was generated for this question."})
+    if plan_dict.get("routed"):
+        steps.append({"step": 3, "title": "Re-routed to a pre-aggregated table",
+                      "text": plan_dict.get("routing_explanation", "")})
+        steps.append({"step": 3, "title": "SQL actually executed (aggregate)",
+                      "text": plan_dict.get("sql", "")})
+        steps.append({"step": 3, "title": "Implied raw SQL (NOT executed)",
+                      "text": plan_dict.get("raw_sql", "") + " — shown for comparison only; it was not run."})
+    elif plan_dict.get("sql"):
+        steps.append({"step": 3, "title": "Generated SQL from an allowlisted template",
+                      "text": plan_dict.get("sql", "") + f" Tables scanned: {', '.join(plan_dict.get('tables', []))}. Guard: SELECT/WITH only, allowlisted tables."})
+    if ptype == "query":
+        summary = f"Query returned {row_count} row(s) in {runtime_ms} ms."
+        if first_row is not None:
+            summary += f" First row: {first_row}."
+        steps.append({"step": 4, "title": "Ran the query",
+                      "text": summary})
+        if plan_dict.get("routed") and plan_dict.get("wants_list"):
+            steps.append({"step": 5, "title": "Interpreted — with a limit stated plainly",
+                          "text": ("This aggregated result answers the count/sum version of the question. "
+                                   "It is NOT the individual row list that was asked for: pre-aggregated tables "
+                                   "cannot list individual event rows. Do not read it as a row list.")})
+        elif plan_dict.get("routed"):
+            steps.append({"step": 5, "title": "Interpreted the result",
+                          "text": ("Aggregated total for the count/sum asked for. It cannot list individual rows, "
+                                   "but no row list was asked for in this question.")})
+        elif row_count == 1 and first_row is not None:
+            steps.append({"step": 5, "title": "Interpreted the result",
+                          "text": f"Single value result: {first_row}. Grain: {plan_dict.get('grain', '')}."})
+        else:
+            steps.append({"step": 5, "title": "Interpreted the result",
+                          "text": f"{row_count} row(s) returned at grain {plan_dict.get('grain', '')}; the table and chart show them, not a summary invented here."})
+    elif ptype in ("clarification", "refusal"):
+        steps.append({"step": 4, "title": "No query was run",
+                      "text": plan_dict.get("clarification", "")})
+    elif ptype == "weather_report":
+        steps.append({"step": 4, "title": "No single SQL for this answer",
+                      "text": "A weather report is computed from many queries, so there is no single executed SQL to show. Use the Ask section for a single-metric SQL."})
+    return steps
+
+
+# -- Aggregate-aware routing for raw queries -------------------------
+# A question that would scan the raw events table (1.35M session rows)
+# and, worse, try to list them all in the UI is not run as written.
+# It is re-routed to a pre-aggregated table, and both SQL statements
+# are shown, labelled. Coverage is only claimed where it is exact on
+# this seed-42 data (checked at build time):
+#   agg_user_daily SUM(sessions)    == fact_sessions row count (1,355,587)
+#   agg_user_daily/surface SUM(impressions) == fact_content_impressions (3,204,996)
+#   agg_surface_daily SUM(engagements)      == fact_content_engagements (511,652)
+# NOT exact, so NOT routed: agg_user_daily messages_sent (328,868) vs
+# fact_messages (462,920). A messages raw-total request clarifies
+# instead of routing to a wrong total.
+def _aggregate_route(q, f):
+    """Return a routed plan dict, or None if this is not a raw query."""
+    raw_phrases = ("all events", "all sessions", "all rows", "every event",
+                   "every session", "list all", "show all", "full table",
+                   "raw events", "entire fact_sessions", "all impressions",
+                   "all engagements")
+    if not any(p in q for p in raw_phrases):
+        return None
+    list_verbs = ("list", "show", "give", "get", "return", "dump", "print")
+    wants_list = any(_word(q, v) for v in list_verbs) or "list all" in q
+    by_day = "by day" in q or "per day" in q or "daily" in q
+    # Messages have no exact aggregate (see note above): clarify honestly.
+    if "message" in q:
+        return {"type": "clarification", "metric": None, "sql": None, "tables": [],
+                "grain": "", "explanation": "",
+                "clarification": ("I will not route a raw messages total to agg_user_daily: its messages_sent "
+                                  "total (328,868) does not equal the raw fact_messages count (462,920) on this "
+                                  "data, so that route would mislead. Ask for messaging DAU instead, which is a "
+                                  "catalog metric with its own template.")}
+    if "engagement" in q:
+        table, col, kind = "agg_surface_daily", "engagements", "engagements"
+        raw_table = "fact_content_engagements"
+        raw_sql = "SELECT * FROM fact_content_engagements"
+    elif "impression" in q:
+        table, col, kind = "agg_surface_daily", "impressions", "impressions"
+        raw_table = "fact_content_impressions"
+        raw_sql = "SELECT * FROM fact_content_impressions"
+    else:
+        # Generic "events" / sessions / rows: sessions are the raw event
+        # table in this dataset (fact_sessions); the trace says so.
+        table, col, kind = "agg_user_daily", "sessions", "sessions"
+        raw_table = "fact_sessions"
+        raw_sql = "SELECT * FROM fact_sessions"
+    conds = []
+    if "app" in f:
+        conds.append(f"app = '{f['app']}'")
+    if "country" in f:
+        conds.append(f"country = '{f['country']}'")
+    if "platform" in f:
+        conds.append(f"platform = '{f['platform']}'")
+    if table == "agg_surface_daily":
+        # agg_surface_daily has a stray 2026-04-01 row outside the
+        # window; keep routed surface queries inside Jan-Mar 2026.
+        conds.append("date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31'")
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    if by_day:
+        sql = (f"SELECT date, SUM({col}) AS {kind} FROM {table}{where} "
+               f"GROUP BY date ORDER BY date")
+        grain, metric = "day (pre-aggregated)", f"{kind}_by_day_routed"
+    else:
+        sql = f"SELECT SUM({col}) AS value FROM {table}{where}"
+        grain, metric = "total (pre-aggregated)", f"total_{kind}_routed"
+    ok, reason = guard_sql(sql)
+    if not ok:
+        return None
+    if wants_list:
+        routing = ("Running the raw query would list every individual event row (over a million "
+                   "session rows) in the UI, which is very long and not useful as a list. The system "
+                   "re-routed to a pre-aggregated table instead. Aggregates answer counts, sums, and "
+                   "averages, but they cannot list individual event rows — the result below is daily "
+                   "totals (or a total), not the row list you asked for.")
+        alternative = ("Aggregated daily totals (shown). For example rows, ask a bounded sample "
+                       "question instead of 'all rows'; this demo does not fake a sample as a full list.")
+    else:
+        routing = ("Running the raw query would scan the full raw events table for a total that a "
+                   "pre-aggregated table already holds. The system re-routed to that table: for counts "
+                   "and sums of sessions, impressions, and engagements the pre-aggregated total equals "
+                   "the raw total on this seed-42 data. It cannot list individual rows, but no row list "
+                   "was asked for here.")
+        alternative = "Aggregated total (shown)."
+    return {
+        "type": "query", "metric": metric, "sql": sql, "raw_sql": raw_sql,
+        "tables": [table], "raw_tables": [raw_table], "grain": grain,
+        "filters": f, "breakdown": "day" if by_day else None, "routed": True,
+        "wants_list": wants_list,
+        "can_list_rows": False, "routing_explanation": routing,
+        "alternative": alternative,
+        "explanation": f"Aggregate-routed metric {metric}, grain {grain}, filters {f}. Raw SQL shown, not executed.",
+        "clarification": None,
+    }
+
+
+# SQL scenario gallery: preset cards that run through the same
+# /api/ask planner path (no new data, no new metrics). One card is
+# the aggregate-routing demo, so the gallery itself shows both SQLs.
+GALLERY_SCENARIOS = [
+    {"id": "gallery_instagram_dau_country", "title": "Instagram DAU by country",
+     "question": "What was DAU for instagram by country over the last 28 days?",
+     "description": "Daily active users by country, last 28 days, from fact_sessions joined to dim_users."},
+    {"id": "gallery_facebook_dau_country", "title": "Facebook DAU by country",
+     "question": "What was DAU for facebook by country over the last 28 days?",
+     "description": "Same DAU template, scoped to Facebook, broken down by country."},
+    {"id": "gallery_whatsapp_messaging_dau", "title": "WhatsApp messaging DAU",
+     "question": "What is messaging DAU for whatsapp?",
+     "description": "Mean daily message senders for WhatsApp. Note: the planner's D7 metric is not app-scoped, so WhatsApp retention is not faked as an app metric here."},
+    {"id": "gallery_instagram_creators", "title": "Daily creators, Instagram",
+     "question": "What is daily creators for instagram?",
+     "description": "Mean distinct creators publishing per day on Instagram."},
+    {"id": "gallery_engagement_by_surface", "title": "Engagement rate by surface",
+     "question": "What is engagement rate by surface?",
+     "description": "Engagements per sampled impression, split by feed, Reels, and stories."},
+    {"id": "gallery_routed_all_sessions", "title": "Raw query, routed to an aggregate",
+     "question": "List all sessions",
+     "description": "A raw row-list request, re-routed to pre-aggregated daily session totals. Both SQL statements are shown; the result is totals, not rows."},
+]
+
+
 def _date_range(q: str):
     if "last 7 days" in q or "past 7 days" in q or "last week" in q:
         return "2026-03-25", DATA_END
@@ -467,6 +685,12 @@ def plan(question: str):
             return {"type": "clarification", "metric": None, "sql": None, "tables": [], "grain": "",
                     "explanation": "",
                     "clarification": f"'{bad}' is not a country in the synthetic data. The countries are US, IN, BR, ID, MX, GB, and DE."}
+    # Aggregate-aware routing for raw queries: before metric detection,
+    # so "list all sessions" is never silently run as a full raw scan
+    # or silently answered as a different metric.
+    routed = _aggregate_route(q, _extract_filters(q))
+    if routed is not None:
+        return routed
     if "experiment" in q:
         exp = _experiment_plan(q)
         if exp is not None:

@@ -218,6 +218,12 @@ class ChatSession:
         self.grain_preference = None
         self.filters = {}
         self.corrections = []
+        # Last single SQL executed by a drill-down/breakdown helper, for
+        # the "Show the working" panel. Weather, diagnosis, recommendation
+        # and brief turns run many queries or none, so they set nothing
+        # here and honestly get no single-SQL panel, rather than an
+        # invented one.
+        self.last_working = None
 
     # -- DuckDB helpers (same tables as weather.py, read-only views) ----
     def _connect(self):
@@ -238,11 +244,14 @@ class ChatSession:
         creator drill-down: Jan/Feb/Mar 2026 in this dataset."""
         con = self._connect()
         app_filter = f" AND c.app = '{self.app}'" if self.app else ""
-        rows = con.execute(
+        _sql = (
             "SELECT CAST(DATE_TRUNC('month', CAST(f.published_at AS DATE)) AS VARCHAR) AS month, "
             "COUNT(*) AS posts, COUNT(DISTINCT f.creator_id) AS creators "
             "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
-            f"WHERE 1=1{app_filter} GROUP BY month ORDER BY month").fetchall()
+            f"WHERE 1=1{app_filter} GROUP BY month ORDER BY month")
+        rows = con.execute(_sql).fetchall()
+        self.last_working = {"sql": _sql, "tables": ["fact_content_creation", "dim_content"],
+                             "row_count": len(rows)}
         # DATE_TRUNC returns a timestamp; monthly labels are YYYY-MM only.
         return [{"month": str(r[0])[:7], "posts": r[1], "creators": r[2]} for r in rows]
 
@@ -270,11 +279,14 @@ class ChatSession:
         extra = ""
         for c in self._user_filter_sql("u", filters or {}):
             extra += f" AND {c}"
-        rows = con.execute(
+        _sql = (
             "SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau "
             "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
             f"WHERE CAST(s.start_time AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter}{extra} "
-            "GROUP BY d ORDER BY d").fetchall()
+            "GROUP BY d ORDER BY d")
+        rows = con.execute(_sql).fetchall()
+        self.last_working = {"sql": _sql, "tables": ["fact_sessions", "dim_users"],
+                             "row_count": len(rows)}
         return [{"date": str(r[0]), "dau": r[1]} for r in rows]
 
     def _daily_series_for_topic(self, topic, filters=None):
@@ -620,38 +632,49 @@ class ChatSession:
         app_filter_u = f" AND u.primary_app = '{self.app}'" if self.app else ""
         app_filter_c = f" AND c.app = '{self.app}'" if self.app else ""
         rows = None
+        _sql, _tables = None, []
         if dimension == "country":
             if topic == "growth":
-                rows = con.execute(
+                _sql = (
                     "SELECT u.country, COUNT(DISTINCT s.user_id) AS n "
                     "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
                     f"WHERE CAST(s.start_time AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_u} "
-                    "GROUP BY u.country ORDER BY n DESC").fetchall()
+                    "GROUP BY u.country ORDER BY n DESC")
+                _tables = ["fact_sessions", "dim_users"]
+                rows = con.execute(_sql).fetchall()
                 rows = [{"label": r[0], "count": r[1], "extra": None} for r in rows]
             elif topic == "creators":
-                rows = con.execute(
+                _sql = (
                     "SELECT u.country, COUNT(DISTINCT f.creator_id) AS creators, COUNT(*) AS posts "
                     "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
                     "JOIN dim_users u ON u.user_id = f.creator_id "
                     f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_c} "
-                    "GROUP BY u.country ORDER BY creators DESC").fetchall()
+                    "GROUP BY u.country ORDER BY creators DESC")
+                _tables = ["fact_content_creation", "dim_content", "dim_users"]
+                rows = con.execute(_sql).fetchall()
                 rows = [{"label": r[0], "count": r[1], "extra": f"{r[2]:,} posts"} for r in rows]
             elif topic == "messaging":
-                rows = con.execute(
+                _sql = (
                     "SELECT u.country, COUNT(DISTINCT m.sender_id) AS n "
                     "FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id "
                     f"WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_u} "
-                    "GROUP BY u.country ORDER BY n DESC").fetchall()
+                    "GROUP BY u.country ORDER BY n DESC")
+                _tables = ["fact_messages", "dim_users"]
+                rows = con.execute(_sql).fetchall()
                 rows = [{"label": r[0], "count": r[1], "extra": None} for r in rows]
         elif dimension == "surface" and topic in ("creators", "engagement"):
-            rows = con.execute(
+            _sql = (
                 "SELECT c.surface, COUNT(*) AS posts, COUNT(DISTINCT f.creator_id) AS creators "
                 "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
                 f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter_c} "
-                "GROUP BY c.surface ORDER BY posts DESC").fetchall()
+                "GROUP BY c.surface ORDER BY posts DESC")
+            _tables = ["fact_content_creation", "dim_content"]
+            rows = con.execute(_sql).fetchall()
             rows = [{"label": r[0], "count": r[1], "extra": f"{r[2]:,} creators"} for r in rows]
         if not rows:
             return None
+        if _sql:
+            self.last_working = {"sql": _sql, "tables": _tables, "row_count": len(rows)}
         total = sum(r["count"] for r in rows) or 1
         for r in rows:
             r["share"] = r["count"] / total
@@ -875,6 +898,9 @@ class ChatSession:
                     f"(current period {start} to {end}):\n\nBy country:\n{_lines(country)}\n\nBy surface:\n{_lines(surface)}\n\n"
                     "That shows where creator supply sits; it does not prove why it fell. "
                     "Next: use the buttons below for a diagnosis or an experiment recommendation.")
+            # Two queries behind this turn (country + surface), so no
+            # single SQL panel: showing only the second would mislead.
+            self.last_working = None
             return self._reply("breakdown", text,
                                breakdown={"topic": "creators", "dimension": "country+surface",
                                           "rows": country, "surface_rows": surface})
@@ -1012,6 +1038,9 @@ class ChatSession:
         out = {"type": type_, "stage": self.stage, "app": self.app,
                "text": text, "options": self.options}
         out.update(extra)
+        if getattr(self, "last_working", None):
+            out["working"] = self.last_working
+            self.last_working = None
         self.history.append({"user": None, "assistant": out})
         return out
 

@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from urllib.parse import parse_qs, urlparse
 
-from socialpulse_nlq.planner import plan, run_plan
+from socialpulse_nlq.planner import plan, run_plan, build_trace, metric_definition, GALLERY_SCENARIOS
 from socialpulse_nlq.weather import compute_weather
 from socialpulse_nlq.chat import ChatSession
 from socialpulse_nlq.questions import load_all_questions, save_questions
@@ -62,6 +62,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
             self.wfile.write(html)
+        elif self.path == "/api/gallery":
+            self._send_json({"scenarios": GALLERY_SCENARIOS})
         elif self.path == "/api/metrics":
             text = (ROOT / "catalog/measures.yaml").read_text()
             ids = re.findall(r"-\s*id:\s*(\S+)", text)
@@ -126,14 +128,31 @@ class Handler(BaseHTTPRequestHandler):
                 weather = compute_weather(self.data_dir, app=p.get("app"))
             except Exception as e:
                 weather = {"error": str(e)}
+        first_row = [str(v) for v in rows[0]] if rows else None
+        trace = build_trace(p, len(rows), ms, first_row=first_row)
+        definition = metric_definition(p["metric"]) if p.get("metric") else None
+        working = {
+            "sql": p.get("sql"), "raw_sql": p.get("raw_sql"),
+            "tables": p.get("tables", []), "raw_tables": p.get("raw_tables", []),
+            "grain": p.get("grain", ""),
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+            "routed": bool(p.get("routed")), "can_list_rows": p.get("can_list_rows", True),
+            "routing_explanation": p.get("routing_explanation"),
+            "alternative": p.get("alternative"),
+            "deterministic_note": ("Deterministic working trace: every step below is produced by the "
+                                   "planner from allowlisted templates and the executed result. No live LLM, "
+                                   "no API key, no external call."),
+        }
         self._send_json({
             "weather": weather,
             "type": p["type"], "metric": p.get("metric"), "sql": p.get("sql"),
-            "tables": p.get("tables", []), "grain": p.get("grain", ""),
+            "raw_sql": p.get("raw_sql"), "tables": p.get("tables", []), "grain": p.get("grain", ""),
             "filters": p.get("filters", {}), "breakdown": p.get("breakdown"),
             "explanation": p.get("explanation", ""), "clarification": p.get("clarification"),
             "columns": cols, "rows": [[str(v) for v in r] for r in rows[:200]],
             "row_count": len(rows), "runtime_ms": ms,
+            "trace": trace, "working": working,
         })
 
     def log_message(self, *args):  # keep the terminal readable
