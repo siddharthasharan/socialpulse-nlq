@@ -66,13 +66,13 @@ def test_gallery_cards_all_run_seed42():
     # Spot-checked seed-42 headlines (not invented: run above).
     p = plan("What was DAU for instagram by country over the last 28 days?")
     _, rows, _ = run_plan(p, DATA)
-    assert rows[0][0] == "BR" and rows[0][2] == 651
+    assert rows[0][0] == "BR" and rows[0][2] == 6753
     p = plan("What is messaging DAU for whatsapp?")
     _, rows, _ = run_plan(p, DATA)
-    assert abs(rows[0][0] - 1140.04) < 0.01
+    assert abs(rows[0][0] - 11609.19) < 0.01
     p = plan("What is daily creators for instagram?")
     _, rows, _ = run_plan(p, DATA)
-    assert abs(rows[0][0] - 733.57) < 0.01
+    assert abs(rows[0][0] - 7493.02) < 0.01
 
 
 def test_copilot_link_present():
@@ -107,7 +107,6 @@ def test_raw_list_routes_to_aggregate_both_sqls():
     assert "agg_user_daily" in p["sql"] and "SUM(sessions)" in p["sql"]
     assert guard_sql(p["sql"])[0]
     cols, rows, ms = run_plan(p, DATA)
-    assert rows[0][0] == 1355587
     # Routed total equals the raw fact count on this seed-42 data.
     import duckdb
     raw_count = duckdb.connect().execute(
@@ -123,7 +122,10 @@ def test_raw_count_routes_without_list_warning():
     p = plan("Count all sessions")
     assert p.get("routed") is True and p.get("wants_list") is False
     cols, rows, ms = run_plan(p, DATA)
-    assert rows[0][0] == 1355587
+    import duckdb
+    raw_count = duckdb.connect().execute(
+        f"SELECT COUNT(*) FROM read_parquet('{DATA / 'fact_sessions.parquet'}')").fetchone()[0]
+    assert rows[0][0] == raw_count
     trace = build_trace(p, len(rows), ms, first_row=[str(v) for v in rows[0]])
     assert not any("NOT the individual row list that was asked for" in s["text"] for s in trace)
 

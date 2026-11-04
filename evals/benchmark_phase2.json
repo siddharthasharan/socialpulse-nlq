@@ -3,7 +3,7 @@
     "category": "simple",
     "expected_metric": "dau_mean_daily",
     "expected_type": "scalar",
-    "expected_value": 8897.36,
+    "expected_value": 89324.1888888889,
     "id": "b01",
     "question": "What is the mean daily DAU?"
   },
@@ -11,7 +11,7 @@
     "category": "simple",
     "expected_metric": "wau_mean_weekly",
     "expected_type": "scalar",
-    "expected_value": 26651.5,
+    "expected_value": 267348.9285714286,
     "id": "b02",
     "question": "What is WAU?"
   },
@@ -19,7 +19,7 @@
     "category": "simple",
     "expected_metric": "mau_march",
     "expected_type": "scalar",
-    "expected_value": 46818,
+    "expected_value": 468737.0,
     "id": "b03",
     "question": "What is MAU in March?"
   },
@@ -27,7 +27,7 @@
     "category": "simple",
     "expected_metric": "dau_mau_stickiness",
     "expected_type": "scalar",
-    "expected_value": 0.21535,
+    "expected_value": 0.21535179607905858,
     "id": "b04",
     "question": "What is DAU/MAU stickiness?"
   },
@@ -35,7 +35,7 @@
     "category": "simple",
     "expected_metric": "new_users_in_window",
     "expected_type": "scalar",
-    "expected_value": 25071,
+    "expected_value": 250222.0,
     "id": "b05",
     "question": "How many new users were there in the window?"
   },
@@ -43,7 +43,7 @@
     "category": "simple",
     "expected_metric": "sessions_per_dau",
     "expected_type": "scalar",
-    "expected_value": 1.69287,
+    "expected_value": 1.6934842957183305,
     "id": "b06",
     "question": "What is sessions per DAU?"
   },
@@ -59,7 +59,7 @@
     "category": "simple",
     "expected_metric": "messaging_dau_mean",
     "expected_type": "scalar",
-    "expected_value": 3820.57,
+    "expected_value": 38812.76666666667,
     "id": "b08",
     "question": "What is messaging DAU on average per day?"
   },
@@ -136,7 +136,7 @@
     "category": "cohorts",
     "expected_metric": "d7_exact_retention",
     "expected_type": "scalar",
-    "expected_value": 0.22053,
+    "expected_value": 0.22215985224350848,
     "id": "b17",
     "question": "What is D7 retention?"
   },
@@ -146,9 +146,9 @@
     "expected_rows": 3,
     "expected_type": "breakdown",
     "expected_values": {
-      "organic": 0.22242,
-      "paid": 0.20042,
-      "referral": 0.22829
+      "organic": 0.22618364635545624,
+      "paid": 0.19642477768672797,
+      "referral": 0.22783555323252166
     },
     "id": "b18",
     "question": "What is D7 retention by acquisition source?"
@@ -159,7 +159,7 @@
     "expected_rows": 1,
     "expected_type": "breakdown",
     "expected_values": {
-      "paid": 0.20042
+      "paid": 0.19642477768672797
     },
     "id": "b19",
     "question": "What is D7 retention for paid users?"
@@ -168,7 +168,7 @@
     "category": "cohorts",
     "expected_metric": "posts_per_creator_90d",
     "expected_type": "scalar",
-    "expected_value": 22.66789,
+    "expected_value": 22.564089743589744,
     "id": "b20",
     "question": "What is posts per creator over 90 days?"
   },
@@ -176,7 +176,7 @@
     "category": "cohorts",
     "expected_metric": "creator_penetration",
     "expected_type": "scalar",
-    "expected_value": 0.19894,
+    "expected_value": 0.20167468513901807,
     "id": "b21",
     "question": "What is creator penetration?"
   },
@@ -206,7 +206,7 @@
     "category": "diagnostics",
     "expected_metric": "orphan_post_rate",
     "expected_type": "scalar",
-    "expected_value": 0.24588,
+    "expected_value": 0.24977855101054033,
     "id": "b25",
     "question": "What is the orphan post rate?"
   },
@@ -214,7 +214,7 @@
     "category": "diagnostics",
     "expected_metric": "top1_creator_impression_share",
     "expected_type": "scalar",
-    "expected_value": 0.09535,
+    "expected_value": 0.0964383065094456,
     "id": "b26",
     "question": "Are the top 1% of creators capturing a disproportionate share of views?"
   },
@@ -222,7 +222,7 @@
     "category": "diagnostics",
     "expected_metric": "commenter_penetration",
     "expected_type": "scalar",
-    "expected_value": 0.09146,
+    "expected_value": 0.09150969488659336,
     "id": "b27",
     "question": "What is commenter penetration?"
   },
@@ -230,7 +230,7 @@
     "category": "diagnostics",
     "expected_metric": "engagement_rate_per_impression",
     "expected_type": "scalar",
-    "expected_value": 0.15964,
+    "expected_value": 0.16010749914075573,
     "id": "b28",
     "question": "What is engagement rate per impression?"
   },
@@ -238,7 +238,7 @@
     "category": "diagnostics",
     "expected_metric": "reels_completion_rate",
     "expected_type": "scalar",
-    "expected_value": 0.35047,
+    "expected_value": 0.3504851839722351,
     "id": "b29",
     "question": "What is the Reels completion rate?"
   },
@@ -246,7 +246,7 @@
     "category": "diagnostics",
     "expected_metric": "reels_watch_time_per_viewer_day",
     "expected_type": "scalar",
-    "expected_value": 0.90443,
+    "expected_value": 0.9052338879573009,
     "id": "b30",
     "question": "What is Reels watch time per viewer per day?"
   },
@@ -272,10 +272,10 @@
     "expected_type": "weather_report",
     "expected_metric": null,
     "expected_cards": {
-      "dau": 10054.57,
-      "wau": 32685.25,
-      "d7_retention": 0.21532,
-      "messaging_dau": 4340.29
+      "dau": 100627.82142857143,
+      "wau": 327201.5,
+      "d7_retention": 0.1960631805671892,
+      "messaging_dau": 43501.32142857143
     }
   },
   {
@@ -285,10 +285,10 @@
     "expected_type": "weather_report",
     "expected_metric": null,
     "expected_cards": {
-      "daily_creators": 1015.57,
-      "creator_penetration": 0.10128,
-      "orphan_post_rate": 0.24588,
-      "top1_share": 0.09535
+      "daily_creators": 10338.92857142857,
+      "creator_penetration": 0.1030659408353302,
+      "orphan_post_rate": 0.24977855101054033,
+      "top1_share": 0.0964383065094456
     },
     "expected_watchouts_contains": [
       "Creator problem",
@@ -304,13 +304,13 @@
     "expected_metric": "dau_mean_daily",
     "min_rows": 7,
     "expected_values": [
-      2808,
-      2850,
-      2830,
-      3131,
-      3277,
-      2876,
-      2823
+      28786.0,
+      28517.0,
+      28586.0,
+      32213.0,
+      32611.0,
+      28946.0,
+      28489.0
     ]
   },
   {
@@ -321,34 +321,34 @@
     "expected_metric": "dau_mean_daily",
     "min_rows": 28,
     "expected_values": [
-      2852,
-      2854,
-      2804,
-      3150,
-      3304,
-      2939,
-      2966,
-      2900,
-      2925,
-      2914,
-      3263,
-      3241,
-      2908,
-      2883,
-      2829,
-      2810,
-      2885,
-      3195,
-      3214,
-      2910,
-      2872,
-      2808,
-      2850,
-      2830,
-      3131,
-      3277,
-      2876,
-      2823
+      29337.0,
+      29146.0,
+      29403.0,
+      32780.0,
+      33346.0,
+      29810.0,
+      29318.0,
+      28929.0,
+      28940.0,
+      29154.0,
+      32585.0,
+      33157.0,
+      29892.0,
+      29120.0,
+      28918.0,
+      29080.0,
+      29068.0,
+      32269.0,
+      33062.0,
+      29475.0,
+      28957.0,
+      28786.0,
+      28517.0,
+      28586.0,
+      32213.0,
+      32611.0,
+      28946.0,
+      28489.0
     ]
   },
   {
@@ -358,10 +358,10 @@
     "expected_type": "weather_report",
     "expected_metric": null,
     "expected_cards": {
-      "dau": 2971.89,
-      "d7_retention": 0.19106,
-      "daily_creators": 301.39,
-      "messaging_dau": 1275.79
+      "dau": 30139.071428571428,
+      "d7_retention": 0.1948900772430184,
+      "daily_creators": 3065.8571428571427,
+      "messaging_dau": 13031.535714285714
     },
     "expected_watchouts_contains": [
       "Retention falling",

@@ -61,8 +61,8 @@ def test_dau_series_respects_app_filter():
         cols, rows, _ = run_plan(p, data)
         assert len(rows) == 7
         vals = [r[-1] for r in rows]
-        assert all(v < 5000 for v in vals), vals  # all-app would be ~9,500+
-        assert abs(sum(vals) / len(vals) - 2942.14) < 1.0
+        assert all(v < 50000 for v in vals), vals  # all-app would be ~89,000+
+        assert abs(sum(vals) / len(vals) - 29735.43) < 1.0
 
 
 def test_dau_over_last_returns_series_not_average():

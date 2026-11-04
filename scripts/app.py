@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from urllib.parse import parse_qs, urlparse
 
-from socialpulse_nlq.planner import plan, run_plan, build_trace, metric_definition, GALLERY_SCENARIOS
+from socialpulse_nlq.planner import plan, run_plan, build_trace, metric_definition, token_meter, GALLERY_SCENARIOS
 from socialpulse_nlq.weather import compute_weather
 from socialpulse_nlq.chat import ChatSession
 from socialpulse_nlq.questions import load_all_questions, save_questions
@@ -130,6 +130,11 @@ class Handler(BaseHTTPRequestHandler):
                 weather = {"error": str(e)}
         first_row = [str(v) for v in rows[0]] if rows else None
         trace = build_trace(p, len(rows), ms, first_row=first_row)
+        meter = token_meter(p, self.data_dir, rows, ms) if p["type"] == "query" else {
+            "available": False, "reason": "No query was run for this answer, so there is no token comparison to show."}
+        if meter.get("available") and meter.get("routed"):
+            trace = trace + [{"step": 6, "title": "Token meter (estimated)",
+                              "text": meter["note"] + " " + meter["method"]}]
         definition = metric_definition(p["metric"]) if p.get("metric") else None
         working = {
             "sql": p.get("sql"), "raw_sql": p.get("raw_sql"),
@@ -152,7 +157,7 @@ class Handler(BaseHTTPRequestHandler):
             "explanation": p.get("explanation", ""), "clarification": p.get("clarification"),
             "columns": cols, "rows": [[str(v) for v in r] for r in rows[:200]],
             "row_count": len(rows), "runtime_ms": ms,
-            "trace": trace, "working": working,
+            "trace": trace, "working": working, "token_meter": meter,
         })
 
     def log_message(self, *args):  # keep the terminal readable

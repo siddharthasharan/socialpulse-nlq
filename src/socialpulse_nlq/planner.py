@@ -178,17 +178,20 @@ def build_trace(plan_dict, row_count, runtime_ms, first_row=None):
 
 
 # -- Aggregate-aware routing for raw queries -------------------------
-# A question that would scan the raw events table (1.35M session rows)
-# and, worse, try to list them all in the UI is not run as written.
-# It is re-routed to a pre-aggregated table, and both SQL statements
-# are shown, labelled. Coverage is only claimed where it is exact on
-# this seed-42 data (checked at build time):
-#   agg_user_daily SUM(sessions)    == fact_sessions row count (1,355,587)
-#   agg_user_daily/surface SUM(impressions) == fact_content_impressions (3,204,996)
-#   agg_surface_daily SUM(engagements)      == fact_content_engagements (511,652)
-# NOT exact, so NOT routed: agg_user_daily messages_sent (328,868) vs
-# fact_messages (462,920). A messages raw-total request clarifies
-# instead of routing to a wrong total.
+# A question that would scan the raw events table (millions of event
+# rows at 500K users) and, worse, try to list them all in the UI is not
+# run as written. It is re-routed to a pre-aggregated table, and both
+# SQL statements are shown, labelled. Coverage is only claimed where
+# it is exact on the current seed-42 data (checked at build time by
+# tests/test_working.py, which compares the routed total to the raw
+# table count on whatever data is present, rather than quoting a
+# frozen count here):
+#   agg_user_daily SUM(sessions)    == fact_sessions row count
+#   agg_user_daily/surface SUM(impressions) == fact_content_impressions
+#   agg_surface_daily SUM(engagements)      == fact_content_engagements
+# NOT exact, so NOT routed: agg_user_daily messages_sent does not
+# equal the raw fact_messages count. A messages raw-total request
+# clarifies instead of routing to a wrong total.
 def _aggregate_route(q, f):
     """Return a routed plan dict, or None if this is not a raw query."""
     raw_phrases = ("all events", "all sessions", "all rows", "every event",
@@ -205,8 +208,8 @@ def _aggregate_route(q, f):
         return {"type": "clarification", "metric": None, "sql": None, "tables": [],
                 "grain": "", "explanation": "",
                 "clarification": ("I will not route a raw messages total to agg_user_daily: its messages_sent "
-                                  "total (328,868) does not equal the raw fact_messages count (462,920) on this "
-                                  "data, so that route would mislead. Ask for messaging DAU instead, which is a "
+                                  "total does not equal the raw fact_messages count on this seed-42 data, so "
+                                  "that route would mislead. Ask for messaging DAU instead, which is a "
                                   "catalog metric with its own template.")}
     if "engagement" in q:
         table, col, kind = "agg_surface_daily", "engagements", "engagements"
@@ -245,8 +248,8 @@ def _aggregate_route(q, f):
     if not ok:
         return None
     if wants_list:
-        routing = ("Running the raw query would list every individual event row (over a million "
-                   "session rows) in the UI, which is very long and not useful as a list. The system "
+        routing = ("Running the raw query would list every individual event row (millions of "
+                   "event rows at this scale) in the UI, which is very long and not useful as a list. The system "
                    "re-routed to a pre-aggregated table instead. Aggregates answer counts, sums, and "
                    "averages, but they cannot list individual event rows — the result below is daily "
                    "totals (or a total), not the row list you asked for.")
@@ -812,3 +815,106 @@ def run_plan(plan: dict, data_dir: Path):
     cols = [d[0] for d in cur.description] if cur.description else []
     ms = int((time.time() - t0) * 1000)
     return cols, rows, ms
+
+
+# -- Token meter --------------------------------------------------------
+# Estimated tokens only, never exact API usage, and no live LLM call:
+# roughly 1 token per 4 characters of the payload that would go to an
+# LLM, stated in the panel wherever these numbers are shown. The raw
+# route is deliberately NOT executed (that is the point of routing),
+# so its numbers are measured differently and labelled as such:
+#   * raw scan runtime = a timed COUNT(*) scan of the raw table.
+#     That is a lower bound: fully materialising SELECT * would take
+#     longer, not shorter, so the saving shown is conservative.
+#   * raw payload tokens = raw row count x the average serialised
+#     length of a sampled raw row (first 100 rows), divided by 4.
+#     The sample is measured from the actual table, not assumed.
+# The aggregate route uses the actual executed result plus the skills
+# context that would be sent with it: the metric definition and the
+# aggregate SQL template. Those are reusable context, paid once per
+# run, not data dumped every run. If no aggregate route exists for a
+# query, the meter says so and claims no saving.
+CHARS_PER_TOKEN = 4
+
+
+def estimate_tokens(chars):
+    """Ceiling of chars / CHARS_PER_TOKEN; chars must be an int."""
+    return -(-int(chars) // CHARS_PER_TOKEN)
+
+
+def token_meter(plan_dict, data_dir, rows, runtime_ms):
+    """Token meter for an /api/ask answer. Returns a dict the working
+    panel renders, or {"available": False, "reason": ...} when no query
+    ran or no saving can honestly be claimed. `rows` is the full
+    result of run_plan (before any UI cap) and `runtime_ms` its
+    measured runtime. Never runs the implied raw SQL."""
+    import time as _time
+
+    if plan_dict.get("type") != "query" or not plan_dict.get("sql"):
+        return {"available": False,
+                "reason": "No query was run for this answer, so there is no token comparison to show."}
+    definition = metric_definition(plan_dict.get("metric")) if plan_dict.get("metric") else None
+    skills_text = ""
+    if definition:
+        skills_text = f"{plan_dict.get('metric')}: {definition[0]} Grain: {definition[1]}. Denominator: {definition[2]}."
+    skills_tokens = estimate_tokens(len(skills_text))
+    agg_payload_chars = len(str(rows))
+    if not plan_dict.get("routed"):
+        return {
+            "available": True, "routed": False,
+            "method": "Estimated tokens: roughly 1 token per 4 characters of the payload that would go to an LLM. Estimates only, not exact API usage; no live LLM call.",
+            "executed_tokens": estimate_tokens(agg_payload_chars) + skills_tokens,
+            "executed_payload_chars": agg_payload_chars,
+            "skills_tokens": skills_tokens,
+            "aggregate_runtime_ms": int(runtime_ms),
+            "aggregate_tokens": None, "raw_tokens": None, "saved_tokens": None,
+            "saved_pct": None, "raw_runtime_ms": None,
+            "note": ("No pre-aggregate route exists for this metric, so no token saving is claimed. "
+                     "The figure above is the executed result payload plus the reused skills/catalog context."),
+        }
+    raw_tables = plan_dict.get("raw_tables") or []
+    if not raw_tables:
+        return {"available": False,
+                "reason": "This routed plan names no raw table, so no raw-route comparison can be measured."}
+    raw_table = raw_tables[0]
+    import duckdb
+    con = duckdb.connect()
+    p = Path(data_dir) / f"{raw_table}.parquet"
+    if not p.exists():
+        return {"available": False,
+                "reason": f"Raw table {raw_table} is not present in this data directory."}
+    con.execute(f"CREATE OR REPLACE VIEW {raw_table} AS SELECT * FROM read_parquet('{p}')")
+    t0 = _time.time()
+    raw_row_count = int(con.execute(f"SELECT COUNT(*) FROM {raw_table}").fetchone()[0])
+    raw_scan_ms = int((_time.time() - t0) * 1000)
+    sample = con.execute(f"SELECT * FROM {raw_table} LIMIT 100").fetchall()
+    sample_chars = sum(len(str(r)) for r in sample)
+    avg_chars = (sample_chars / len(sample)) if sample else 0
+    raw_payload_chars = int(raw_row_count * avg_chars)
+    raw_tokens = estimate_tokens(raw_payload_chars)
+    # Aggregate route: actual executed result + skills context. The
+    # skills text for a routed metric also carries the routing skill
+    # (the aggregate SQL template), which is reusable context.
+    agg_skills_text = skills_text + (plan_dict.get("sql") or "") + (plan_dict.get("routing_explanation") or "")
+    agg_skills_tokens = estimate_tokens(len(agg_skills_text))
+    aggregate_tokens = estimate_tokens(agg_payload_chars) + agg_skills_tokens
+    saved = raw_tokens - aggregate_tokens
+    pct = (100.0 * saved / raw_tokens) if raw_tokens else 0.0
+    # Never round a 99.99…% saving up to a literal 100%: the aggregate
+    # route still costs tokens, so a displayed 100% would be false.
+    pct_display = ">99.99" if 99.995 <= pct < 100.0 else f"{pct:.2f}"
+    return {
+        "available": True, "routed": True,
+        "method": "Estimated tokens: roughly 1 token per 4 characters of the payload that would go to an LLM. Estimates only, not exact API usage; no live LLM call.",
+        "raw_tokens": raw_tokens, "raw_payload_chars": raw_payload_chars,
+        "raw_row_count": raw_row_count, "raw_table": raw_table,
+        "raw_runtime_ms": raw_scan_ms,
+        "raw_runtime_note": ("Timed COUNT(*) scan of the raw table (measured). Fully materialising "
+                             "SELECT * would take longer, so the saving below is conservative."),
+        "aggregate_tokens": aggregate_tokens,
+        "aggregate_payload_chars": agg_payload_chars,
+        "skills_tokens": agg_skills_tokens,
+        "aggregate_runtime_ms": int(runtime_ms),
+        "saved_tokens": saved, "saved_pct": min(round(pct, 4), 99.9999),
+        "note": f"You saved {saved:,} estimated tokens ({pct_display}% less) by routing to the pre-aggregated table.",
+    }

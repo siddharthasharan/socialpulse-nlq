@@ -261,10 +261,12 @@ def test_breakdown_by_country_and_surface_on_seed42_data():
 def test_ranking_most_drop_last_2_weeks():
     """The 2026-10-29 22:55 PDT screenshot failure: after a WhatsApp
     creators breakdown, 'which country had the most drop in the last
-    2 weeks' must rank by change. Seed-42 answer is ID on both
-    measures (159 vs 171 creators, -12, -7.0%; posts 462 vs 510),
-    total creators 1,575 vs 1,551 — a small short-window move, not
-    the Jan-Mar decline, and the reply must say so."""
+    2 weeks' must rank by change. Seed-42 answer on 500K data is DE
+    (906 vs 930 creators, -24, -2.6%; posts 2,740 vs 2,813),
+    total creators 16,178 vs 16,091 — a small short-window move, not
+    the Jan-Mar decline, and the reply must say so. (On 50K data the
+    winner was ID; the winner is scale-dependent, the rank-by-change
+    behaviour is what this test pins.)"""
     s = _real_session()
     if s is None:
         return
@@ -274,14 +276,14 @@ def test_ranking_most_drop_last_2_weeks():
     assert r["type"] == "ranking" and r["ranking"]["topic"] == "creators"
     assert r["ranking"]["dimension"] == "country" and r["ranking"]["days"] == 14
     rows = {row["label"]: row for row in r["ranking"]["rows"]}
-    assert rows["ID"]["current"] == 159 and rows["ID"]["prior"] == 171 and rows["ID"]["change"] == -12
-    assert "largest drop is ID" in r["text"]
+    assert rows["DE"]["current"] == 906 and rows["DE"]["prior"] == 930 and rows["DE"]["change"] == -24
+    assert "largest drop is DE" in r["text"]
     assert "short-window" in r["text"]
     # 'Most growth' is a direction, not the growth topic: in a
     # creators conversation it must still rank creators.
     g = s.respond("Which country had the most growth in the last 2 weeks")
     assert g["type"] == "ranking" and g["ranking"]["topic"] == "creators"
-    assert "largest growth is IN" in g["text"]
+    assert "largest growth is BR" in g["text"]
 
 
 def test_segment_followup_filters_drilldown():

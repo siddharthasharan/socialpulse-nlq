@@ -48,8 +48,8 @@ def test_whatsapp_weather_on_seed42_data():
         return
     w = compute_weather(data, app="whatsapp")
     by_id = {c["id"]: c for c in w["cards"]}
-    assert abs(by_id["dau"]["current"] - 2971.89) < 1.0
-    assert abs(by_id["d7_retention"]["current"] - 0.19106) < 0.01
+    assert abs(by_id["dau"]["current"] - 30139.07) < 1.0
+    assert abs(by_id["d7_retention"]["current"] - 0.19489) < 0.01
     # Scoped retention falls while global retention is flat — the
     # global report hides this split, which is the point of scoping.
     assert by_id["d7_retention"]["direction"] == "down"

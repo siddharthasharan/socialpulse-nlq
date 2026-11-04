@@ -205,9 +205,18 @@ function renderWorking(d){
     if(d.raw_sql) h += `<p><b>Implied raw SQL — NOT executed:</b></p><pre>${esc(d.raw_sql)}</pre>`;
     if(d.sql) h += `<p><b>Aggregate SQL — actually executed:</b></p><pre>${esc(d.sql)}</pre>`;
     if(w.alternative) h += `<p><b>Alternative that ran:</b> ${esc(w.alternative)}</p>`;
-  } else if(d.sql){
+  }
+  const tm = d.token_meter || {};
+  if(tm.available && tm.routed){
+    h += `<div class="warn"><b>Token meter (estimated):</b> you saved <b>${esc(String(tm.saved_tokens))} tokens (${esc(String(tm.saved_pct))}% less)</b> by routing to the pre-aggregated table. Raw route: ${esc(String(tm.raw_tokens))} estimated tokens. Aggregate route: ${esc(String(tm.aggregate_tokens))} estimated tokens (including ${esc(String(tm.skills_tokens))} skills/catalog tokens), ${esc(String(tm.aggregate_runtime_ms))} ms for the full aggregate query. Raw scan time (${esc(String(tm.raw_runtime_ms))} ms) is a timed COUNT(*) scan only, not the full SELECT * run: DuckDB counts without materialising rows, so the expensive part of the raw route is materialising and sending millions of rows to an LLM, which is what the token saving measures. ${esc(tm.method || '')}</div>`;
+  } else if(tm.available && !tm.routed){
+    h += `<p class="small"><b>Token meter (estimated):</b> executed result plus skills/catalog context: ${esc(String(tm.executed_tokens))} tokens. ${esc(tm.note || '')} ${esc(tm.method || '')}</p>`;
+  } else if(tm.reason){
+    h += `<p class="small"><b>Token meter:</b> ${esc(tm.reason)}</p>`;
+  }
+  if(d.sql && !w.routed){
     h += `<p><b>Exact SQL executed:</b></p><pre>${esc(d.sql)}</pre>`;
-  } else {
+  } else if(!d.sql){
     h += `<p class="small">No SQL was run for this answer.</p>`;
   }
   if(d.trace && d.trace.length){

@@ -3,11 +3,11 @@
     "checks": {
       "brief_eng_points_min": 3,
       "brief_pm_points_min": 3,
-      "drilldown_daily_creators": 455.79,
-      "drilldown_orphan": 0.2444,
+      "drilldown_daily_creators": 4680.464285714285,
+      "drilldown_orphan": 0.25013107745669405,
       "recommendation_label": "HYPOTHESIS \u2014 not a forecast",
       "recommendation_must_not_contain": "will increase",
-      "weather_dau": 4543.71,
+      "weather_dau": 45249.0,
       "weather_dau_tolerance": 10.0
     },
     "description": "Instagram full flow: weather -> creators drill-down -> diagnosis -> hypothesis recommendation -> PM/Eng brief. The demo flow from Phase 3 planning.",
@@ -43,7 +43,7 @@
   {
     "checks": {
       "diagnosis_text_must_not_contain": "creator-specific problem hiding inside healthy growth",
-      "weather_d7": 0.19106,
+      "weather_d7": 0.1948900772430184,
       "weather_d7_tolerance": 0.01
     },
     "description": "Whatsapp: growth up, retention down, creators down. Diagnosis priority is creators first (documented), retention second \u2014 the diagnosis text must not claim creator-only when retention also fired.",
@@ -103,7 +103,7 @@
     "id": "c5",
     "description": "Turn-by-turn Step 1: 'current state' phrasing maps to weather, 'what about WhatsApp?' inherits the weather intent with a new app, 'creators by country' is a breakdown, and a why question is a decomposition, not a cause.",
     "checks": {
-      "weather_dau": 4543.71,
+      "weather_dau": 45249.0,
       "weather_dau_tolerance": 10.0
     },
     "turns": [

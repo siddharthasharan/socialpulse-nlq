@@ -1,0 +1,19 @@
+nohup: ignoring input
+SocialPulse NLQ UI at http://localhost:8000  (data: /workspaces/socialpulse-nlq/data/phase1)
+Traceback (most recent call last):
+  File "/workspaces/socialpulse-nlq/scripts/app.py", line 154, in <module>
+    main()
+    ~~~~^^
+  File "/workspaces/socialpulse-nlq/scripts/app.py", line 150, in main
+    ThreadingHTTPServer(("0.0.0.0", args.port), Handler).serve_forever()
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/python/3.14.2/lib/python3.14/socketserver.py", line 457, in __init__
+    self.server_bind()
+    ~~~~~~~~~~~~~~~~^^
+  File "/usr/local/python/3.14.2/lib/python3.14/http/server.py", line 148, in server_bind
+    socketserver.TCPServer.server_bind(self)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^
+  File "/usr/local/python/3.14.2/lib/python3.14/socketserver.py", line 478, in server_bind
+    self.socket.bind(self.server_address)
+    ~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^
+OSError: [Errno 98] Address already in use
