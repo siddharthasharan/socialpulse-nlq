@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portfolio Shell — Analytics &amp; Experiments</title>
+<!--
+  Unified Muse-style shell, slice 1 (2026-11-04).
+
+  WHAT THIS IS: one chat shell over TWO separate, deterministic demos.
+  - Analytics mode  -> SocialPulse NLQ chat backend (this server, /api/chat).
+    Synthetic analytics data, 500K users, seed 42. No live LLM.
+  - Experiments mode -> Experiment Copilot platform backend (a different
+    service, /api/chat, /api/run, /api/run-status). Synthetic experiment
+    data, deterministic decision rules. No live LLM.
+
+  WHAT THIS IS NOT: the two engines do NOT share data, do NOT share a
+  session, and do NOT share history. A conversation is Analytics OR
+  Experiments and stays in that mode. Switching mode starts a NEW
+  conversation. The mode indicator at the top of the chat always says
+  which engine answered. Nothing on this page may claim otherwise.
+
+  EXTENSION POINT — ANALYTICS DATASETS (code/docs only, slice 1):
+  SHELL_DATASETS below lists the Analytics datasets this shell can talk
+  to. It intentionally has exactly one entry ("social") in this slice.
+  A later slice adds a dataset by (1) adding its id here, (2) teaching
+  the SocialPulse chat backend a per-dataset data dir / session, and
+  (3) adding a dataset picker that sends the chosen dataset with each
+  /api/chat call. Do NOT add a working dataset switch before step (2)
+  exists: a picker that changes the label without changing the data
+  would be a dishonest control. Domain datasets (Marketplace, Pharma,
+  AI Labs) are a separate queued idea, and their rows must NOT be the
+  Copilot experiment rows — see docs/shell.md.
+-->
+<style>
+  :root{--purple:#6d28d9;--purple-light:#ede9fe;--ink:#1f2937;--muted:#6b7280;
+    --line:#e5e7eb;--bg:#f9fafb;--white:#fff}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+  #shell{display:flex;height:100vh}
+  aside{width:280px;flex-shrink:0;background:var(--white);border-right:1px solid var(--line);
+    display:flex;flex-direction:column;padding:16px;gap:12px;overflow:auto}
+  aside h1{font-size:18px;margin:0}
+  aside .sub{font-size:12px;color:var(--muted);line-height:1.5}
+  .newbtn{width:100%;text-align:left;background:var(--purple-light);border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px;cursor:pointer;font-size:14px}
+  .newbtn:hover{border-color:var(--purple)}
+  .chatlist{display:flex;flex-direction:column;gap:6px}
+  .chatitem{text-align:left;background:var(--white);border:1px solid var(--line);border-radius:10px;
+    padding:8px 10px;cursor:pointer}
+  .chatitem.active{border-color:var(--purple);background:var(--purple-light)}
+  .chatitem .t{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chatitem .m{font-size:11px;color:var(--muted)}
+  .badge{display:inline-block;font-size:11px;font-weight:600;border-radius:999px;padding:2px 8px;
+    background:var(--purple-light);color:var(--purple)}
+  .badge.exp{background:#fef3c7;color:#92400e}
+  main{flex:1;display:flex;flex-direction:column;min-width:0}
+  #modebar{padding:12px 20px;border-bottom:1px solid var(--line);background:var(--white);
+    display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  #modebar .engine{font-weight:700}
+  #modebar .note{font-size:12px;color:var(--muted)}
+  #modebar button{margin-left:auto}
+  #layout{flex:1;display:flex;min-height:0}
+  #chatcol{flex:1;display:flex;flex-direction:column;min-width:0}
+  #transcript{flex:1;overflow:auto;padding:20px;display:flex;flex-direction:column;gap:12px}
+  .bubble{max-width:760px;padding:12px 14px;border-radius:14px;line-height:1.55;white-space:pre-wrap;
+    font-size:15px}
+  .bubble.user{align-self:flex-end;background:var(--purple);color:#fff}
+  .bubble.assistant{align-self:flex-start;background:var(--white);border:1px solid var(--line)}
+  .bubble.system{align-self:center;background:#fffbeb;border:1px solid #fde68a;font-size:13px;color:#92400e}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{background:var(--white);border:1px solid var(--purple);color:var(--purple);border-radius:999px;
+    padding:6px 12px;cursor:pointer;font-size:13px}
+  .cards{display:flex;flex-wrap:wrap;gap:10px}
+  .card{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:12px;
+    width:280px;cursor:pointer}
+  .card:hover{border-color:var(--purple)}
+  .card h3{margin:0 0 6px;font-size:15px}
+  .card p{margin:4px 0;font-size:13px;color:var(--muted)}
+  .config{background:var(--white);border:1px solid var(--line);border-radius:12px;padding:14px;max-width:760px}
+  .config table{border-collapse:collapse;font-size:13px}
+  .config td{border-bottom:1px solid var(--line);padding:4px 8px;vertical-align:top}
+  .btn{background:var(--purple);color:#fff;border:0;border-radius:999px;padding:8px 14px;cursor:pointer}
+  .btn.secondary{background:var(--white);color:var(--purple);border:1px solid var(--purple)}
+  #composer{border-top:1px solid var(--line);background:var(--white);padding:12px 20px;
+    display:flex;gap:8px;align-items:center}
+  #composer input{flex:1;padding:12px;border:1px solid var(--line);border-radius:999px;font-size:15px}
+  #composer .attach{background:var(--white);border:1px solid var(--line);border-radius:50%;
+    width:40px;height:40px;cursor:pointer;font-size:18px}
+  #artifact{width:360px;flex-shrink:0;border-left:1px solid var(--line);background:var(--white);
+    padding:16px;overflow:auto}
+  #artifact h2{font-size:16px;margin-top:0}
+  #artifact pre{white-space:pre-wrap;word-break:break-word;background:var(--bg);padding:10px;
+    border-radius:8px;font-size:12px}
+  #artifact table{border-collapse:collapse;font-size:13px;width:100%}
+  #artifact td,#artifact th{border-bottom:1px solid var(--line);padding:4px;text-align:left}
+  .verdict{font-weight:800;font-size:18px}
+  footer{font-size:12px;color:var(--muted);padding:8px 20px;border-top:1px solid var(--line);background:var(--white)}
+  @media (max-width:900px){aside{display:none}#artifact{display:none}}
+</style>
+</head>
+<body>
+<div id="shell">
+  <aside>
+    <h1>Portfolio Shell</h1>
+    <p class="sub">Two separate deterministic demos in one chat shell.
+      Analytics and Experiments do <b>not</b> share data or sessions.
+      No live LLM anywhere on this page.</p>
+    <button class="newbtn" id="newAnalytics">＋ New Analytics chat</button>
+    <button class="newbtn" id="newExperiments">＋ New Experiments chat</button>
+    <p class="sub">Dataset (Analytics only, slice 1): <b>Social</b> — the only
+      dataset wired up. See docs/shell.md for the extension point.</p>
+    <div><b>Chats</b></div>
+    <div class="chatlist" id="chatlist"></div>
+    <p class="sub"><a href="/">Back to the SocialPulse dashboard</a> ·
+      <a href="https://experiment-copilot-platform.onrender.com" target="_blank" rel="noopener">Open Experiment Copilot standalone</a></p>
+  </aside>
+  <main>
+    <div id="modebar">
+      <span class="badge" id="modeBadge">Analytics</span>
+      <span class="engine" id="modeEngine">SocialPulse Analytics</span>
+      <span class="note" id="modeNote"></span>
+      <button class="btn secondary" id="switchMode">New chat in the other mode</button>
+    </div>
+    <div id="layout">
+      <div id="chatcol">
+        <div id="transcript"></div>
+        <div id="composer">
+          <button class="attach" id="attachBtn" title="Attachments are not handled in this slice">＋</button>
+          <input id="msgInput" placeholder="Ask a question…" autocomplete="off">
+          <button class="btn" id="sendBtn">Send</button>
+        </div>
+      </div>
+      <div id="artifact">
+        <h2 id="artifactTitle">Artifact</h2>
+        <div id="artifactBody"><p class="sub">No artifact yet. Analytics turns that run a
+          query show their working here; experiment runs show their scorecard here.</p></div>
+      </div>
+    </div>
+    <footer>Honesty note: both engines are deterministic. The shell routes your
+      message to one engine or the other; it never computes a lift, a metric, or a
+      verdict itself, and it never mixes the two demos' data.</footer>
+  </main>
+</div>
+<script>
+"use strict";
+// ---- Extension point (docs only in slice 1): one Analytics dataset. ----
+const SHELL_DATASETS = ["social"]; // future datasets plug in via docs/shell.md
+const LS_KEY = "portfolio-shell-conversations-v1";
+const RENDER_COPILOT = "https://experiment-copilot-platform.onrender.com";
+let copilotBase = null; // resolved at startup from /api/shell-config or location
+let conversations = [];
+let activeId = null;
+let runPoll = null;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+const uid = () => Math.random().toString(36).slice(2, 10);
+const MODE_INFO = {
+  analytics: { badge: "Analytics", engine: "SocialPulse Analytics",
+    note: "Deterministic planner + chat over synthetic SocialPulse data (500K users, seed 42). No live LLM, no API key, no external call." },
+  experiments: { badge: "Experiments", engine: "Experiment Copilot",
+    note: "Deterministic experiment engine over separate synthetic experiment data. No live LLM. This data is NOT shared with Analytics." },
+};
+
+function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(conversations)); } catch (e) {} }
+function load() {
+  try { conversations = JSON.parse(localStorage.getItem(LS_KEY) || "[]"); } catch (e) { conversations = []; }
+  if (!Array.isArray(conversations)) conversations = [];
+}
+function active() { return conversations.find((c) => c.id === activeId) || null; }
+function titleOf(c) {
+  const first = (c.messages || []).find((m) => m.role === "user");
+  return first ? first.text.slice(0, 48) : (c.mode === "analytics" ? "New Analytics chat" : "New Experiments chat");
+}
+
+function renderList() {
+  const list = $("chatlist"); list.innerHTML = "";
+  [...conversations].reverse().forEach((c) => {
+    const b = document.createElement("button");
+    b.className = "chatitem" + (c.id === activeId ? " active" : "");
+    b.innerHTML = `<div class="t">${esc(titleOf(c))}</div><div class="m">${c.mode === "analytics" ? "Analytics" : "Experiments"}</div>`;
+    b.onclick = () => { activeId = c.id; renderAll(); };
+    list.appendChild(b);
+  });
+}
+function setModeBar() {
+  const c = active(); if (!c) return;
+  const info = MODE_INFO[c.mode];
+  $("modeBadge").textContent = info.badge;
+  $("modeBadge").className = "badge" + (c.mode === "experiments" ? " exp" : "");
+  $("modeEngine").textContent = info.engine;
+  $("modeNote").textContent = info.note;
+  $("msgInput").placeholder = c.mode === "analytics"
+    ? "Ask about an app, e.g. What's the weather report for Instagram?"
+    : "Ask about an experiment, pick a card, or describe a custom experiment…";
+}
+function renderWorking(w) {
+  if (!w) return "";
+  let h = "<p><b>Show the working</b></p>";
+  h += `<p class="sub">${esc(w.deterministic_note || "Deterministic working trace: produced by the planner from allowlisted templates and the executed result. No live LLM, no API key, no external call.")}</p>`;
+  if (w.sql) h += `<p>SQL executed:</p><pre>${esc(w.sql)}</pre>`;
+  if (w.raw_sql) h += `<p>Raw SQL (shown, NOT executed — this request was re-routed):</p><pre>${esc(w.raw_sql)}</pre>`;
+  if (w.tables && w.tables.length) h += `<p>Tables: ${esc(w.tables.join(", "))}</p>`;
+  if (w.metric_definition) h += `<p>Metric: ${esc(w.metric_definition.definition || "")} (grain: ${esc(w.metric_definition.grain || "")})</p>`;
+  if (w.routing_explanation) h += `<p>${esc(w.routing_explanation)}</p>`;
+  return h;
+}
+function renderScorecard(sc) {
+  if (!sc) return "";
+  let h = `<p class="verdict">${esc(sc.recommendation || sc.verdict || "")}</p>`;
+  h += `<p><b>${esc(sc.experiment_name || "")}</b><br>Primary: ${esc(sc.primary_metric || "")}`;
+  if (sc.primary_lift_pct != null) h += ` · Lift ${sc.primary_lift_pct.toFixed(2)}% (95% CI [${sc.ci_low_pct.toFixed(2)}%, ${sc.ci_high_pct.toFixed(2)}%], p=${sc.p_value})`;
+  h += ` · Guardrails: ${esc(sc.guardrail_status || "")} · SRM: ${esc(sc.srm_status || "")} · Seed: ${esc(sc.seed)}</p>`;
+  if (sc.kpis && sc.kpis.length) h += "<table>" + sc.kpis.map((k) => `<tr><td>${esc(k.label)}</td><td>${esc(k.value)}</td></tr>`).join("") + "</table>";
+  if (sc.metrics && sc.metrics.length) h += "<p><b>Metrics</b></p><table>" + sc.metrics.map((m) => `<tr><td>${esc(m.name)}</td><td>${m.lift_pct != null ? m.lift_pct.toFixed(2) + "%" : ""}</td><td>${m.p_value != null ? "p=" + m.p_value : ""}</td></tr>`).join("") + "</table>";
+  if (sc.pm) {
+    h += `<p><button class="btn secondary" id="pmToggle">PM view</button></p><div id="pmView" style="display:none">` +
+      [["What happened?", "what"], ["Why does it matter?", "why"], ["Business impact", "impact"],
+       ["Should we launch?", "launch"], ["What should we do next?", "next"]]
+      .map(([label, key]) => sc.pm[key] ? `<p><b>${label}</b><br>${esc(sc.pm[key])}</p>` : "").join("") + "</div>";
+  }
+  if (sc.watchouts && sc.watchouts.length) h += "<p><b>Watch-outs</b></p><ul>" + sc.watchouts.map((w) => `<li>${esc(w)}</li>`).join("") + "</ul>";
+  const pmBtn = () => { const v = $("pmView"); if (v) v.style.display = v.style.display === "none" ? "" : "none"; };
+  setTimeout(() => { const b = $("pmToggle"); if (b) b.onclick = pmBtn; }, 0);
+  return h;
+}
+function renderArtifact() {
+  const c = active(); if (!c) return;
+  const last = [...(c.messages || [])].reverse().find((m) => m.working || m.scorecard);
+  if (!last) {
+    $("artifactTitle").textContent = "Artifact";
+    $("artifactBody").innerHTML = "<p class=\"sub\">No artifact yet. Analytics turns that run a query show their working here; experiment runs show their scorecard here. Weather, diagnosis, recommendation, and brief turns run many queries or none, so they honestly show no single SQL here.</p>";
+    return;
+  }
+  if (last.scorecard) { $("artifactTitle").textContent = "Scorecard — Experiment Copilot"; $("artifactBody").innerHTML = renderScorecard(last.scorecard); }
+  else { $("artifactTitle").textContent = "Working — SocialPulse Analytics"; $("artifactBody").innerHTML = renderWorking(last.working); }
+}
+function renderBlocks(blocks) {
+  const t = $("transcript");
+  (blocks || []).forEach((b) => {
+    if (b.type === "text") {
+      const d = document.createElement("div"); d.className = "bubble assistant"; d.textContent = b.text; t.appendChild(d);
+    } else if (b.type === "chips") {
+      const d = document.createElement("div"); d.className = "chips";
+      b.items.forEach((item) => { const btn = document.createElement("button"); btn.className = "chip"; btn.textContent = item; btn.onclick = () => sendText(item); d.appendChild(btn); });
+      t.appendChild(d);
+    } else if (b.type === "industry_cards") {
+      const d = document.createElement("div"); d.className = "cards";
+      b.industries.forEach((ind) => { const c = document.createElement("div"); c.className = "card";
+        c.innerHTML = `<h3>${esc(ind.title)}</h3><p>${esc(ind.examples)}</p><p>${esc(ind.focus)}</p>`;
+        c.onclick = () => sendCopilotAction("industry", { industry_id: ind.id }, ind.title); d.appendChild(c); });
+      t.appendChild(d);
+    } else if (b.type === "scenario_cards") {
+      const d = document.createElement("div"); d.className = "cards";
+      b.cards.forEach((card) => { const c = document.createElement("div"); c.className = "card";
+        c.innerHTML = `<h3>${esc(card.title)}</h3><p>${esc(card.subtitle)}</p>`;
+        if (card.runnable) c.onclick = () => sendCopilotAction(b.cards.length === 14 ? "example" : "scenario", { scenario_id: card.scenario_id }, card.title);
+        d.appendChild(c); });
+      t.appendChild(d);
+    } else if (b.type === "guided_run") {
+      const d = document.createElement("div"); d.className = "config";
+      const presets = b.presets && b.presets.length ? b.presets : [{ scenario_id: b.scenario_id, label: "Try a sample run" }];
+      d.innerHTML = `<h3>${esc(b.title)}</h3><p>${esc(b.description)}</p><div style="display:flex;flex-wrap:wrap;gap:8px">` +
+        presets.map((p, i) => `<button class="btn secondary" data-p="${i}">${esc(p.label)}</button>`).join("") + "</div>";
+      presets.forEach((p, i) => { d.querySelector(`[data-p="${i}"]`).onclick = () => sendCopilotAction("guided_run", { scenario_id: p.scenario_id }, p.label); });
+      t.appendChild(d);
+    } else if (b.type === "config") {
+      const cfg = b.config; const d = document.createElement("div"); d.className = "config";
+      const rows = [["Experiment", cfg.name], ["Business hypothesis", cfg.hypothesis], ["Treatment", cfg.treatment],
+        ["Control", cfg.control], ["Unit of randomization", cfg.unit], ["Population", cfg.population],
+        ["Baseline period", cfg.baseline], ["Duration", cfg.duration], ["Primary metric", cfg.primary],
+        ["Secondary metrics", (cfg.secondary || []).join(", ")], ["Guardrails", cfg.guardrails],
+        ["Method", cfg.method], ["Seed", cfg.seed]]
+        .map(([k, v]) => `<tr><td>${esc(k)}</td><td>${esc(v)}</td></tr>`).join("");
+      d.innerHTML = `<h3>Recommended design</h3><table>${rows}</table><div style="margin-top:12px;display:flex;gap:8px">` +
+        `<button class="btn" data-a="run">Run Experiment</button>` +
+        `<button class="btn secondary" data-a="modify">Modify Design</button>` +
+        `<button class="btn secondary" data-a="explain">Explain Methodology</button></div>`;
+      d.querySelector('[data-a="run"]').onclick = () => startCopilotRun();
+      d.querySelector('[data-a="modify"]').onclick = () => sendCopilotAction("modify", {}, "Modify Design");
+      d.querySelector('[data-a="explain"]').onclick = () => sendCopilotAction("explain", {}, "Explain Methodology");
+      t.appendChild(d);
+    } else if (b.type === "run_started") {
+      startCopilotRun();
+    } else if (b.type === "scorecard_open" || b.type === "example_scorecard") {
+      // Scorecard itself is rendered in the artifact panel from the API response.
+    }
+  });
+}
+function renderTranscript() {
+  const t = $("transcript"); t.innerHTML = "";
+  const c = active(); if (!c) return;
+  c.messages.forEach((m) => {
+    if (m.role === "user") {
+      const d = document.createElement("div"); d.className = "bubble user"; d.textContent = m.text; t.appendChild(d);
+    } else if (m.role === "system") {
+      const d = document.createElement("div"); d.className = "bubble system"; d.textContent = m.text; t.appendChild(d);
+    } else if (m.blocks) {
+      renderBlocks(m.blocks);
+    } else {
+      const d = document.createElement("div"); d.className = "bubble assistant";
+      d.textContent = (m.engine ? "Assistant [" + m.engine + "]: " : "") + m.text; t.appendChild(d);
+      if (m.options && m.options.length) {
+        const chips = document.createElement("div"); chips.className = "chips";
+        m.options.forEach((o) => { const btn = document.createElement("button"); btn.className = "chip";
+          btn.textContent = o.label || o.topic || o.send; btn.onclick = () => sendText(o.send || o.label); chips.appendChild(btn); });
+        t.appendChild(chips);
+      }
+    }
+  });
+  t.scrollTop = t.scrollHeight;
+}
+function renderAll() { setModeBar(); renderList(); renderTranscript(); renderArtifact(); }
+function pushUser(text) {
+  const c = active(); c.messages.push({ role: "user", text });
+  const d = document.createElement("div"); d.className = "bubble user"; d.textContent = text; $("transcript").appendChild(d);
+  $("transcript").scrollTop = $("transcript").scrollHeight; save(); renderList();
+}
+async function sendText(text) {
+  const c = active(); if (!c || !text) return;
+  pushUser(text);
+  if (c.mode === "analytics") {
+    let res;
+    try { res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: c.serverSessionId || undefined, message: text }) }).then((r) => r.json()); }
+    catch (e) { c.messages.push({ role: "system", text: "Analytics backend did not respond: " + e }); save(); renderTranscript(); return; }
+    c.serverSessionId = res.session_id;
+    c.messages.push({ role: "assistant", engine: "analytics", text: res.text, options: res.options || [], working: res.working || null });
+  } else {
+    await sendCopilotMessage(text);
+    return;
+  }
+  save(); renderAll();
+}
+async function copilotApi(path, body) {
+  const res = await fetch(copilotBase + path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
+  if (!res.ok) throw new Error("Copilot backend returned " + res.status);
+  return res.json();
+}
+async function sendCopilotMessage(text) {
+  const c = active();
+  try {
+    const res = await copilotApi("/api/chat", { session_id: c.serverSessionId || null, message: text });
+    c.serverSessionId = res.session_id;
+    const entry = { role: "assistant", engine: "experiments", blocks: res.blocks || [] };
+    if (res.scorecard) entry.scorecard = res.scorecard;
+    c.messages.push(entry);
+  } catch (e) { c.messages.push({ role: "system", text: "Experiments backend did not respond: " + e + ". Is the Copilot service awake?" }); }
+  save(); renderAll();
+}
+async function sendCopilotAction(action, payload, label) {
+  const c = active(); if (!c) return;
+  if (label) pushUser(label);
+  try {
+    const res = await copilotApi("/api/chat", { session_id: c.serverSessionId || null, action, payload });
+    c.serverSessionId = res.session_id;
+    const entry = { role: "assistant", engine: "experiments", blocks: res.blocks || [] };
+    if (res.scorecard) entry.scorecard = res.scorecard;
+    c.messages.push(entry);
+  } catch (e) { c.messages.push({ role: "system", text: "Experiments backend did not respond: " + e }); }
+  save(); renderAll();
+}
+async function startCopilotRun() {
+  const c = active(); if (!c) return;
+  const prog = document.createElement("div"); prog.className = "bubble assistant";
+  prog.textContent = "Running your experiment using realistic synthetic data…"; $("transcript").appendChild(prog);
+  try {
+    const r = await copilotApi("/api/run", { session_id: c.serverSessionId });
+    if (r.error) throw new Error(r.error);
+    if (runPoll) clearInterval(runPoll);
+    runPoll = setInterval(async () => {
+      const st = await fetch(copilotBase + "/api/run-status?session_id=" + encodeURIComponent(c.serverSessionId)).then((x) => x.json());
+      prog.textContent = "Running… " + (st.stages || []).map((s) => s.stage).join(" · ");
+      if (st.done) {
+        clearInterval(runPoll); runPoll = null;
+        if (st.error) { c.messages.push({ role: "system", text: "The run failed: " + st.error }); }
+        else { const entry = { role: "assistant", engine: "experiments", blocks: st.summary || [] };
+               if (st.scorecard) entry.scorecard = st.scorecard; c.messages.push(entry); }
+        save(); renderAll();
+      }
+    }, 800);
+  } catch (e) { c.messages.push({ role: "system", text: "Couldn't start the run: " + e }); save(); renderAll(); }
+}
+async function newConversation(mode) {
+  const c = { id: uid(), mode, messages: [], serverSessionId: null, createdAt: Date.now() };
+  conversations.push(c); activeId = c.id; save();
+  if (mode === "experiments") {
+    try {
+      const res = await copilotApi("/api/chat", {});
+      c.serverSessionId = res.session_id;
+      c.messages.push({ role: "assistant", engine: "experiments", blocks: res.blocks || [] });
+    } catch (e) { c.messages.push({ role: "system", text: "Experiments backend did not respond: " + e + ". You can still start an Analytics chat, or retry this chat." }); }
+  } else {
+    c.messages.push({ role: "assistant", engine: "analytics",
+      text: "Hi! Ask for a weather report first — for example, \"What's the weather report for Instagram?\" — then pick a topic to drill down." });
+  }
+  save(); renderAll();
+}
+async function resolveCopilotBase() {
+  const q = new URLSearchParams(location.search).get("copilot");
+  if (q) { copilotBase = q.replace(/\/$/, ""); return; }
+  try {
+    const cfg = await fetch("/api/shell-config").then((r) => r.json());
+    if (cfg.copilot_base) { copilotBase = cfg.copilot_base.replace(/\/$/, ""); return; }
+  } catch (e) {}
+  copilotBase = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+    ? "http://localhost:8001" : RENDER_COPILOT;
+}
+$("sendBtn").onclick = () => { const v = $("msgInput").value.trim(); $("msgInput").value = ""; sendText(v); };
+$("msgInput").addEventListener("keydown", (e) => { if (e.key === "Enter") $("sendBtn").click(); });
+$("attachBtn").onclick = () => { const c = active(); if (!c) return;
+  c.messages.push({ role: "system", text: "Attachments are visual only in this slice — no file is uploaded or handled." }); save(); renderTranscript(); };
+$("newAnalytics").onclick = () => newConversation("analytics");
+$("newExperiments").onclick = () => newConversation("experiments");
+$("switchMode").onclick = () => { const c = active(); newConversation(c && c.mode === "analytics" ? "experiments" : "analytics"); };
+(async () => {
+  await resolveCopilotBase();
+  load();
+  if (!conversations.length) { await newConversation("analytics"); }
+  else { activeId = conversations[conversations.length - 1].id; renderAll(); }
+})();
+</script>
+</body>
+</html>

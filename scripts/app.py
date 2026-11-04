@@ -62,6 +62,22 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
             self.wfile.write(html)
+        elif self.path in ("/shell", "/shell.html"):
+            # Unified Muse-style shell (slice 1): a NEW page only. The
+            # existing "/" dashboard + docked chat routes are untouched,
+            # so the live demo keeps working while the shell is tested.
+            html = (ROOT / "app/shell.html").read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(html)))
+            self.end_headers()
+            self.wfile.write(html)
+        elif self.path == "/api/shell-config":
+            # Copilot backend origin for the shell. Env override (used in
+            # deployment) wins; empty means the shell falls back to its
+            # location heuristic (localhost -> :8001, else Render URL).
+            import os
+            self._send_json({"copilot_base": os.environ.get("COPILOT_BASE_URL", "")})
         elif self.path == "/api/gallery":
             self._send_json({"scenarios": GALLERY_SCENARIOS})
         elif self.path == "/api/metrics":
