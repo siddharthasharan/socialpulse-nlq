@@ -17,12 +17,26 @@ sys.path.insert(0, str(ROOT / "src"))
 from urllib.parse import parse_qs, urlparse
 
 from socialpulse_nlq.planner import plan, run_plan, build_trace, metric_definition, token_meter, GALLERY_SCENARIOS
+from socialpulse_nlq.sqlviz import build_visualization
 from socialpulse_nlq.weather import compute_weather
 from socialpulse_nlq.chat import ChatSession
 from socialpulse_nlq.questions import load_all_questions, save_questions
 import uuid
 
 CHAT_SESSIONS = {}
+
+# Phase 0: health payload is static process state, NOT a data check.
+# /api/health answers from this dict alone and never opens DuckDB, so it
+# stays fast even while the 500K data is still cold. It is a liveness
+# check ("is the server up?"), not a data-integrity check ("is the data
+# right?") — that is what the validation suite is for.
+HEALTH_PAYLOAD = {
+    "status": "ok",
+    "service": "socialpulse-nlq",
+    "users": 500000,
+    "seed": 42,
+    "window": "2026-01-01..2026-03-31",
+}
 
 
 def parse_experiments():
@@ -55,14 +69,20 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):  # noqa: N802
-        if self.path in ("/", "/index.html"):
+        # Phase 0: strip the query string before route matching. Shared
+        # links carry tracking parameters (/?v=..., /shell?utm_source=...)
+        # and the old exact-match on self.path returned "not found" for
+        # all of them. The original path is kept for /api/weather below,
+        # which reads its own query. Unknown paths still 404.
+        path = urlparse(self.path).path
+        if path in ("/", "/index.html"):
             html = (ROOT / "app/index.html").read_bytes()
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
             self.wfile.write(html)
-        elif self.path in ("/shell", "/shell.html"):
+        elif path in ("/shell", "/shell.html"):
             # Unified Muse-style shell (slice 1): a NEW page only. The
             # existing "/" dashboard + docked chat routes are untouched,
             # so the live demo keeps working while the shell is tested.
@@ -72,26 +92,32 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
             self.wfile.write(html)
-        elif self.path == "/api/shell-config":
+        elif path == "/api/health":
+            # Liveness only: static payload, no DuckDB, no data dir.
+            self._send_json(HEALTH_PAYLOAD)
+        elif path == "/api/shell-config":
             # Copilot backend origin for the shell. Env override (used in
             # deployment) wins; empty means the shell falls back to its
             # location heuristic (localhost -> :8001, else Render URL).
             import os
             self._send_json({"copilot_base": os.environ.get("COPILOT_BASE_URL", "")})
-        elif self.path == "/api/gallery":
+        elif path == "/api/gallery":
             self._send_json({"scenarios": GALLERY_SCENARIOS})
-        elif self.path == "/api/metrics":
+        elif path == "/api/metrics":
             text = (ROOT / "catalog/measures.yaml").read_text()
             ids = re.findall(r"-\s*id:\s*(\S+)", text)
             self._send_json({"metrics": ids})
-        elif self.path == "/api/experiments":
+        elif path == "/api/experiments":
             self._send_json({"experiments": parse_experiments()})
-        elif self.path == "/api/questions":
+        elif path == "/api/questions":
             # Both-in-one editor read: flow (chat/questions.json) +
             # single-shot evals + conversation evals, from their files.
             self._send_json(load_all_questions(ROOT))
-        elif self.path == "/api/weather" or self.path.startswith("/api/weather?"):
+        elif path == "/api/weather":
             try:
+                # Query is read from the ORIGINAL path (parse_qs above
+                # the stripped path), so /api/weather?app=instagram
+                # still works exactly as before the routing fix.
                 app = parse_qs(urlparse(self.path).query).get("app", [None])[0]
                 self._send_json(compute_weather(self.data_dir, app=app))
             except Exception as e:
@@ -152,8 +178,14 @@ class Handler(BaseHTTPRequestHandler):
             trace = trace + [{"step": 6, "title": "Token meter (estimated)",
                               "text": meter["note"] + " " + meter["method"]}]
         definition = metric_definition(p["metric"]) if p.get("metric") else None
+        # Visualization uses only the SQL that actually ran. For a
+        # routed plan that is the aggregate SQL; the raw SQL stays
+        # labelled NOT executed and is never diagrammed or charted.
+        visualization = (build_visualization(p["sql"], cols, rows)
+                         if p["type"] == "query" and p.get("sql") else None)
         working = {
             "sql": p.get("sql"), "raw_sql": p.get("raw_sql"),
+            "visualization": visualization,
             "tables": p.get("tables", []), "raw_tables": p.get("raw_tables", []),
             "grain": p.get("grain", ""),
             "metric_definition": ({"definition": definition[0], "grain": definition[1],

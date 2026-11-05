@@ -195,6 +195,65 @@ function setModeBar() {
     ? "Ask about an app, e.g. What's the weather report for Instagram?"
     : "Ask about an experiment, pick a card, or describe a custom experiment…";
 }
+function fmtNum(v) {
+  if (typeof v !== "number") return esc(v);
+  if (Number.isInteger(v)) return v.toLocaleString();
+  return v.toFixed(4).replace(/0+$/, "").replace(/\.$/, "");
+}
+function renderChart(v) {
+  const ch = v.chart; if (!ch) return "";
+  const W = 320, H = 170, PAD = 8;
+  if (ch.kind === "bar") {
+    const max = Math.max(...ch.points.map((p) => p.y), 0) || 1;
+    const rh = Math.max(14, Math.min(26, (H - 10) / ch.points.length));
+    const rows = ch.points.map((p, i) => {
+      const w = Math.max(2, (p.y / max) * (W - 130));
+      return `<text x="0" y="${i * rh + 14}" font-size="11">${esc(String(p.x).slice(0, 14))}</text>` +
+        `<rect x="118" y="${i * rh + 3}" width="${w}" height="${rh - 5}" fill="#6d28d9"/>` +
+        `<text x="${118 + w + 4}" y="${i * rh + 14}" font-size="11">${fmtNum(p.y)}</text>`;
+    }).join("");
+    return `<svg viewBox="0 0 ${W} ${ch.points.length * rh + 6}" width="100%" xmlns="http://www.w3.org/2000/svg">${rows}</svg>` +
+      `<p class="sub">Bar chart: ${esc(ch.x_label)} → ${esc(ch.y_label)}. Same data as the table below.</p>`;
+  }
+  const ys = ch.points.map((p) => p.y);
+  const min = Math.min(...ys), max = Math.max(...ys);
+  const span = (max - min) || 1;
+  const xs = ch.points.map((p, i) => PAD + (ch.points.length === 1 ? W / 2 : (i / (ch.points.length - 1)) * (W - 2 * PAD)));
+  const yv = ch.points.map((p) => PAD + (1 - (p.y - min) / span) * (H - 2 * PAD - 14));
+  const pts = xs.map((x, i) => `${x.toFixed(1)},${yv[i].toFixed(1)}`).join(" ");
+  const dots = xs.map((x, i) => `<circle cx="${x.toFixed(1)}" cy="${yv[i].toFixed(1)}" r="3" fill="#6d28d9"/>`).join("");
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">` +
+    `<polyline points="${pts}" fill="none" stroke="#6d28d9" stroke-width="2"/>${dots}` +
+    `<text x="${PAD}" y="${H - 2}" font-size="11">${esc(String(ch.points[0].x))} → ${esc(String(ch.points[ch.points.length - 1].x))} · ${fmtNum(min)} to ${fmtNum(max)}</text></svg>` +
+    `<p class="sub">Line chart: ${esc(ch.x_label)} → ${esc(ch.y_label)}. Same data as the table below.</p>`;
+}
+function renderDiagram(diag) {
+  const titles = { sources: "Source tables", joins: "Joins", filters: "Filters",
+    grouping: "Grouping", aggregation: "Aggregation", output: "Output" };
+  let h = "<p><b>How the SQL works</b> (diagram built from the SQL text, not guessed):</p>";
+  diag.stages.forEach((st, i) => {
+    if (i > 0) h += `<p style="text-align:center;margin:2px 0">↓</p>`;
+    h += `<div style="border:1px solid #6d28d9;border-radius:8px;padding:8px;margin:2px 0">` +
+      `<b>${esc(titles[st.stage] || st.stage)}</b><br>` +
+      st.items.map((it) => esc(it)).join("<br>") + "</div>";
+  });
+  if (diag.subquery) h += `<p class="sub">Note: the outer query aggregates over a subquery result; the stages above are the inner query's, followed by the outer aggregation.</p>`;
+  return h;
+}
+function renderVisualization(v) {
+  if (!v || !v.available) return "";
+  let h = "<p><b>Result visualized</b></p>";
+  if (v.chart) h += renderChart(v);
+  else if (v.chart_note) h += `<p class="sub">${esc(v.chart_note)}</p>`;
+  if (v.columns && v.columns.length) {
+    h += "<table><tr>" + v.columns.map((c) => `<th>${esc(c)}</th>`).join("") + "</tr>" +
+      v.rows.map((r) => "<tr>" + v.columns.map((_, i) => `<td>${fmtNum(r[i])}</td>`).join("") + "</tr>").join("") + "</table>";
+    h += `<p class="sub">${v.capped ? `Showing first ${v.rows.length} of ${v.row_count} rows.` : `${v.row_count} row(s).`}</p>`;
+  }
+  if (v.diagram) h += renderDiagram(v.diagram);
+  else if (v.diagram_unavailable_reason) h += `<p class="sub">No diagram for this query shape: ${esc(v.diagram_unavailable_reason)}. The SQL above is still the executed query, and the table above is its result.</p>`;
+  return h;
+}
 function renderWorking(w) {
   if (!w) return "";
   let h = "<p><b>Show the working</b></p>";
@@ -204,6 +263,7 @@ function renderWorking(w) {
   if (w.tables && w.tables.length) h += `<p>Tables: ${esc(w.tables.join(", "))}</p>`;
   if (w.metric_definition) h += `<p>Metric: ${esc(w.metric_definition.definition || "")} (grain: ${esc(w.metric_definition.grain || "")})</p>`;
   if (w.routing_explanation) h += `<p>${esc(w.routing_explanation)}</p>`;
+  if (w.visualization) h += renderVisualization(w.visualization);
   return h;
 }
 function renderScorecard(sc) {

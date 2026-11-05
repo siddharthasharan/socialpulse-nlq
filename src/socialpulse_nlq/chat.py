@@ -6,6 +6,10 @@ the data the project already computes:
     weather (scoped) -> drill-down (a/b/c) -> diagnosis
     -> experiment hypothesis -> PM/Eng brief
 
+Plus standalone metric turns that need no weather context: MAU
+(app-scoped, March 2026), which answers as the first turn in a
+new chat and does not set the weather state.
+
 Why a state machine, not an LLM chat: every turn must stay grounded in
 the same DuckDB tables, the same weather thresholds, and the same
 receipts as Phase 2. An LLM would be free to invent a lift, a cause, or
@@ -43,6 +47,7 @@ import re
 from pathlib import Path
 
 from .questions import load_flow
+from .sqlviz import build_visualization
 from .weather import compute_weather
 
 APPS = ["instagram", "whatsapp", "facebook"]
@@ -250,10 +255,13 @@ class ChatSession:
             "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
             f"WHERE 1=1{app_filter} GROUP BY month ORDER BY month")
         rows = con.execute(_sql).fetchall()
-        self.last_working = {"sql": _sql, "tables": ["fact_content_creation", "dim_content"],
-                             "row_count": len(rows)}
         # DATE_TRUNC returns a timestamp; monthly labels are YYYY-MM only.
-        return [{"month": str(r[0])[:7], "posts": r[1], "creators": r[2]} for r in rows]
+        monthly = [{"month": str(r[0])[:7], "posts": r[1], "creators": r[2]} for r in rows]
+        self.last_working = {"sql": _sql, "tables": ["fact_content_creation", "dim_content"],
+                             "row_count": len(rows),
+                             "result_columns": ["month", "posts", "creators"],
+                             "result_rows": [[m["month"], m["posts"], m["creators"]] for m in monthly]}
+        return monthly
 
     def _user_filter_sql(self, alias, filters):
         """Allowlisted user filters only (country/platform/acquisition).
@@ -285,9 +293,12 @@ class ChatSession:
             f"WHERE CAST(s.start_time AS DATE) BETWEEN DATE '{start}' AND DATE '{end}'{app_filter}{extra} "
             "GROUP BY d ORDER BY d")
         rows = con.execute(_sql).fetchall()
+        series = [{"date": str(r[0]), "dau": r[1]} for r in rows]
         self.last_working = {"sql": _sql, "tables": ["fact_sessions", "dim_users"],
-                             "row_count": len(rows)}
-        return [{"date": str(r[0]), "dau": r[1]} for r in rows]
+                             "row_count": len(rows),
+                             "result_columns": ["date", "dau"],
+                             "result_rows": [[s["date"], s["dau"]] for s in series]}
+        return series
 
     def _daily_series_for_topic(self, topic, filters=None):
         """Daily series for a drill-down topic, or None if Phase 3 has
@@ -368,6 +379,54 @@ class ChatSession:
                             "topic": item.get("topic"), "send": item.get("send", item.get("topic"))})
         self.options = out
         return self.options
+
+    def _mau_turn(self, app):
+        """Standalone MAU turn (2026-11-04): a single metric, so it
+        needs no weather report first — unlike drill-down, diagnosis,
+        recommendation, and brief, which all read the weather cards.
+        The number comes from the planner's app-scoped mau_march
+        template, so the SQL, tables, and metric definition in the
+        working payload are the same receipts the single-shot ask UI
+        shows. The working payload carries one scalar row, so the
+        visualization builder honestly renders table-only (no chart
+        for a single number) and a diagram of the actual query:
+        sources -> filters -> aggregation -> output, with no joins
+        or grouping stages invented for a query that has none.
+        """
+        from .planner import metric_definition, plan, run_plan
+        self.app = app
+        self.stage = "mau"
+        self.topic = None
+        p = plan(f"MAU for {app}")
+        if p["type"] != "query" or not p.get("sql"):
+            return self._clarify("I could not build the MAU query for "
+                                 f"{app}. Try \"What's the MAU for Instagram?\"")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        value = rows[0][0] if rows else 0
+        definition = metric_definition("mau_march")
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": cols, "result_rows": rows,
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        self._set_options([
+            {"label": f"Weather — what's happening with {app}?",
+             "send": f"What's happening with {app}?"},
+            {"label": f"MAU for {others[0]}",
+             "send": f"What's the MAU for {others[0]}?"},
+            {"label": f"MAU for {others[1]}",
+             "send": f"What's the MAU for {others[1]}?"},
+        ])
+        text = (f"Monthly active users (MAU) for {app} in March 2026: "
+                f"{value:,} users.\n\n"
+                "That is distinct users with at least one session on "
+                f"{app} in March 2026, app-scoped, not all-apps. "
+                "March is the only month MAU is defined for in this "
+                "data (the Jan-Mar 2026 window), and the exact SQL is "
+                "in the working panel.")
+        return self._reply("mau", text, mau={"app": app, "value": value})
 
     def _weather_turn(self, app):
         self.app = app
@@ -673,11 +732,16 @@ class ChatSession:
             rows = [{"label": r[0], "count": r[1], "extra": f"{r[2]:,} creators"} for r in rows]
         if not rows:
             return None
-        if _sql:
-            self.last_working = {"sql": _sql, "tables": _tables, "row_count": len(rows)}
         total = sum(r["count"] for r in rows) or 1
         for r in rows:
             r["share"] = r["count"] / total
+        if _sql:
+            cols = ["label", "count", "extra", "share"] if any(r.get("extra") for r in rows) else ["label", "count", "share"]
+            self.last_working = {"sql": _sql, "tables": _tables, "row_count": len(rows),
+                                 "result_columns": cols,
+                                 "result_rows": [[r["label"], r["count"]] +
+                                                 ([r.get("extra")] if "extra" in cols else []) +
+                                                 [r["share"]] for r in rows]}
         return rows
 
     def _breakdown_turn(self, topic, dimension):
@@ -1039,7 +1103,20 @@ class ChatSession:
                "text": text, "options": self.options}
         out.update(extra)
         if getattr(self, "last_working", None):
-            out["working"] = self.last_working
+            working = dict(self.last_working)
+            # Attach the visualization for this single executed SQL:
+            # chart + table from its result rows, diagram from its
+            # text. Turns with no single SQL set nothing here, so
+            # they honestly get no visualization, as before.
+            if working.get("sql") and working.get("result_rows") is not None:
+                working["visualization"] = build_visualization(
+                    working["sql"], working.get("result_columns", []),
+                    working.get("result_rows", []))
+            # The visualization payload is the public contract; the
+            # raw result fields that built it stay internal.
+            working.pop("result_columns", None)
+            working.pop("result_rows", None)
+            out["working"] = working
             self.last_working = None
         self.history.append({"user": None, "assistant": out})
         return out
@@ -1053,7 +1130,7 @@ class ChatSession:
         # send text is what is actually sent, so a letter after a
         # drill-down advances to diagnosis/recommendation/brief instead
         # of re-opening the same drill-down.
-        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and self.weather:
+        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage == "mau"):
             idx = ord(q) - ord("a") if q.isalpha() else int(q) - 1
             if 0 <= idx < len(self.options):
                 send = self.options[idx].get("send") or self.options[idx].get("topic")
@@ -1078,6 +1155,11 @@ class ChatSession:
                 break
         stripped_clean = stripped.rstrip("?!.").strip()
         if stripped_clean in APPS:
+            if self.stage == "mau":
+                # MAU follow-up ("what about WhatsApp?" after a MAU
+                # turn, or a bare app name) keeps the MAU intent and
+                # swaps the app, instead of opening a weather report.
+                return self._mau_turn(stripped_clean)
             if q.startswith("same for") and self.topic and self.weather:
                 # Same drill-down, different app: weather the new app
                 # first (so its numbers are the receipt), then re-run
@@ -1094,6 +1176,27 @@ class ChatSession:
                 return self._drilldown_turn(stripped_clean)
             return self._clarify("Ask for a weather report first — for example, "
                                  "\"What's happening with Instagram?\" — then pick a topic.")
+        # MAU intent (2026-11-04): a standalone metric turn. The
+        # keyword is "mau", so the probe's typo ("teh") does not
+        # matter, and no weather report is required first. Placed
+        # before breakdown/ranking/why/weather so a MAU question is
+        # never swallowed by them. Stickiness questions ("dau/mau")
+        # are not MAU questions and fall through to clarification,
+        # as before; MAU has no country/surface breakdown.
+        if ("mau" in q or "monthly active" in q) and "stickiness" not in q \
+                and "dau/mau" not in q and "dau / mau" not in q:
+            if " by country" in q or " by surface" in q:
+                return self._clarify("MAU is only defined per app, not broken down by country or surface — "
+                                     "ask \"What's the MAU for Instagram?\"")
+            app = app_found or self.app
+            if app:
+                return self._mau_turn(app)
+            self._set_options([
+                {"label": a, "send": f"What's the MAU for {a}?", "topic": None} for a in APPS
+            ])
+            return self._reply("clarification",
+                               "Which app's MAU? Reply instagram, whatsapp, or facebook — "
+                               "for example, \"What's the MAU for Instagram?\"")
         # Breakdown: "creators by country", "creators by surface".
         # This is the country/surface decomposition the user chose
         # first (2026-10-29), ahead of creator cohorts.
@@ -1210,5 +1313,6 @@ class ChatSession:
                 return self._clarify("Pick a drill-down from the last message (a/b/c/d), or name a topic: "
                                      "creators, retention, growth, messaging, or engagement.")
         return self._clarify("I could not map that to a chat turn. Try: \"What is the current state of Instagram?\", "
-                             "\"What about WhatsApp?\", \"creators by country\", or \"what's driving the creator drop?\" — "
+                             "\"What about WhatsApp?\", \"creators by country\", \"what's driving the creator drop?\", or "
+                             "\"What's the MAU for Instagram?\" — "
                              "then pick a drill-down, ask for a diagnosis, an experiment recommendation, or the PM/Eng brief.")

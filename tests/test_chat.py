@@ -302,3 +302,65 @@ if __name__ == "__main__":
             fn()
             print(f"PASS {name}")
     print("all chat tests pass")
+
+
+def test_mau_turn_standalone_no_weather():
+    # 2026-11-04: MAU is a standalone metric turn — it answers as the
+    # first turn in a new chat, with no weather report required, and
+    # the 500K seed-42 gold is Instagram March MAU 210,809.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What's the MAU for Instagram?")
+    assert r["type"] == "mau" and r["app"] == "instagram"
+    assert "210,809" in r["text"]
+    w = r["working"]
+    assert "app = 'instagram'" in w["sql"] and w["tables"] == ["fact_sessions"]
+    assert w["metric_definition"]["definition"].startswith("Distinct users")
+    viz = w["visualization"]
+    assert viz["available"] is True and viz["chart"] is None  # single scalar: table only
+    assert [st["stage"] for st in viz["diagram"]["stages"]] == [
+        "sources", "filters", "aggregation", "output"]  # no invented joins/grouping
+
+
+def test_mau_typo_probe():
+    # Literal 2026-11-04 shell probe: the typo must not matter, since
+    # mapping is on the "mau" keyword, not perfect spelling.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What's teh MAU for Instagram?")
+    assert r["type"] == "mau" and r["app"] == "instagram"
+    assert "210,809" in r["text"]
+
+
+def test_mau_no_app_clarifies_which_app():
+    # No app mentioned and no app in context: clarify, never silently
+    # answer all-apps MAU for a question that likely expects one app.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What's the MAU?")
+    assert r["type"] == "clarification"
+    assert "instagram" in r["text"] and "whatsapp" in r["text"]
+
+
+def test_mau_followup_what_about_swaps_app():
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the MAU for Instagram?")
+    r = s.respond("what about whatsapp?")
+    assert r["type"] == "mau" and r["app"] == "whatsapp"
+    assert "140,378" in r["text"]
+
+
+def test_mau_option_letter_advances():
+    # Option letters work after a MAU turn (stage == "mau" satisfies
+    # the letter gate): "a" is the weather option for the same app.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the MAU for Instagram?")
+    r = s.respond("a")
+    assert r["type"] == "weather" and r["app"] == "instagram"

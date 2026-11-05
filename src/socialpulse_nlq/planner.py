@@ -446,16 +446,28 @@ def build_sql(metric: str, f: dict, breakdown, q: str):
     if metric == "mau_march":
         tables = ["fact_sessions"]
         grain = "user x month"
+        # App scope (2026-11-04): MAU is sessions on that app, so the
+        # filter is fact_sessions.app directly, the same column the
+        # aggregate-routing branch filters on. Without an app the
+        # query is unchanged and answers all-apps MAU.
+        app_where = f" AND app = '{f['app']}'" if "app" in f else ""
         return ("SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions "
-                "WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"), tables, grain
+                f"WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'{app_where}"), tables, grain
 
     if metric == "dau_mau_stickiness":
         tables = ["fact_sessions"]
         grain = "month"
+        # App scope (2026-11-04): stickiness is a ratio for ONE
+        # population, so the app filter applies to BOTH the numerator
+        # (mean March DAU) and the denominator (March MAU). Scoping
+        # only the denominator would mix all-app DAU with app MAU and
+        # could push the ratio above 1. Without an app the SQL is
+        # byte-identical to before, so the all-apps gold is unchanged.
+        app_where = f" AND app = '{f['app']}'" if "app" in f else ""
         return ("SELECT AVG(dau) / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions "
-                "WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'), 0) AS value FROM "
+                f"WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'{app_where}), 0) AS value FROM "
                 "(SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions "
-                "WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' GROUP BY d)"), tables, grain
+                f"WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'{app_where} GROUP BY d)"), tables, grain
 
     if metric == "new_users_in_window":
         tables = ["dim_users"]

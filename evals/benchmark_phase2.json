@@ -266,43 +266,40 @@
     "question": "How is the product doing?"
   },
   {
-    "id": "b33",
     "category": "weather_report",
-    "question": "Show me the weather report",
-    "expected_type": "weather_report",
-    "expected_metric": null,
     "expected_cards": {
-      "dau": 100627.82142857143,
-      "wau": 327201.5,
       "d7_retention": 0.1960631805671892,
-      "messaging_dau": 43501.32142857143
-    }
+      "dau": 100627.82142857143,
+      "messaging_dau": 43501.32142857143,
+      "wau": 327201.5
+    },
+    "expected_metric": null,
+    "expected_type": "weather_report",
+    "id": "b33",
+    "question": "Show me the weather report"
   },
   {
-    "id": "b34",
     "category": "weather_report",
-    "question": "What is product health?",
-    "expected_type": "weather_report",
-    "expected_metric": null,
     "expected_cards": {
-      "daily_creators": 10338.92857142857,
       "creator_penetration": 0.1030659408353302,
+      "daily_creators": 10338.92857142857,
       "orphan_post_rate": 0.24977855101054033,
       "top1_share": 0.0964383065094456
     },
+    "expected_metric": null,
+    "expected_type": "weather_report",
     "expected_watchouts_contains": [
       "Creator problem",
       "Creator supply softening",
       "Concentration watch"
-    ]
+    ],
+    "id": "b34",
+    "question": "What is product health?"
   },
   {
-    "id": "b35",
     "category": "segments",
-    "question": "What is the DAU trend for Whatsapp over the last 7 days?",
-    "expected_type": "series",
     "expected_metric": "dau_mean_daily",
-    "min_rows": 7,
+    "expected_type": "series",
     "expected_values": [
       28786.0,
       28517.0,
@@ -311,15 +308,15 @@
       32611.0,
       28946.0,
       28489.0
-    ]
+    ],
+    "id": "b35",
+    "min_rows": 7,
+    "question": "What is the DAU trend for Whatsapp over the last 7 days?"
   },
   {
-    "id": "b36",
     "category": "segments",
-    "question": "What was DAU for whatsapp over the last 28 days?",
-    "expected_type": "series",
     "expected_metric": "dau_mean_daily",
-    "min_rows": 28,
+    "expected_type": "series",
     "expected_values": [
       29337.0,
       29146.0,
@@ -349,23 +346,42 @@
       32611.0,
       28946.0,
       28489.0
-    ]
+    ],
+    "id": "b36",
+    "min_rows": 28,
+    "question": "What was DAU for whatsapp over the last 28 days?"
   },
   {
-    "id": "b37",
     "category": "weather_report",
-    "question": "How is Whatsapp doing recently?",
-    "expected_type": "weather_report",
-    "expected_metric": null,
     "expected_cards": {
-      "dau": 30139.071428571428,
       "d7_retention": 0.1948900772430184,
       "daily_creators": 3065.8571428571427,
+      "dau": 30139.071428571428,
       "messaging_dau": 13031.535714285714
     },
+    "expected_metric": null,
+    "expected_type": "weather_report",
     "expected_watchouts_contains": [
       "Retention falling",
       "Creator problem"
-    ]
+    ],
+    "id": "b37",
+    "question": "How is Whatsapp doing recently?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "mau_march",
+    "expected_type": "scalar",
+    "expected_value": 210809.0,
+    "id": "b38",
+    "question": "What is the MAU for Instagram?"
+  },
+  {
+    "category": "simple",
+    "expected_metric": "dau_mau_stickiness",
+    "expected_type": "scalar",
+    "expected_value": 0.2152911999992655,
+    "id": "b39",
+    "question": "What is DAU/MAU stickiness for Instagram?"
   }
 ]

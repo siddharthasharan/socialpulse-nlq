@@ -38,6 +38,14 @@ do not share data, sessions, or history, and neither uses a live LLM.
   exact SQL, tables, metric definition, and the deterministic trace
   labelled "No live LLM, no API key, no external call." Weather,
   diagnosis, recommendation, and brief turns honestly show no single SQL.
+- SQL visualization (slice 1, see `docs/visualization.md`): a
+  single-SQL turn's artifact also shows a chart + table of its result
+  rows (capped at 50, stated when capped) and a deterministic diagram
+  of the SQL itself (tables → joins → filters → grouping/aggregation
+  → output). Shapes the parser does not model (WITH, UNION, scalar
+  subqueries, multi-subquery joins) get an honest note, never a
+  guessed diagram; routed turns diagram only the aggregate SQL that
+  actually ran.
 - Experiment runs show their scorecard in the right panel: verdict, KPIs,
   metrics table, PM view toggle, watch-outs.
 

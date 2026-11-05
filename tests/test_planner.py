@@ -88,3 +88,34 @@ if __name__ == "__main__":
             fn()
             print(f"PASS {name}")
     print("all planner tests pass")
+
+
+def test_mau_app_scoped_sql():
+    # 2026-11-04: mau_march must filter to the app asked about, so an
+    # Instagram question no longer returns all-apps MAU.
+    p = plan("What is the MAU for Instagram?")
+    assert p["type"] == "query" and p["metric"] == "mau_march"
+    assert "app = 'instagram'" in p["sql"]
+    assert "2026-03-01" in p["sql"] and "2026-03-31" in p["sql"]
+
+
+def test_mau_no_app_unchanged_all_apps():
+    # Without an app the query is unchanged: all-apps March MAU.
+    p = plan("What is MAU in March?")
+    assert p["metric"] == "mau_march"
+    assert "app = " not in p["sql"]
+
+
+def test_stickiness_app_scopes_numerator_and_denominator():
+    # Stickiness is a ratio for ONE population: the app filter must
+    # appear in both the DAU numerator and the MAU denominator, or
+    # the ratio would mix all-app DAU with app MAU.
+    p = plan("What is DAU/MAU stickiness for Instagram?")
+    assert p["metric"] == "dau_mau_stickiness"
+    assert p["sql"].count("app = 'instagram'") == 2
+
+
+def test_stickiness_no_app_unchanged():
+    p = plan("What is DAU/MAU stickiness?")
+    assert p["metric"] == "dau_mau_stickiness"
+    assert "app = " not in p["sql"]
