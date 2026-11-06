@@ -281,3 +281,129 @@ def test_v2_families_all_covered():
     assert fam["guardrail_adversarial"] == 8
     assert fam["sql_safety_syntax"] == 6
     assert set(fam) == set(FAMILIES)
+
+
+# --------------------------------------------------------------------------
+# v3 (slice 2b): the 31 hand-designed hard cases (h01-h31) wired in.
+# --------------------------------------------------------------------------
+
+V3_HELDOUT = V2_HELDOUT | {"h02", "h08", "h18", "h21", "h26", "h30"}
+
+
+def test_structural_not_contains():
+    # h12: sessions per DAU in March returns a number 0.03% from the
+    # right one when the planner silently filters to India, so only
+    # "no country filter unless asked" catches it.
+    specs = [{"not_contains": "country = '",
+              "label": "no country filter unless asked"}]
+    assert _structural_checks("SELECT 1 AS value", specs)[0]["pass"] is True
+    assert _structural_checks(
+        "SELECT 1 AS value FROM t WHERE u.country = 'IN'", specs)[0]["pass"] is False
+    assert _structural_checks("", specs)[0]["found"] == 0
+    # Positive and negative specs compose in one list.
+    mixed = [{"contains": "app = 'instagram'"},
+             {"not_contains": "country = '"}]
+    r = _structural_checks("SELECT 1 WHERE app = 'instagram'", mixed)
+    assert [s["pass"] for s in r] == [True, True]
+
+
+def test_oracle_behavioral_expect_value():
+    # The behavioral oracle can now check a premise that IS a value:
+    # the true app-scoped number a hard case rests on (h01-h09), or
+    # "zero April sessions" (h17/h18). No data files needed: an
+    # in-memory DuckDB connection with one fact_sessions row.
+    import tempfile
+
+    import duckdb
+
+    from socialpulse_nlq.eval_harness import run_oracle
+
+    con = duckdb.connect()
+    con.execute("CREATE TABLE fact_sessions(start_time TIMESTAMP)")
+    con.execute("INSERT INTO fact_sessions VALUES ('2026-03-31 10:00:00')")
+    data_dir = Path(tempfile.mkdtemp(prefix="harness_oracle_"))
+    entries = {
+        "h17": {"id": "h17", "kind": "behavioral",
+                "evidence_sql": ("SELECT COUNT(*) FROM fact_sessions WHERE "
+                                 "CAST(start_time AS DATE) >= DATE '2026-04-01'"),
+                "evidence_expect_value": 0},
+        "h01": {"id": "h01", "kind": "behavioral",
+                "evidence_sql": "SELECT 0.20171801455598928 AS value",
+                "evidence_expect_value": 0.20171801455598928},
+        "bad": {"id": "bad", "kind": "behavioral",
+                "evidence_sql": "SELECT 1.0 AS value",
+                "evidence_expect_value": 2.0},
+    }
+    results = {r["id"]: r for r in
+               run_oracle(con, data_dir, [], [], entries)}
+    assert results["h17"]["agree"] is True
+    assert results["h17"]["oracle_value"] == 0
+    assert results["h01"]["agree"] is True
+    assert results["bad"]["agree"] is False
+    assert "1.0 != expected 2.0" in results["bad"]["detail"]
+
+
+def test_v3_split_integrity():
+    manifest = load_manifest(ROOT, version="v3")
+    assert manifest["version"] == "v3"
+    singles, convs, _ = load_cases(ROOT, version="v3")
+    validate_case_set(manifest, singles, convs)
+    ids = [c["id"] for c in manifest["cases"]]
+    assert len(ids) == len(set(ids)) == 150
+    assert len(singles) == 136 and len(convs) == 14
+    dev = cases_for_split(manifest, "dev")
+    held = cases_for_split(manifest, "heldout")
+    assert dev & held == set()
+    assert dev | held == set(ids)
+    assert len(held) == 30 and len(dev) == 120
+    assert held == V3_HELDOUT
+
+
+def test_v3_oracle_covers_every_case_and_hard_labeled():
+    manifest = load_manifest(ROOT, version="v3")
+    singles, convs, oracle = load_cases(ROOT, version="v3")
+    assert set(oracle) == {c["id"] for c in singles + convs}
+    assert len(oracle) == 150
+    for c in singles + convs:
+        assert c.get("family") in FAMILIES, c["id"]
+    hard = [c for c in singles + convs if c["id"].startswith("h")]
+    assert len(hard) == 31
+    for c in hard:
+        assert "Hard case (slice 2b" in oracle[c["id"]].get("note", ""), c["id"]
+    # The review decisions carried into v3: h26 is a refusal (the guard
+    # widening makes it refuse by design), h30 expects a clarification,
+    # h31's switch turn is the bare "same for WhatsApp" phrasing.
+    h26 = next(c for c in singles if c["id"] == "h26")
+    assert h26["expected_type"] == "refusal"
+    h30 = next(c for c in convs if c["id"] == "h30")
+    assert h30["turns"][3]["expect_type"] == "clarification"
+    assert "expect_topic" not in h30["turns"][3]
+    h31 = next(c for c in convs if c["id"] == "h31")
+    assert h31["turns"][2]["user"] == "same for WhatsApp"
+    assert h31["turns"][2]["expect_type"] == "drilldown"
+    h29 = next(c for c in convs if c["id"] == "h29")
+    assert h29["turns"][3]["expect_topic"] == "creators"
+
+
+def test_v3_families():
+    # 150 cases: metric_scoping grows by the 12 traps, the other hard
+    # groups land in their families, and SQL safety finally has a
+    # held-out case (h26).
+    from collections import Counter
+
+    manifest = load_manifest(ROOT, version="v3")
+    fam = Counter(c["family"] for c in manifest["cases"])
+    assert fam["metric_scoping"] == 46
+    assert fam["aggregation_grain"] == 29
+    assert fam["complex_joins_breakdowns"] == 21
+    assert fam["ambiguous_metric"] == 10
+    assert fam["multi_turn_context"] == 11
+    assert fam["incorrect_assumption"] == 11
+    assert fam["guardrail_adversarial"] == 13
+    assert fam["sql_safety_syntax"] == 9
+    assert set(fam) == set(FAMILIES)
+    held = Counter(c["family"] for c in manifest["cases"]
+                   if c["split"] == "heldout")
+    assert held["sql_safety_syntax"] == 1
+    assert held["multi_turn_context"] == 3
+    assert held["metric_scoping"] == 12

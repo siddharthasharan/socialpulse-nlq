@@ -80,6 +80,13 @@ VERSIONS = {
            "singles": "benchmark_v2.json",
            "convs": "conversation_phase3.json",
            "oracle": "oracle_v2.json"},
+    # v3 (slice 2b): v2's 119 cases plus the 31 hand-designed hard cases
+    # (h01-h31). New conversations file: conversation_phase3.json is
+    # shared by v1/v2 and frozen, so v3 has its own copy plus h28-h31.
+    "v3": {"manifest": "benchmark_v3_manifest.json",
+           "singles": "benchmark_v3.json",
+           "convs": "conversation_v3.json",
+           "oracle": "oracle_v3.json"},
 }
 
 
@@ -210,9 +217,20 @@ def validate_data_pin(con, data_dir, manifest):
 
 def _structural_checks(sql, specs):
     """Contains-checks on the planned SQL, never a string comparison
-    against a gold query. Each spec: {"contains": s} or with "min_count"."""
+    against a gold query. Each spec: {"contains": s} (optionally with
+    "min_count") or {"not_contains": s} -- the SQL must NOT contain s.
+    The negative form is for wrong-scope traps where the value alone
+    cannot catch the error: h12 (sessions per DAU in March) returns a
+    number 0.03% from the right one when the planner silently filters
+    to India, so only "no country filter unless asked" catches it."""
     out = []
     for spec in specs or []:
+        if "not_contains" in spec:
+            needle = spec["not_contains"]
+            n = (sql or "").count(needle)
+            out.append({"label": spec.get("label", f"SQL must not contain {needle!r}"),
+                        "pass": n == 0, "found": n, "want": 0})
+            continue
         needle = spec["contains"]
         n = (sql or "").count(needle)
         want = spec.get("min_count", 1)
@@ -406,13 +424,13 @@ def _turn_topic(reply):
     return None
 
 
-def score_conversation(conv, data_dir, structural_specs=None):
+def score_conversation(conv, data_dir, structural_specs=None, variant="baseline"):
     """Drive a ChatSession through one conversation and score it.
     Returns a result dict with per-turn traces and the five items."""
     from socialpulse_nlq.chat import ChatSession
 
     check_turn, check_values = _load_conv_runner()
-    session = ChatSession(data_dir)
+    session = ChatSession(data_dir, variant=variant)
     replies, turn_traces, failures = [], [], []
     con = None
     syntax_ok, safety_ok, exec_ok = True, True, True
@@ -630,11 +648,33 @@ def run_oracle(con, data_dir, singles, convs, oracle_by_id):
             elif kind == "behavioral":
                 problems = []
                 ev = entry.get("evidence_sql")
+                ev_value = None
                 if ev:
                     rows = [r[0] for r in con.execute(ev).fetchall()]
                     for absent in entry.get("evidence_expect_absent", []):
                         if absent in rows:
                             problems.append(f"{absent} unexpectedly present in {rows}")
+                    if "evidence_expect_value" in entry:
+                        # The premise is a value, not an absence: e.g. the
+                        # true app-scoped number a hard case rests on
+                        # (h01-h09), or "zero April sessions" (h17/h18).
+                        # Compared with the harness 2% tolerance for
+                        # numbers, exact equality otherwise. The value
+                        # is the premise the case rests on, not an
+                        # expected answer -- these cases expect a
+                        # clarification, so no answer is stored.
+                        ev_value = rows[0] if rows else None
+                        expected = entry["evidence_expect_value"]
+                        try:
+                            # DuckDB may return Decimal for literal
+                            # decimals; coerce so the comparison is
+                            # numeric, not type-sensitive.
+                            ok = close(float(ev_value), float(expected))
+                        except (TypeError, ValueError):
+                            ok = ev_value == expected
+                        if not ok:
+                            problems.append(
+                                f"evidence value {ev_value} != expected {expected}")
                 evf = (entry.get("evidence") or {}).get("data_dir_has_no_file_matching")
                 if evf:
                     import fnmatch
@@ -651,8 +691,11 @@ def run_oracle(con, data_dir, singles, convs, oracle_by_id):
                             f"{entry['evidence_expect_top_dim']}")
                 results.append({"id": case_id, "kind": kind,
                                 "agree": not problems,
-                                "oracle_value": "premise holds",
-                                "stored_value": "behavioral spec",
+                                "oracle_value": (ev_value if "evidence_expect_value" in entry
+                                                 else "premise holds"),
+                                "stored_value": (entry.get("evidence_expect_value")
+                                                 if "evidence_expect_value" in entry
+                                                 else "behavioral spec"),
                                 "detail": "; ".join(problems)})
             elif kind == "registry":
                 text = (Path(ROOT) / "catalog/experiments.yaml").read_text()
@@ -690,8 +733,8 @@ def run_oracle(con, data_dir, singles, convs, oracle_by_id):
 # Full run + summary
 # --------------------------------------------------------------------------
 
-def _run_single(case, con, data_dir, structural_specs):
-    p = plan(case["question"])
+def _run_single(case, con, data_dir, structural_specs, variant="baseline"):
+    p = plan(case["question"], variant=variant)
     outcome = {"plan": p, "guard": (True, "no SQL"), "syntax_ok": True,
                "syntax_error": "", "exec_ok": True, "exec_error": "",
                "columns": [], "rows": [], "runtime_ms": 0, "weather": None,
@@ -761,8 +804,10 @@ def cases_for_split(manifest, split):
 
 
 def run_benchmark(root=ROOT, data_dir=None, split="dev", with_oracle=True,
-                  version=MANIFEST_VERSION):
-    """Run the frozen benchmark for one split. Returns the full report dict."""
+                  version=MANIFEST_VERSION, variant="baseline"):
+    """Run the frozen benchmark for one split. Returns the full report dict.
+    variant selects a slice-3 planner variant (see docs/ablations.md);
+    default "baseline" is the current planner exactly as-is."""
     data_dir = Path(data_dir or (Path(root) / "data/phase1"))
     manifest = load_manifest(root, version=version)
     singles, convs, oracle_by_id = load_cases(root, version=version)
@@ -790,14 +835,15 @@ def run_benchmark(root=ROOT, data_dir=None, split="dev", with_oracle=True,
         for case in singles:
             if case["id"] in wanted:
                 results.append(_run_single(case, con, data_dir,
-                                           structural.get(case["id"])))
+                                           structural.get(case["id"]), variant))
     finally:
         con.close()
     for conv in convs:
         if conv["id"] in wanted:
             results.append(score_conversation(conv, data_dir,
-                                              structural.get(conv["id"])))
+                                              structural.get(conv["id"]), variant))
     report = {"benchmark": manifest["benchmark"], "version": manifest["version"],
+              "variant": variant,
               "split": split, "data": manifest["data"],
               "oracle": oracle_results,
               "results": results,

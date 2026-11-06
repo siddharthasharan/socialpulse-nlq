@@ -199,8 +199,9 @@ def _find_repo_root(data_dir):
 class ChatSession:
     """One multi-turn conversation. Create one per UI session id."""
 
-    def __init__(self, data_dir):
+    def __init__(self, data_dir, variant="baseline"):
         self.data_dir = Path(data_dir)
+        self.variant = variant
         self.repo_root = _find_repo_root(data_dir)
         # Flow questions come from chat/questions.json when it exists
         # (the Questions editor writes it); otherwise the hardcoded
@@ -397,7 +398,7 @@ class ChatSession:
         self.app = app
         self.stage = "mau"
         self.topic = None
-        p = plan(f"MAU for {app}")
+        p = plan(f"MAU for {app}", variant=self.variant)
         if p["type"] != "query" or not p.get("sql"):
             return self._clarify("I could not build the MAU query for "
                                  f"{app}. Try \"What's the MAU for Instagram?\"")

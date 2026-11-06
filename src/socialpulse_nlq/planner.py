@@ -78,6 +78,161 @@ def catalog_metric_ids(catalog_path: Path):
     return re.findall(r"-\s*id:\s*(\S+)", text)
 
 
+# -- Planner variants (Phase 1, slice 3) ---------------------------------
+# Three deterministic variants, selected by a flag on plan(), not three
+# planners. Default stays the baseline, so every existing caller is
+# unchanged. See docs/ablations.md for the design, the derivation rules,
+# and the predictions recorded before any variant ran.
+VARIANTS = ("baseline", "catalog-assisted", "validated")
+_CATALOG_ROOT = Path(__file__).resolve().parents[2]  # src/socialpulse_nlq/ -> repo root
+_CATALOG_CACHE = {}
+_MONTHS_OUTSIDE_WINDOW = ("april", "may", "june", "july", "august",
+                         "september", "october", "november", "december")
+
+
+def _load_catalog_metrics(catalog_path=None):
+    """{metric id: {"scope": [dimensions...]}} from catalog/measures.yaml.
+    Regex parse (no PyYAML in the venv), same style as
+    catalog_metric_ids. Cached by file mtime; a metric with no scope
+    line loads as scope None (fail-closed downstream)."""
+    path = Path(catalog_path or _CATALOG_ROOT / "catalog" / "measures.yaml")
+    mtime = path.stat().st_mtime
+    cached = _CATALOG_CACHE.get(str(path))
+    if cached and cached[0] == mtime:
+        return cached[1]
+    text = path.read_text()
+    starts = [(m.group(1), m.start()) for m in
+              re.finditer(r"-\s*id:\s*(\S+)", text)]
+    metrics = {}
+    for i, (mid, start) in enumerate(starts):
+        end = starts[i + 1][1] if i + 1 < len(starts) else len(text)
+        block = text[start:end]
+        m = re.search(r"scope:\s*\[([^\]]*)\]", block)
+        scope = None
+        if m:
+            scope = [s.strip() for s in m.group(1).split(",") if s.strip()]
+        metrics[mid] = {"scope": scope}
+    _CATALOG_CACHE[str(path)] = (mtime, metrics)
+    return metrics
+
+
+def _load_experiments(catalog_path=None):
+    """{experiment id: primary_metric} from catalog/experiments.yaml."""
+    path = Path(catalog_path or _CATALOG_ROOT / "catalog" / "experiments.yaml")
+    text = path.read_text()
+    starts = [(m.group(1), m.start()) for m in
+              re.finditer(r"-\s*id:\s*(\S+)", text)]
+    exps = {}
+    for i, (eid, start) in enumerate(starts):
+        end = starts[i + 1][1] if i + 1 < len(starts) else len(text)
+        block = text[start:end]
+        m = re.search(r"primary_metric:\s*(\S+)", block)
+        exps[eid] = m.group(1) if m else None
+    return exps
+
+
+def _requested_filters(q: str, metric):
+    """Filter dimensions the question requests, as {dim: value} for the
+    dimensions the variant checks (app / country / platform / surface /
+    acquisition). The date range is not a filter here: the window is
+    covered separately by the validated variant's month rule.
+
+    Metric-name conflation: a surface filter is dropped when the surface
+    word is part of the detected metric's own name ('reels' in
+    reels_completion_rate). 'What is the Reels completion rate?' asks
+    about a Reels metric, not for a Reels-surface scope on some other
+    metric; without this the variants would clarify on a plain,
+    answerable question."""
+    f = _extract_filters(q)
+    dims = {k: f[k] for k in ("app", "country", "platform", "surface", "acquisition")
+            if k in f}
+    if metric and "surface" in dims and dims["surface"] in metric:
+        del dims["surface"]
+    return dims
+
+
+def _catalog_scope_check(metric, requested):
+    """Catalog-assisted, pre-plan: (ok, reason). The metric must exist
+    in the catalog and every requested dimension must be in its catalog
+    scope. A metric with no scope on file fails closed."""
+    catalog = _load_catalog_metrics()
+    entry = catalog.get(metric)
+    if entry is None:
+        return False, f"metric {metric} has no catalog definition"
+    scope = entry.get("scope")
+    if scope is None:
+        return False, f"metric {metric} has no catalog scope on file"
+    for dim, value in requested.items():
+        if dim not in scope:
+            return False, (f"{metric} is not defined per {dim} in the catalog, "
+                           f"so I will not answer it scoped to {value}")
+    return True, "ok"
+
+
+def _catalog_experiment_check(exp_plan):
+    """Catalog-assisted, registry check for experiment_info plans:
+    (ok, reason). The metric must equal the primary_metric of the named
+    experiment in catalog/experiments.yaml. The experiment id is read
+    from the plan's explanation, which names it."""
+    m = re.search(r"(exp_[a-z0-9_]+)", exp_plan.get("explanation") or "")
+    if not m:
+        return False, "experiment plan does not name a registry experiment"
+    exps = _load_experiments()
+    want = exps.get(m.group(1))
+    if want is None:
+        return False, f"experiment {m.group(1)} is not in the registry"
+    if exp_plan.get("metric") != want:
+        return False, (f"registry primary metric for {m.group(1)} is {want}, "
+                       f"not {exp_plan.get('metric')}")
+    return True, "ok"
+
+
+def _validate_plan(question, requested, plan_dict):
+    """Validated, post-plan: (ok, reason) for a built query plan.
+    Rules, in order: metric in the catalog; every requested filter is
+    present in the planned SQL; no named month outside the data window
+    (2026-01-01..2026-03-31); the SQL guard passes (re-checked, not
+    assumed)."""
+    metric = plan_dict.get("metric")
+    catalog = _load_catalog_metrics()
+    if metric not in catalog:
+        return False, f"metric {metric} has no catalog definition"
+    sql = plan_dict.get("sql") or ""
+    needles = {
+        "app": lambda v: (f"primary_app = '{v}'", f"app = '{v}'",
+                          f"c.app = '{v}'", f"i.app = '{v}'"),
+        "country": lambda v: (f"country = '{v}'", f"u.country = '{v}'"),
+        "platform": lambda v: (f"platform = '{v}'", f"u.platform = '{v}'"),
+        "surface": lambda v: (f"surface = '{v}'", f"c.surface = '{v}'",
+                              f"i.surface = '{v}'"),
+        "acquisition": lambda v: (f"acquisition_source = '{v}'",),
+    }
+    for dim, value in requested.items():
+        if not any(n in sql for n in needles[dim](value)):
+            return False, (f"the planned SQL does not apply the requested "
+                           f"{dim} filter ({value}); answering would return "
+                           f"the all-population value, not the scoped one")
+    q = question.lower()
+    for month in _MONTHS_OUTSIDE_WINDOW:
+        if _word(q, month):
+            return False, (f"{month} is outside the data window "
+                           f"(2026-01-01 to 2026-03-31), so there is no "
+                           f"{month} value to report")
+    ok, reason = guard_sql(sql)
+    if not ok:
+        return False, f"SQL guard rejected the planned query: {reason}"
+    return True, "ok"
+
+
+def _abstain(metric, reason):
+    """Clarification plan returned when a variant refuses to answer.
+    Metric is kept for the trace; sql is None, so the harness scores
+    it as a clarification."""
+    return {"type": "clarification", "metric": metric, "sql": None,
+            "tables": [], "grain": "", "explanation": "",
+            "clarification": f"I am not answering that as asked: {reason}."}
+
+
 # Metric definitions, mirroring catalog/measures.yaml the same way the
 # SQL templates mirror it (the YAML is the human-readable contract;
 # tests check the ids stay in sync). Used only for display in the
@@ -319,6 +474,20 @@ def _word(q: str, w: str) -> bool:
     return re.search(rf"\b{re.escape(w)}\b", q) is not None
 
 
+def _in_is_preposition(q: str) -> bool:
+    """The word 'in' is both the country code IN and an English
+    preposition. 'in <Month>' ('in January', 'in March') and 'in the
+    last/past ...' are window phrasing, not India -- before this fix
+    (2026-11-05, Phase 1 slice 2b) the planner read them as country IN
+    and silently returned India-only numbers for the most ordinary
+    windowed questions. A genuine India question names the country
+    ('in India', 'for India') and is caught by the 'india' entry,
+    which comes before 'in' in COUNTRIES, so this guard never fires
+    for it."""
+    return (re.search(r"\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\b", q) is not None
+            or re.search(r"\bin\s+the\s+(?:last|past)\b", q) is not None)
+
+
 def _extract_filters(q: str):
     filters = {}
     filters["date_start"], filters["date_end"] = _date_range(q)
@@ -327,6 +496,8 @@ def _extract_filters(q: str):
             filters["app"] = app
             break
     for name, code in COUNTRIES.items():
+        if name == "in" and _in_is_preposition(q):
+            continue
         if _word(q, name):
             filters["country"] = code
             break
@@ -679,15 +850,26 @@ def _experiment_plan(q: str):
     return None
 
 
-def plan(question: str):
-    """Return a plan dict. Clarification plans have sql=None."""
+def plan(question: str, variant: str = "baseline"):
+    """Return a plan dict. Clarification plans have sql=None.
+
+    variant selects one of the slice-3 planner variants (see
+    docs/ablations.md): "baseline" (default, the current planner
+    exactly as-is), "catalog-assisted" (pre-plan catalog scope check),
+    "validated" (post-plan validation / abstention)."""
+    if variant not in VARIANTS:
+        raise ValueError(f"unknown planner variant {variant!r}; known: {list(VARIANTS)}")
     q = question.lower().strip()
     if not q:
         return {"type": "clarification", "metric": None, "sql": None, "tables": [], "grain": "",
                 "explanation": "",
                 "clarification": "Ask a question about a specific metric, for example 'What was DAU by app over the last 28 days?'"}
-    # Unsafe first.
-    if any(w in q for w in ["delete", "drop table", "update ", "insert into", "remove all", "truncate"]):
+    # Unsafe first. "drop the database" added 2026-11-05 (Phase 1 slice
+    # 2b): the list used to catch "drop table" but not "drop the
+    # database", which passed only because no metric mapped. A bare
+    # "drop" is deliberately NOT listed -- "the drop in DAU" is a
+    # legitimate question.
+    if any(w in q for w in ["delete", "drop table", "drop database", "drop the database", "update ", "insert into", "remove all", "truncate"]):
         return {"type": "refusal", "metric": None, "sql": None, "tables": [], "grain": "",
                 "explanation": "",
                 "clarification": "I only run read-only SELECT queries. I will not run write or control statements."}
@@ -709,6 +891,10 @@ def plan(question: str):
     if "experiment" in q:
         exp = _experiment_plan(q)
         if exp is not None:
+            if variant == "catalog-assisted" and exp.get("type") == "experiment_info":
+                ok, reason = _catalog_experiment_check(exp)
+                if not ok:
+                    return _abstain(exp.get("metric"), reason)
             return exp
     # Product-health questions are answered by the weather report, not
     # by a single metric. This must come before metric detection: "How
@@ -792,6 +978,11 @@ def plan(question: str):
     # "by acquisition" is the metric itself for retention, not a separate breakdown.
     if metric == "d7_retention_by_acquisition":
         breakdown = None
+    if variant == "catalog-assisted":
+        requested = _requested_filters(q, metric)
+        ok, reason = _catalog_scope_check(metric, requested)
+        if not ok:
+            return _abstain(metric, reason)
     try:
         sql, tables, grain = build_sql(metric, f, breakdown, q)
     except ValueError as e:
@@ -801,12 +992,18 @@ def plan(question: str):
     if not ok:
         return {"type": "clarification", "metric": metric, "sql": None, "tables": [], "grain": "",
                 "explanation": "", "clarification": f"SQL guard rejected the planned query: {reason}"}
-    return {
+    plan_dict = {
         "type": "query", "metric": metric, "sql": sql, "tables": tables, "grain": grain,
         "filters": f, "breakdown": breakdown,
         "explanation": f"Metric {metric}, grain {grain}, filters {f}, breakdown {breakdown}.",
         "clarification": None,
     }
+    if variant == "validated":
+        requested = _requested_filters(q, metric)
+        ok, reason = _validate_plan(question, requested, plan_dict)
+        if not ok:
+            return _abstain(metric, reason)
+    return plan_dict
 
 
 def run_plan(plan: dict, data_dir: Path):

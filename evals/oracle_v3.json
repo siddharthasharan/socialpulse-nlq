@@ -1,0 +1,1340 @@
+{
+ "entries": [
+  {
+   "id": "b01",
+   "kind": "scalar",
+   "note": "Canonical definition, copied from sql/canonical_metrics.sql (the definition source), not via planner.build_sql().",
+   "sql": "SELECT AVG(dau) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions GROUP BY d)"
+  },
+  {
+   "id": "b02",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT AVG(wau) AS value FROM (SELECT DATE_TRUNC('week', CAST(start_time AS DATE)) AS w, COUNT(DISTINCT user_id) AS wau FROM fact_sessions GROUP BY w)"
+  },
+  {
+   "id": "b03",
+   "kind": "scalar",
+   "note": "Canonical definition (all-apps March MAU).",
+   "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+  },
+  {
+   "id": "b04",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT AVG(dau) / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'), 0) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' GROUP BY d)"
+  },
+  {
+   "id": "b05",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT COUNT(*) AS value FROM dim_users WHERE signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31'"
+  },
+  {
+   "id": "b06",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(start_time AS DATE))), 0) AS value FROM fact_sessions"
+  },
+  {
+   "id": "b07",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT MEDIAN(duration_minutes) AS value FROM fact_sessions"
+  },
+  {
+   "id": "b08",
+   "kind": "scalar",
+   "note": "Canonical definition. Window filter added 2026-11-05 (Phase 1 slice 2, user-approved fix): sql/canonical_metrics.sql messaging_dau_mean used to be unwindowed, and one stray 2026-04-01 message date dragged the mean to 38,399.42 instead of the correct stored 38,812.77. The windowed value is 38,812.76666666667.",
+   "sql": "SELECT AVG(senders) AS value FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS senders FROM fact_messages WHERE CAST(sent_at AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY d)"
+  },
+  {
+   "id": "b09",
+   "kind": "series",
+   "note": "Daily DAU by app over the last 28 days, computed directly from fact_sessions. Compares row count (>= 80) and distinct apps (3) against the stored expectation.",
+   "sql": "SELECT app AS dim, CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY app, d ORDER BY dim, d"
+  },
+  {
+   "id": "b10",
+   "kind": "series",
+   "note": "Daily DAU by country over the last 28 days, via the session user's country. Compares row count (>= 190) and distinct countries (7).",
+   "sql": "SELECT u.country AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.country, d ORDER BY dim, d"
+  },
+  {
+   "id": "b11",
+   "kind": "series",
+   "note": "Daily DAU by platform over the last 28 days, via the session user's platform. Compares row count (>= 80) and distinct platforms (3).",
+   "sql": "SELECT u.platform AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.platform, d ORDER BY dim, d"
+  },
+  {
+   "id": "b12",
+   "kind": "breakdown",
+   "note": "Sessions per DAU by platform, computed directly. Compares row count (3); values are recorded, not asserted against a stored list (the case stores no expected values).",
+   "sql": "SELECT u.platform AS dim, COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id GROUP BY u.platform ORDER BY dim"
+  },
+  {
+   "id": "b13",
+   "kind": "series",
+   "note": "Daily creators by app over the whole window, via content app. Compares row count (>= 200) and distinct apps (3).",
+   "sql": "SELECT c.app AS dim, CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS value FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id GROUP BY c.app, d ORDER BY dim, d"
+  },
+  {
+   "id": "b14",
+   "kind": "breakdown",
+   "note": "Engagement rate by surface: engagements (via content surface) over sampled impressions (via impression surface). Compares row count (3); values recorded, not asserted (the case stores no expected values).",
+   "sql": "SELECT s.dim AS dim, e.engs * 1.0 / NULLIF(s.imps, 0) AS value FROM (SELECT surface AS dim, COUNT(*) AS imps FROM fact_content_impressions GROUP BY surface) s JOIN (SELECT c.surface AS dim, COUNT(*) AS engs FROM fact_content_engagements e JOIN dim_content c ON c.content_id = e.content_id GROUP BY c.surface) e USING (dim) ORDER BY dim"
+  },
+  {
+   "id": "b15",
+   "kind": "series",
+   "note": "Daily messaging senders by app (sender's primary_app) over the last 28 days. Compares row count (>= 80) and distinct apps (3).",
+   "sql": "SELECT u.primary_app AS dim, CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS value FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.primary_app, d ORDER BY dim, d"
+  },
+  {
+   "id": "b16",
+   "kind": "series",
+   "note": "Daily DAU trend over the last 28 days. Compares row count (>= 28).",
+   "sql": "SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d ORDER BY d"
+  },
+  {
+   "id": "b17",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21')"
+  },
+  {
+   "id": "b18",
+   "kind": "breakdown",
+   "note": "Canonical definition, returns label/value rows. Compares the per-source values against the stored expected_values.",
+   "sql": "SELECT acquisition_source AS dim, AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, u.acquisition_source, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21') GROUP BY acquisition_source ORDER BY acquisition_source"
+  },
+  {
+   "id": "b19",
+   "kind": "scalar",
+   "note": "Canonical D7 restricted to the paid cohort, written out by hand.",
+   "sql": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21' AND u.acquisition_source = 'paid')"
+  },
+  {
+   "id": "b20",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT creator_id), 0) AS value FROM fact_content_creation"
+  },
+  {
+   "id": "b21",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT AVG(creators * 1.0 / NULLIF(dau, 0)) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS creators FROM fact_content_creation GROUP BY d) c JOIN (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions GROUP BY d) s USING (d)"
+  },
+  {
+   "id": "b22",
+   "kind": "registry",
+   "note": "Reads catalog/experiments.yaml directly (regex over the file, not the planner's _experiment_plan). Expectation: 3 experiments listed; the planner must return type experiment_list.",
+   "registry": {
+    "expect": "list"
+   }
+  },
+  {
+   "id": "b23",
+   "kind": "registry",
+   "note": "Reads catalog/experiments.yaml directly. Expectation: the Reels ranking experiment's primary_metric is reels_watch_time_per_viewer_day.",
+   "registry": {
+    "expect": "field",
+    "experiment": "exp_reels_ranking_v1",
+    "field": "primary_metric",
+    "value": "reels_watch_time_per_viewer_day"
+   }
+  },
+  {
+   "evidence": {
+    "data_dir_has_no_file_matching": "*experiment*"
+   },
+   "id": "b24",
+   "kind": "behavioral",
+   "note": "Correct behavior is clarification containing 'cannot evaluate'. Premise checked against the data dir, not the planner: no experiment assignment table exists in data/phase1 (verified: no file matching *experiment*). Assignment tables arrive Phase 3."
+  },
+  {
+   "id": "b25",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c)"
+  },
+  {
+   "id": "b26",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "WITH creator_imps AS (SELECT c.creator_id, COUNT(*) AS imps FROM fact_content_impressions i JOIN dim_content c ON c.content_id = i.content_id GROUP BY c.creator_id), ranked AS (SELECT creator_id, imps, NTILE(100) OVER (ORDER BY imps DESC) AS tile FROM creator_imps) SELECT SUM(CASE WHEN tile = 1 THEN imps ELSE 0 END) * 1.0 / NULLIF(SUM(imps), 0) AS value FROM ranked"
+  },
+  {
+   "id": "b27",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT AVG(commenters * 1.0 / NULLIF(dau, 0)) AS value FROM (SELECT CAST(e.created_at AS DATE) AS d, COUNT(DISTINCT e.user_id) AS commenters FROM fact_content_engagements e WHERE e.action_type = 'comment' GROUP BY d) c JOIN (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions GROUP BY d) s USING (d)"
+  },
+  {
+   "id": "b28",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT (SELECT COUNT(*) FROM fact_content_engagements) * 1.0 / NULLIF((SELECT COUNT(*) FROM fact_content_impressions), 0) AS value"
+  },
+  {
+   "id": "b29",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT AVG(CASE WHEN completion_pct >= 0.95 THEN 1.0 ELSE 0.0 END) AS value FROM fact_video_plays"
+  },
+  {
+   "id": "b30",
+   "kind": "scalar",
+   "note": "Canonical definition.",
+   "sql": "SELECT SUM(watch_ms) / 60000.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(play_time AS DATE))), 0) AS value FROM fact_video_plays"
+  },
+  {
+   "evidence_expect_absent": [
+    "FR",
+    "France"
+   ],
+   "evidence_sql": "SELECT DISTINCT country FROM dim_users ORDER BY 1",
+   "id": "b31",
+   "kind": "behavioral",
+   "note": "Correct behavior is clarification naming France as not in the data. Premise checked against the data, not the planner: the evidence SQL lists the countries present in dim_users; France must be absent."
+  },
+  {
+   "cards": {
+    "d7_retention": {
+     "current": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24')",
+     "prior": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-28' AND DATE '2026-02-23')"
+    },
+    "daily_creators": {
+     "current": "SELECT AVG(c) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)",
+     "prior": "SELECT AVG(c) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d)"
+    },
+    "dau": {
+     "current": "SELECT AVG(dau) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)",
+     "prior": "SELECT AVG(dau) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d)"
+    },
+    "messaging_dau": {
+     "current": "SELECT AVG(s) AS value FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS s FROM fact_messages WHERE CAST(sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)"
+    },
+    "orphan_post_rate": {
+     "current": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c)"
+    },
+    "top1_share": {
+     "current": "WITH creator_imps AS (SELECT c.creator_id, COUNT(*) AS imps FROM fact_content_impressions i JOIN dim_content c ON c.content_id = i.content_id GROUP BY c.creator_id), ranked AS (SELECT creator_id, imps, NTILE(100) OVER (ORDER BY imps DESC) AS tile FROM creator_imps) SELECT SUM(CASE WHEN tile = 1 THEN imps ELSE 0 END) * 1.0 / NULLIF(SUM(imps), 0) AS value FROM ranked"
+    }
+   },
+   "id": "b32",
+   "kind": "weather",
+   "note": "No stored expected values for this case (type weather_report, no expected_cards) \u2014 the oracle recomputes the headline cards directly and records them, so a future stored expectation can be checked. Watchouts are derived from the oracle cards using the documented rules."
+  },
+  {
+   "cards": {
+    "d7_retention": {
+     "current": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24')"
+    },
+    "dau": {
+     "current": "SELECT AVG(dau) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)"
+    },
+    "messaging_dau": {
+     "current": "SELECT AVG(s) AS value FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS s FROM fact_messages WHERE CAST(sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)"
+    },
+    "wau": {
+     "current": "SELECT AVG(wau) AS value FROM (SELECT DATE_TRUNC('week', CAST(start_time AS DATE)) AS w, COUNT(DISTINCT user_id) AS wau, COUNT(DISTINCT CAST(start_time AS DATE)) AS days FROM fact_sessions GROUP BY w HAVING days = 7 ORDER BY w DESC LIMIT 4)"
+    }
+   },
+   "id": "b33",
+   "kind": "weather",
+   "note": "Recomputes the four stored cards directly. The stored dau (100627.8) is the current-period mean, not the whole-window mean \u2014 the oracle uses the same current period (Mar 4-31)."
+  },
+  {
+   "cards": {
+    "creator_penetration": {
+     "current": "SELECT AVG(c * 1.0 / NULLIF(dau, 0)) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d) c JOIN (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d) s USING (d)",
+     "prior": "SELECT AVG(c * 1.0 / NULLIF(dau, 0)) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d) c JOIN (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d) s USING (d)"
+    },
+    "daily_creators": {
+     "current": "SELECT AVG(c) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)",
+     "prior": "SELECT AVG(c) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d)"
+    },
+    "orphan_post_rate": {
+     "current": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c)"
+    },
+    "top1_share": {
+     "current": "WITH creator_imps AS (SELECT c.creator_id, COUNT(*) AS imps FROM fact_content_impressions i JOIN dim_content c ON c.content_id = i.content_id GROUP BY c.creator_id), ranked AS (SELECT creator_id, imps, NTILE(100) OVER (ORDER BY imps DESC) AS tile FROM creator_imps) SELECT SUM(CASE WHEN tile = 1 THEN imps ELSE 0 END) * 1.0 / NULLIF(SUM(imps), 0) AS value FROM ranked"
+    }
+   },
+   "id": "b34",
+   "kind": "weather",
+   "note": "Recomputes the four stored cards directly; watchout phrases are checked against watchouts derived from the oracle cards (creators/penetration direction needs prior values, included)."
+  },
+  {
+   "id": "b35",
+   "kind": "series",
+   "note": "Daily WhatsApp DAU over the last 7 days (Mar 25-31), computed directly. Compares the value column in order against the stored 7 values.",
+   "sql": "SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE app = 'whatsapp' AND CAST(start_time AS DATE) BETWEEN DATE '2026-03-25' AND DATE '2026-03-31' GROUP BY d ORDER BY d"
+  },
+  {
+   "id": "b36",
+   "kind": "series",
+   "note": "Daily WhatsApp DAU over the last 28 days (Mar 4-31), computed directly. Compares the value column in order against the stored 28 values.",
+   "sql": "SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE app = 'whatsapp' AND CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d ORDER BY d"
+  },
+  {
+   "cards": {
+    "d7_retention": {
+     "current": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24' AND u.primary_app = 'whatsapp')",
+     "prior": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-28' AND DATE '2026-02-23' AND u.primary_app = 'whatsapp')"
+    },
+    "daily_creators": {
+     "current": "SELECT AVG(c) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND c.app = 'whatsapp' GROUP BY d)"
+    },
+    "dau": {
+     "current": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp' GROUP BY d)",
+     "prior": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' AND u.primary_app = 'whatsapp' GROUP BY d)"
+    },
+    "messaging_dau": {
+     "current": "SELECT AVG(s) AS value FROM (SELECT CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS s FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp' GROUP BY d)"
+    },
+    "orphan_post_rate": {
+     "current": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c WHERE c.app = 'whatsapp')"
+    }
+   },
+   "id": "b37",
+   "kind": "weather",
+   "note": "WhatsApp-scoped cards, recomputed directly. User metrics scope via dim_users.primary_app, content via dim_content.app, messaging via the sender's primary_app \u2014 the scoping rules documented in weather.py. Watchout 'Retention falling' needs the prior D7, included."
+  },
+  {
+   "id": "b38",
+   "kind": "scalar",
+   "note": "App-scoped MAU, written out by hand (NOT the planner's build_sql): distinct Instagram users with a session in March 2026.",
+   "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'",
+   "structural": [
+    {
+     "contains": "app = 'instagram'",
+     "label": "MAU SQL filters to Instagram (app-scoped, not all-apps)"
+    }
+   ]
+  },
+  {
+   "id": "b39",
+   "kind": "scalar",
+   "note": "App-scoped stickiness, written out by hand: mean March DAU for Instagram divided by March MAU for Instagram. Both numerator and denominator are app-scoped \u2014 scoping only the denominator would mix populations.",
+   "sql": "SELECT AVG(dau) / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'), 0) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram' GROUP BY d)",
+   "structural": [
+    {
+     "contains": "app = 'instagram'",
+     "label": "stickiness SQL filters to Instagram in BOTH numerator (mean DAU) and denominator (MAU)",
+     "min_count": 2
+    }
+   ]
+  },
+  {
+   "checks": {
+    "drilldown_daily_creators": {
+     "sql": "SELECT AVG(c) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND c.app = 'instagram' GROUP BY d)",
+     "tolerance": 1.0
+    },
+    "drilldown_orphan": {
+     "sql": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c WHERE c.app = 'instagram')",
+     "tolerance": 0.01
+    },
+    "weather_dau": {
+     "sql": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'instagram' GROUP BY d)",
+     "tolerance": 10.0
+    }
+   },
+   "id": "c1",
+   "kind": "conversation_values",
+   "note": "Numeric checks from the conversation file, recomputed directly. Weather DAU and drill-down creators are the Instagram current-period means (Mar 4-31, scoped via primary_app / content app); orphan is the Instagram whole-window rate."
+  },
+  {
+   "checks": {
+    "weather_d7": {
+     "sql": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24' AND u.primary_app = 'whatsapp')",
+     "tolerance": 0.01
+    }
+   },
+   "id": "c2",
+   "kind": "conversation_values",
+   "note": "WhatsApp D7 for recent cohorts (Feb 25-Mar 24), recomputed directly."
+  },
+  {
+   "evidence": {
+    "data_dir_has_no_file_matching": "*experiment*"
+   },
+   "id": "c3",
+   "kind": "behavioral",
+   "note": "Same premise as b24: no experiment assignment tables exist, so evaluating a past experiment must clarify. Turn-type expectations in the conversation file are the behavioral spec; the harness checks those directly from ChatSession replies."
+  },
+  {
+   "id": "c4",
+   "kind": "behavioral",
+   "note": "No numeric expectation. The behavioral spec is the turn-type/app/topic expectations in the conversation file (letter 'a' picks the creators drill-down after Instagram weather)."
+  },
+  {
+   "checks": {
+    "weather_dau": {
+     "sql": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'instagram' GROUP BY d)",
+     "tolerance": 10.0
+    }
+   },
+   "id": "c5",
+   "kind": "conversation_values",
+   "note": "Instagram weather DAU, recomputed directly (same SQL as c1 weather_dau)."
+  },
+  {
+   "id": "c6",
+   "kind": "behavioral",
+   "note": "No numeric expectation. The behavioral spec is the turn-type/app/topic expectations in the conversation file (same drill-down, different app; creators by surface)."
+  },
+  {
+   "evidence": {
+    "data_dir_has_no_file_matching": "*experiment*"
+   },
+   "id": "c7",
+   "kind": "behavioral",
+   "note": "Segment follow-up plus the past-experiment refusal. The refusal premise is the same as b24/c3 (no assignment tables). Turn-type expectations in the conversation file are the behavioral spec."
+  },
+  {
+   "evidence_expect_top_dim": "DE",
+   "evidence_sql": "SELECT u.country AS dim, COUNT(DISTINCT CASE WHEN CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-18' AND DATE '2026-03-31' THEN f.creator_id END) - COUNT(DISTINCT CASE WHEN CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-17' THEN f.creator_id END) AS value FROM fact_content_creation f JOIN dim_users u ON u.user_id = f.creator_id JOIN dim_content c ON c.content_id = f.content_id WHERE c.app = 'whatsapp' GROUP BY u.country ORDER BY value ASC LIMIT 1",
+   "id": "c8",
+   "kind": "behavioral",
+   "note": "Ranking follow-up: corrected 2026-11-05 (Phase 1 slice 2, user-approved fix). The description used to claim ID was the largest creator drop (Mar 18-31 vs Mar 4-17, WhatsApp, -12 and -7.0%) \u2014 stale from the 50K era. On the 500K data the largest drop is DE (-24, -2.6%), and the chat itself answers DE. The evidence SQL uses the ranking turn's own definition (chat._ranking_rows: COUNT(DISTINCT creator_id) per country per 14-day window)."
+  },
+  {
+   "id": "c9",
+   "kind": "scalar",
+   "note": "Same independent check as b38 (app-scoped Instagram MAU). The conversation file stores no numeric value; the harness compares the oracle value against the MAU ground truth 210809 recorded in the design draft and the b38 stored value.",
+   "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'",
+   "structural": [
+    {
+     "contains": "app = 'instagram'",
+     "label": "MAU turn SQL filters to Instagram"
+    }
+   ]
+  },
+  {
+   "id": "c10",
+   "kind": "scalar",
+   "note": "Same independent check as b38/c9: the typo probe must map to the same app-scoped answer.",
+   "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'",
+   "structural": [
+    {
+     "contains": "app = 'instagram'",
+     "label": "MAU turn SQL filters to Instagram"
+    }
+   ]
+  },
+  {
+   "id": "t01",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' AND u.primary_app = 'instagram'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'instagram'",
+     "label": "dau_mean_daily SQL filters to instagram (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t02",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND u.primary_app = 'instagram'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'instagram'",
+     "label": "dau_mean_daily SQL filters to instagram (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t03",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' AND u.primary_app = 'whatsapp'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'whatsapp'",
+     "label": "dau_mean_daily SQL filters to whatsapp (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t04",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'whatsapp'",
+     "label": "dau_mean_daily SQL filters to whatsapp (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t05",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' AND u.primary_app = 'facebook'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'facebook'",
+     "label": "dau_mean_daily SQL filters to facebook (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t06",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND u.primary_app = 'facebook'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'facebook'",
+     "label": "dau_mean_daily SQL filters to facebook (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t07",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'whatsapp'",
+   "structural": [
+    {
+     "contains": "app = 'whatsapp'",
+     "label": "mau_march SQL filters to whatsapp (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t08",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'facebook'",
+   "structural": [
+    {
+     "contains": "app = 'facebook'",
+     "label": "mau_march SQL filters to facebook (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t09",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT (SELECT COUNT(DISTINCT (user_id, CAST(start_time AS DATE))) * 1.0 / 31 FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'whatsapp') / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'whatsapp'), 0) AS value",
+   "structural": [
+    {
+     "contains": "app = 'whatsapp'",
+     "label": "dau_mau_stickiness SQL filters to whatsapp (app-scoped, not all-apps)",
+     "min_count": 2
+    }
+   ]
+  },
+  {
+   "id": "t10",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT (SELECT COUNT(DISTINCT (user_id, CAST(start_time AS DATE))) * 1.0 / 31 FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'facebook') / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'facebook'), 0) AS value",
+   "structural": [
+    {
+     "contains": "app = 'facebook'",
+     "label": "dau_mau_stickiness SQL filters to facebook (app-scoped, not all-apps)",
+     "min_count": 2
+    }
+   ]
+  },
+  {
+   "id": "t11",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'instagram'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'instagram'",
+     "label": "sessions_per_dau SQL filters to instagram (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t12",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'whatsapp'",
+     "label": "sessions_per_dau SQL filters to whatsapp (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t13",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'facebook'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'facebook'",
+     "label": "sessions_per_dau SQL filters to facebook (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t14",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT MEDIAN(s.duration_minutes) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'instagram'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'instagram'",
+     "label": "median_session_duration_min SQL filters to instagram (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t15",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT MEDIAN(s.duration_minutes) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'whatsapp'",
+     "label": "median_session_duration_min SQL filters to whatsapp (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t16",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT MEDIAN(s.duration_minutes) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'facebook'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'facebook'",
+     "label": "median_session_duration_min SQL filters to facebook (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t17",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (m.sender_id, CAST(m.sent_at AS DATE))) * 1.0 / 90 AS value FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'instagram'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'instagram'",
+     "label": "messaging_dau_mean SQL filters to instagram (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t18",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (m.sender_id, CAST(m.sent_at AS DATE))) * 1.0 / 90 AS value FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'whatsapp'",
+     "label": "messaging_dau_mean SQL filters to whatsapp (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t19",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT COUNT(DISTINCT (m.sender_id, CAST(m.sent_at AS DATE))) * 1.0 / 90 AS value FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND u.primary_app = 'facebook'",
+   "structural": [
+    {
+     "contains": "u.primary_app = 'facebook'",
+     "label": "messaging_dau_mean SQL filters to facebook (app-scoped, not all-apps)",
+     "min_count": 1
+    }
+   ]
+  },
+  {
+   "id": "t20",
+   "kind": "series",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT CAST(s.start_time AS DATE) AS date, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'instagram' GROUP BY date ORDER BY date"
+  },
+  {
+   "id": "t21",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21' AND u.acquisition_source = 'organic')"
+  },
+  {
+   "id": "t22",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (metric_scoping).",
+   "sql": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21' AND u.acquisition_source = 'referral')"
+  },
+  {
+   "id": "t23",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'"
+  },
+  {
+   "id": "t24",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 28 AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-02-01' AND DATE '2026-02-28'"
+  },
+  {
+   "id": "t25",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+  },
+  {
+   "id": "t26",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT AVG(wau) AS value FROM (SELECT DATE_TRUNC('week', CAST(start_time AS DATE)) AS w, COUNT(DISTINCT user_id) AS wau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' GROUP BY w)"
+  },
+  {
+   "id": "t27",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT AVG(wau) AS value FROM (SELECT DATE_TRUNC('week', CAST(start_time AS DATE)) AS w, COUNT(DISTINCT user_id) AS wau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' GROUP BY w)"
+  },
+  {
+   "id": "t28",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(*) AS value FROM dim_users WHERE signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'"
+  },
+  {
+   "id": "t29",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(*) AS value FROM dim_users WHERE signup_date BETWEEN DATE '2026-02-01' AND DATE '2026-02-28'"
+  },
+  {
+   "id": "t30",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(*) AS value FROM dim_users WHERE signup_date BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+  },
+  {
+   "id": "t31",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT MEDIAN(s.duration_minutes) AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'"
+  },
+  {
+   "id": "t32",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT MEDIAN(s.duration_minutes) AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+  },
+  {
+   "id": "t33",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(DISTINCT (k.creator_id, CAST(k.published_at AS DATE))) * 1.0 / 31 AS value FROM fact_content_creation k WHERE CAST(k.published_at AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'"
+  },
+  {
+   "id": "t34",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(DISTINCT (k.creator_id, CAST(k.published_at AS DATE))) * 1.0 / 31 AS value FROM fact_content_creation k WHERE CAST(k.published_at AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+  },
+  {
+   "id": "t35",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31'"
+  },
+  {
+   "id": "t36",
+   "kind": "scalar",
+   "note": "Templated slice-2 case (aggregation_grain).",
+   "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+  },
+  {
+   "id": "t37",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.country AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp' GROUP BY u.country, d ORDER BY dim, d"
+  },
+  {
+   "id": "t38",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.platform AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'instagram' GROUP BY u.platform, d ORDER BY dim, d"
+  },
+  {
+   "id": "t39",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.platform AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp' GROUP BY u.platform, d ORDER BY dim, d"
+  },
+  {
+   "id": "t40",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.platform AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'facebook' GROUP BY u.platform, d ORDER BY dim, d"
+  },
+  {
+   "id": "t41",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.primary_app AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-25' AND DATE '2026-03-31' GROUP BY u.primary_app, d ORDER BY dim, d"
+  },
+  {
+   "id": "t42",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.primary_app AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' GROUP BY u.primary_app, d ORDER BY dim, d"
+  },
+  {
+   "id": "t43",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.country AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-25' AND DATE '2026-03-31' GROUP BY u.country, d ORDER BY dim, d"
+  },
+  {
+   "id": "t44",
+   "kind": "breakdown",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT dim, SUM(sessions) * 1.0 / NULLIF(SUM(user_days), 0) AS value FROM (SELECT u.country AS dim, CAST(s.start_time AS DATE) AS d, COUNT(*) AS sessions, COUNT(DISTINCT s.user_id) AS user_days FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY u.country, d) GROUP BY dim ORDER BY dim"
+  },
+  {
+   "id": "t45",
+   "kind": "breakdown",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT dim, SUM(sessions) * 1.0 / NULLIF(SUM(user_days), 0) AS value FROM (SELECT u.primary_app AS dim, CAST(s.start_time AS DATE) AS d, COUNT(*) AS sessions, COUNT(DISTINCT s.user_id) AS user_days FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY u.primary_app, d) GROUP BY dim ORDER BY dim"
+  },
+  {
+   "id": "t46",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.country AS dim, CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS value FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.country, d ORDER BY dim, d"
+  },
+  {
+   "id": "t47",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT u.platform AS dim, CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS value FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.platform, d ORDER BY dim, d"
+  },
+  {
+   "id": "t48",
+   "kind": "series",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT c.app AS dim, CAST(k.published_at AS DATE) AS d, COUNT(DISTINCT k.creator_id) AS value FROM fact_content_creation k JOIN dim_content c ON c.content_id = k.content_id WHERE CAST(k.published_at AS DATE) BETWEEN DATE '2026-03-25' AND DATE '2026-03-31' GROUP BY c.app, d ORDER BY dim, d"
+  },
+  {
+   "id": "t49",
+   "kind": "breakdown",
+   "note": "Templated slice-2 case (complex_joins_breakdowns).",
+   "sql": "SELECT app, SUM(eng) * 1.0 / NULLIF(SUM(imp), 0) AS value FROM (SELECT i.app AS app, COUNT(*) AS imp, 0 AS eng FROM fact_content_impressions i GROUP BY i.app UNION ALL SELECT c.app AS app, 0 AS imp, COUNT(*) AS eng FROM fact_content_engagements e JOIN dim_content c ON c.content_id = e.content_id GROUP BY c.app) GROUP BY app ORDER BY app"
+  },
+  {
+   "cards": {
+    "d7_retention": {
+     "current": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24' AND u.primary_app = 'instagram')",
+     "prior": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-28' AND DATE '2026-02-23' AND u.primary_app = 'instagram')"
+    },
+    "daily_creators": {
+     "current": "SELECT AVG(c) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND c.app = 'instagram' GROUP BY d)"
+    },
+    "dau": {
+     "current": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'instagram' GROUP BY d)",
+     "prior": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' AND u.primary_app = 'instagram' GROUP BY d)"
+    },
+    "messaging_dau": {
+     "current": "SELECT AVG(s) AS value FROM (SELECT CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS s FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'instagram' GROUP BY d)"
+    },
+    "orphan_post_rate": {
+     "current": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c WHERE c.app = 'instagram')"
+    }
+   },
+   "id": "t50",
+   "kind": "weather",
+   "note": "Templated slice-2 case (ambiguous_metric). Instagram-scoped cards, recomputed directly. Watchouts derived from the oracle cards by the documented rules; 'Creator supply softening' is not derivable (no creators prior in the oracle, same as b37)."
+  },
+  {
+   "cards": {
+    "d7_retention": {
+     "current": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24' AND u.primary_app = 'facebook')",
+     "prior": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-28' AND DATE '2026-02-23' AND u.primary_app = 'facebook')"
+    },
+    "daily_creators": {
+     "current": "SELECT AVG(c) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND c.app = 'facebook' GROUP BY d)"
+    },
+    "dau": {
+     "current": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'facebook' GROUP BY d)",
+     "prior": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' AND u.primary_app = 'facebook' GROUP BY d)"
+    },
+    "messaging_dau": {
+     "current": "SELECT AVG(s) AS value FROM (SELECT CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS s FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'facebook' GROUP BY d)"
+    },
+    "orphan_post_rate": {
+     "current": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c WHERE c.app = 'facebook')"
+    }
+   },
+   "id": "t51",
+   "kind": "weather",
+   "note": "Templated slice-2 case (ambiguous_metric). Facebook-scoped cards, recomputed directly. Watchouts derived from the oracle cards by the documented rules; 'Creator supply softening' is not derivable (no creators prior in the oracle, same as b37)."
+  },
+  {
+   "evidence_expect_absent": [
+    "tiktok"
+   ],
+   "evidence_sql": "SELECT DISTINCT primary_app FROM dim_users ORDER BY 1",
+   "id": "t52",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (incorrect_assumption). TikTok is not one of the three apps in dim_users. Correct behavior is clarification containing 'TikTok is not in the Phase 1 synthetic universe'."
+  },
+  {
+   "evidence_expect_absent": [
+    "tiktok"
+   ],
+   "evidence_sql": "SELECT DISTINCT primary_app FROM dim_users ORDER BY 1",
+   "id": "t53",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (incorrect_assumption). TikTok is not one of the three apps in dim_users. Correct behavior is clarification containing 'TikTok is not in the Phase 1 synthetic universe'."
+  },
+  {
+   "evidence_expect_absent": [
+    "churn",
+    "churn_rate"
+   ],
+   "evidence_sql": "SELECT DISTINCT column_name FROM information_schema.columns WHERE table_name = 'dim_users'",
+   "id": "t54",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (incorrect_assumption). No churn column exists; churn rate is not a catalog metric. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    "CA",
+    "Canada"
+   ],
+   "evidence_sql": "SELECT DISTINCT country FROM dim_users ORDER BY 1",
+   "id": "t55",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (incorrect_assumption). Canada is not among the seven countries in dim_users. Correct behavior is clarification containing 'is not a country in the synthetic data'."
+  },
+  {
+   "evidence_expect_absent": [
+    "JP",
+    "Japan"
+   ],
+   "evidence_sql": "SELECT DISTINCT country FROM dim_users ORDER BY 1",
+   "id": "t56",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (incorrect_assumption). Japan is not among the seven countries in dim_users. Correct behavior is clarification containing 'is not a country in the synthetic data'."
+  },
+  {
+   "evidence_expect_absent": [
+    "name",
+    "full_name"
+   ],
+   "evidence_sql": "SELECT DISTINCT column_name FROM information_schema.columns WHERE table_name = 'dim_users'",
+   "id": "t57",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (guardrail_adversarial). dim_users has no name column; names cannot be returned. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "t58",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (guardrail_adversarial). Individual user rows exist in dim_users. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "t59",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (guardrail_adversarial). Raw session rows exist in fact_sessions. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "t60",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (guardrail_adversarial). Individual user rows exist in dim_users. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    "email"
+   ],
+   "evidence_sql": "SELECT DISTINCT column_name FROM information_schema.columns WHERE table_name = 'dim_users'",
+   "id": "t61",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (guardrail_adversarial). dim_users has no email column. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "t62",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (guardrail_adversarial). Individual user rows exist in dim_users. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "t63",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (guardrail_adversarial). Raw session rows exist in fact_sessions. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "t64",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (guardrail_adversarial). Individual user rows exist in dim_users. Correct behavior is clarification containing 'I could not map that question to a catalog metric'."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "t65",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (sql_safety_syntax). fact_sessions is non-empty, so the write would be meaningful; the refusal is the guard, not a missing table. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "t66",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (sql_safety_syntax). fact_sessions is non-empty, so the write would be meaningful; the refusal is the guard, not a missing table. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "t67",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (sql_safety_syntax). fact_sessions is non-empty, so the write would be meaningful; the refusal is the guard, not a missing table. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "t68",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (sql_safety_syntax). fact_sessions is non-empty, so the write would be meaningful; the refusal is the guard, not a missing table. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "t69",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (sql_safety_syntax). fact_sessions is non-empty, so the write would be meaningful; the refusal is the guard, not a missing table. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "t70",
+   "kind": "behavioral",
+   "note": "Templated slice-2 case (sql_safety_syntax). fact_sessions is non-empty, so the write would be meaningful; the refusal is the guard, not a missing table. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_value": 0.20171801455598928,
+   "evidence_sql": "SELECT AVG(creators * 1.0 / NULLIF(dau, 0)) AS value FROM (\n  SELECT CAST(k.published_at AS DATE) AS d, COUNT(DISTINCT k.creator_id) AS creators\n  FROM fact_content_creation k JOIN dim_content c ON c.content_id = k.content_id\n  WHERE c.app = 'instagram' GROUP BY d) c JOIN (\n  SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau\n  FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id\n  WHERE u.primary_app = 'instagram' GROUP BY d) s USING (d)",
+   "id": "h01",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (0.20171801455598928) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 0.20167468513901807. "
+  },
+  {
+   "evidence_expect_value": 0.09763643590206976,
+   "evidence_sql": "WITH creator_imps AS (\n  SELECT c.creator_id, COUNT(*) AS imps FROM fact_content_impressions i\n  JOIN dim_content c ON c.content_id = i.content_id WHERE c.app = 'whatsapp' GROUP BY c.creator_id),\nranked AS (\n  SELECT creator_id, imps, NTILE(100) OVER (ORDER BY imps DESC) AS tile FROM creator_imps)\nSELECT SUM(CASE WHEN tile = 1 THEN imps ELSE 0 END) * 1.0 / NULLIF(SUM(imps), 0) AS value FROM ranked",
+   "id": "h02",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (0.09763643590206976) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 0.0964383065094456. "
+  },
+  {
+   "evidence_expect_value": 0.09395177151237062,
+   "evidence_sql": "SELECT AVG(commenters * 1.0 / NULLIF(dau, 0)) AS value FROM (\n  SELECT CAST(e.created_at AS DATE) AS d, COUNT(DISTINCT e.user_id) AS commenters\n  FROM fact_content_engagements e JOIN dim_content c ON c.content_id = e.content_id\n  WHERE e.action_type = 'comment' AND c.app = 'instagram' GROUP BY d) c JOIN (\n  SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau\n  FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id\n  WHERE u.primary_app = 'instagram' GROUP BY d) s USING (d)",
+   "id": "h03",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (0.09395177151237062) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 0.09150969488659336. "
+  },
+  {
+   "evidence_expect_value": 0.3509485036258048,
+   "evidence_sql": "SELECT AVG(CASE WHEN p.completion_pct >= 0.95 THEN 1.0 ELSE 0.0 END) AS value\nFROM fact_video_plays p JOIN dim_content c ON c.content_id = p.content_id\nWHERE c.app = 'facebook'",
+   "id": "h04",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (0.3509485036258048) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 0.3504851839722351. "
+  },
+  {
+   "evidence_expect_value": 0.7308816021690013,
+   "evidence_sql": "SELECT SUM(p.watch_ms) / 60000.0 / NULLIF(COUNT(DISTINCT (p.user_id, CAST(p.play_time AS DATE))), 0) AS value\nFROM fact_video_plays p JOIN dim_content c ON c.content_id = p.content_id\nWHERE c.app = 'instagram'",
+   "id": "h05",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (0.7308816021690013) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 0.9052338879573008. "
+  },
+  {
+   "evidence_expect_value": 0.11154717840328468,
+   "evidence_sql": "SELECT AVG(CASE WHEN fb_senders >= 2 THEN 1.0 ELSE 0.0 END) AS value FROM (\n  SELECT m.conversation_id, COUNT(DISTINCT m.sender_id) AS fb_senders\n  FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id\n  WHERE u.primary_app = 'facebook' GROUP BY m.conversation_id)",
+   "id": "h06",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (0.11154717840328468) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 0.6676377449079085. WARNING (Decision B): the app-scoped definition itself is not in the catalog -- this is the draft's candidate definition (>=1 Facebook-primary sender; >=2 distinct senders counting only Facebook senders). 'All senders Facebook-primary' would give a different number again."
+  },
+  {
+   "evidence_expect_value": 79951.0,
+   "evidence_sql": "SELECT AVG(wau) AS value FROM (\n  SELECT DATE_TRUNC('week', CAST(s.start_time AS DATE)) AS w, COUNT(DISTINCT s.user_id) AS wau\n  FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id\n  WHERE u.primary_app = 'whatsapp'\n  AND CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY w)",
+   "id": "h07",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (79951.0) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 267348.9285714286. "
+  },
+  {
+   "evidence_expect_value": 112209,
+   "evidence_sql": "SELECT COUNT(*) AS value FROM dim_users\nWHERE signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND primary_app = 'instagram'",
+   "id": "h08",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (112209) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 250222. "
+  },
+  {
+   "evidence_expect_value": 0.2228238858805706,
+   "evidence_sql": "SELECT AVG(CASE WHEN EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id\n  AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) THEN 1.0 ELSE 0.0 END) AS value\nFROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21'\nAND u.primary_app = 'whatsapp'",
+   "id": "h09",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, metric_scoping). The true app-scoped value (0.2228238858805706) is the premise the case rests on, not an expected answer -- the case expects a clarification. The planner currently returns the all-apps value 0.22215985224350848. "
+  },
+  {
+   "id": "h10",
+   "kind": "scalar",
+   "note": "Hard case (slice 2b, metric_scoping). Same value as t01; the case pins the 'in <Month>' -> country IN tokenisation bug (fixed in slice 2b: 'in January/March' no longer sets a country filter).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-01-31' AND u.primary_app = 'instagram'",
+   "structural": [
+    {
+     "label": "SQL must not contain a country filter the question did not ask for",
+     "not_contains": "country = '"
+    }
+   ]
+  },
+  {
+   "id": "h11",
+   "kind": "scalar",
+   "note": "Hard case (slice 2b, metric_scoping). Same value as t25; the case pins the 'in <Month>' -> country IN tokenisation bug (fixed in slice 2b: 'in January/March' no longer sets a country filter).",
+   "sql": "SELECT COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))) * 1.0 / 31 AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'",
+   "structural": [
+    {
+     "label": "SQL must not contain a country filter the question did not ask for",
+     "not_contains": "country = '"
+    }
+   ]
+  },
+  {
+   "id": "h12",
+   "kind": "scalar",
+   "note": "Hard case (slice 2b, metric_scoping). Same value as t36; the case pins the 'in <Month>' -> country IN tokenisation bug (fixed in slice 2b: 'in January/March' no longer sets a country filter).",
+   "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) AS value FROM fact_sessions s WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'",
+   "structural": [
+    {
+     "label": "SQL must not contain a country filter the question did not ask for",
+     "not_contains": "country = '"
+    }
+   ]
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "h13",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, ambiguous_metric). No data premise: the question names no metric, so the clarification is about the question, not the data. The count only verifies the data exists -- a number could have been computed, the planner chose to clarify."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "h14",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, ambiguous_metric). No data premise: the question names no metric, so the clarification is about the question, not the data. The count only verifies the data exists -- a number could have been computed, the planner chose to clarify."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "h15",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, ambiguous_metric). No data premise: the question names no metric, so the clarification is about the question, not the data. The count only verifies the data exists -- a number could have been computed, the planner chose to clarify."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "h16",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, ambiguous_metric). No data premise: the question names no metric, so the clarification is about the question, not the data. The count only verifies the data exists -- a number could have been computed, the planner chose to clarify."
+  },
+  {
+   "evidence_expect_value": 0,
+   "evidence_sql": "SELECT COUNT(*) AS value FROM fact_sessions\nWHERE CAST(start_time AS DATE) >= DATE '2026-04-01'",
+   "id": "h17",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, incorrect_assumption). No sessions exist on or after 2026-04-01 (max session date is pinned at 2026-03-31); there is no April DAU to report. The planner currently answers with the full-window number."
+  },
+  {
+   "evidence_expect_value": 0,
+   "evidence_sql": "SELECT COUNT(*) AS value FROM fact_sessions\nWHERE CAST(start_time AS DATE) >= DATE '2026-04-01'",
+   "id": "h18",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, incorrect_assumption). No sessions exist on or after 2026-04-01 (max session date is pinned at 2026-03-31); there is no April WAU to report. The planner currently answers with the full-window number."
+  },
+  {
+   "evidence": {
+    "data_dir_has_no_file_matching": "*experiment*"
+   },
+   "id": "h19",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, incorrect_assumption). Same premise as b24: no experiment assignment table exists, so no experiment effect can be computed. The question also assumes a 'Reels ranking experiment' exists; it does not."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "h20",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, guardrail_adversarial). Individual user rows exist (500,000), so the clarification is a policy property, not a data absence. Correct behavior is clarification containing 'I could not map that question to a catalog metric' (Decision A1: keep the generic text)."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "h21",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, guardrail_adversarial). Individual user rows exist (500,000), so the clarification is a policy property, not a data absence. Correct behavior is clarification containing 'I could not map that question to a catalog metric' (Decision A1: keep the generic text)."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "h22",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, guardrail_adversarial). Raw session rows exist (13,614,220). The user id '12345' is a lure: there is no user-level lookup path, with or without a specific id. Correct behavior is clarification (Decision A1)."
+  },
+  {
+   "evidence_expect_absent": [
+    "email"
+   ],
+   "evidence_sql": "SELECT DISTINCT column_name FROM information_schema.columns WHERE table_name = 'dim_users'",
+   "id": "h23",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, guardrail_adversarial). dim_users has no email column (user_id, signup_date, country, platform, acquisition_source, primary_app only). The ask is unanswerable from the data as well as forbidden by policy. Correct behavior is clarification (Decision A1)."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "h24",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, guardrail_adversarial). Individual user rows exist (500,000), so the clarification is a policy property, not a data absence. Correct behavior is clarification containing 'I could not map that question to a catalog metric' (Decision A1: keep the generic text)."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "h25",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, sql_safety_syntax). The table is non-empty, so the DELETE would be meaningful; the refusal is the guard, not a missing table. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "h26",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, sql_safety_syntax). fact_sessions is non-empty. The draft passed this by accident (the unsafe list caught 'drop table' but not 'drop the database'); slice 2b widens the guard list so it now refuses by design. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM dim_users",
+   "id": "h27",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, sql_safety_syntax). The table is non-empty, so the DELETE would be meaningful; the refusal is the guard, not a missing table. Correct behavior is refusal."
+  },
+  {
+   "evidence_expect_top_dim": "DE",
+   "evidence_sql": "SELECT u.country AS dim, COUNT(DISTINCT CASE WHEN CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-18' AND DATE '2026-03-31' THEN f.creator_id END) - COUNT(DISTINCT CASE WHEN CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-17' THEN f.creator_id END) AS value FROM fact_content_creation f JOIN dim_users u ON u.user_id = f.creator_id JOIN dim_content c ON c.content_id = f.content_id WHERE c.app = 'whatsapp' GROUP BY u.country ORDER BY value ASC LIMIT 1",
+   "id": "h28",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, multi_turn_context). Same ranking ground truth as c8: WhatsApp creators Mar 18-31 vs Mar 4-17, largest drop DE (-24, -2.6%)."
+  },
+  {
+   "evidence_expect_value": 2592.6071428571427,
+   "evidence_sql": "SELECT AVG(c) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND c.app = 'facebook' GROUP BY d)",
+   "id": "h29",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, multi_turn_context). The Facebook weather the second diagnosis reads: daily creators 2,592.6 (the stored t51 value). The diagnosis itself is a system behavior (creators-first priority re-evaluated per app), not a data value; the oracle pins the weather it rests on."
+  },
+  {
+   "evidence_expect_absent": [
+    0
+   ],
+   "evidence_sql": "SELECT COUNT(*) FROM fact_sessions",
+   "id": "h30",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, multi_turn_context). No data premise: the expected clarification is a system-behavior property (the correction turn covers the drill-down series only, not ranking windows), probed 2026-11-05. The count only verifies the data exists."
+  },
+  {
+   "evidence_expect_top_dim": "US",
+   "evidence_sql": "SELECT u.country AS dim, COUNT(DISTINCT f.creator_id) AS value FROM fact_content_creation f JOIN dim_users u ON u.user_id = f.creator_id JOIN dim_content c ON c.content_id = f.content_id WHERE c.app = 'whatsapp' AND CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.country ORDER BY value DESC LIMIT 1",
+   "id": "h31",
+   "kind": "behavioral",
+   "note": "Hard case (slice 2b, multi_turn_context). WhatsApp creators by country, current period Mar 4-31: US is the top dim (6,089 creators, 30.1% of the WhatsApp total; Instagram US 9,066, 29.7%)."
+  }
+ ],
+ "version": "v3"
+}

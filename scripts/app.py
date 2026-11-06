@@ -21,6 +21,7 @@ from socialpulse_nlq.sqlviz import build_visualization
 from socialpulse_nlq.weather import compute_weather
 from socialpulse_nlq.chat import ChatSession
 from socialpulse_nlq.questions import load_all_questions, save_questions
+from socialpulse_nlq.usage import client_ip, record_event, usage_snapshot
 import uuid
 
 CHAT_SESSIONS = {}
@@ -82,6 +83,11 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
             self.wfile.write(html)
+            # Usage tracking: one page_load line per page served. The
+            # log carries country + salted daily hash only — never the
+            # raw IP (see socialpulse_nlq/usage.py, docs/usage-tracking.md).
+            record_event("page_load",
+                         client_ip(self.headers, self.client_address[0]))
         elif path in ("/shell", "/shell.html"):
             # Unified Muse-style shell (slice 1): a NEW page only. The
             # existing "/" dashboard + docked chat routes are untouched,
@@ -92,9 +98,16 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(html)))
             self.end_headers()
             self.wfile.write(html)
+            record_event("page_load",
+                         client_ip(self.headers, self.client_address[0]))
         elif path == "/api/health":
             # Liveness only: static payload, no DuckDB, no data dir.
             self._send_json(HEALTH_PAYLOAD)
+        elif path == "/api/usage":
+            # Live usage counters since this process started. Counts
+            # only — no IPs, no hashes, no per-visitor rows. Resets
+            # when the instance sleeps/restarts (Render free tier).
+            self._send_json(usage_snapshot())
         elif path == "/api/shell-config":
             # Copilot backend origin for the shell. Env override (used in
             # deployment) wins; empty means the shell falls back to its
@@ -135,6 +148,10 @@ class Handler(BaseHTTPRequestHandler):
             sid = body.get("session_id") or str(uuid.uuid4())
             if sid not in CHAT_SESSIONS:
                 CHAT_SESSIONS[sid] = ChatSession(self.data_dir)
+                # Usage tracking: a new chat session starts. Country +
+                # salted daily hash only — never the raw IP.
+                record_event("session_start",
+                             client_ip(self.headers, self.client_address[0]))
             reply = CHAT_SESSIONS[sid].respond(str(body.get("message", "")))
             reply = dict(reply)
             reply["session_id"] = sid

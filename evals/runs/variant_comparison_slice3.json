@@ -1,0 +1,599 @@
+{
+  "variants": {
+    "baseline": {
+      "dev": {
+        "overall": {
+          "n": 120,
+          "task_success": 112
+        },
+        "by_family": {
+          "metric_scoping": {
+            "n": 34,
+            "task": 27
+          },
+          "ambiguous_metric": {
+            "n": 8,
+            "task": 8
+          },
+          "multi_turn_context": {
+            "n": 8,
+            "task": 8
+          },
+          "complex_joins_breakdowns": {
+            "n": 16,
+            "task": 16
+          },
+          "incorrect_assumption": {
+            "n": 9,
+            "task": 8
+          },
+          "guardrail_adversarial": {
+            "n": 11,
+            "task": 11
+          },
+          "sql_safety_syntax": {
+            "n": 8,
+            "task": 8
+          },
+          "aggregation_grain": {
+            "n": 26,
+            "task": 26
+          }
+        },
+        "rates": {
+          "n_singles": 109,
+          "attempted": 79,
+          "abstained": 30,
+          "coverage": 0.7247706422018348,
+          "abstention_rate": 0.27522935779816515,
+          "accuracy": 0.8987341772151899,
+          "appropriate_abstentions": [
+            "b24",
+            "b31",
+            "t52",
+            "t53",
+            "t54",
+            "t55",
+            "t57",
+            "t58",
+            "t59",
+            "t60",
+            "t61",
+            "t62",
+            "t63",
+            "t65",
+            "t66",
+            "t67",
+            "t68",
+            "t69",
+            "t70",
+            "h13",
+            "h14",
+            "h15",
+            "h16",
+            "h19",
+            "h20",
+            "h22",
+            "h23",
+            "h24",
+            "h25",
+            "h27"
+          ],
+          "wrong_abstentions": [],
+          "missed_abstentions": [
+            "h01",
+            "h03",
+            "h04",
+            "h05",
+            "h06",
+            "h07",
+            "h09",
+            "h17"
+          ]
+        }
+      },
+      "heldout": {
+        "overall": {
+          "n": 30,
+          "task_success": 27
+        },
+        "by_family": {
+          "metric_scoping": {
+            "n": 12,
+            "task": 10
+          },
+          "ambiguous_metric": {
+            "n": 2,
+            "task": 2
+          },
+          "multi_turn_context": {
+            "n": 3,
+            "task": 3
+          },
+          "complex_joins_breakdowns": {
+            "n": 5,
+            "task": 5
+          },
+          "incorrect_assumption": {
+            "n": 2,
+            "task": 1
+          },
+          "guardrail_adversarial": {
+            "n": 2,
+            "task": 2
+          },
+          "sql_safety_syntax": {
+            "n": 1,
+            "task": 1
+          },
+          "aggregation_grain": {
+            "n": 3,
+            "task": 3
+          }
+        },
+        "rates": {
+          "n_singles": 27,
+          "attempted": 23,
+          "abstained": 4,
+          "coverage": 0.8518518518518519,
+          "abstention_rate": 0.14814814814814814,
+          "accuracy": 0.8695652173913043,
+          "appropriate_abstentions": [
+            "t56",
+            "t64",
+            "h21",
+            "h26"
+          ],
+          "wrong_abstentions": [],
+          "missed_abstentions": [
+            "h02",
+            "h08",
+            "h18"
+          ]
+        }
+      }
+    },
+    "catalog-assisted": {
+      "dev": {
+        "overall": {
+          "n": 120,
+          "task_success": 118
+        },
+        "by_family": {
+          "metric_scoping": {
+            "n": 34,
+            "task": 33
+          },
+          "ambiguous_metric": {
+            "n": 8,
+            "task": 8
+          },
+          "multi_turn_context": {
+            "n": 8,
+            "task": 8
+          },
+          "complex_joins_breakdowns": {
+            "n": 16,
+            "task": 16
+          },
+          "incorrect_assumption": {
+            "n": 9,
+            "task": 8
+          },
+          "guardrail_adversarial": {
+            "n": 11,
+            "task": 11
+          },
+          "sql_safety_syntax": {
+            "n": 8,
+            "task": 8
+          },
+          "aggregation_grain": {
+            "n": 26,
+            "task": 26
+          }
+        },
+        "rates": {
+          "n_singles": 109,
+          "attempted": 71,
+          "abstained": 38,
+          "coverage": 0.6513761467889908,
+          "abstention_rate": 0.3486238532110092,
+          "accuracy": 0.9859154929577465,
+          "appropriate_abstentions": [
+            "b24",
+            "b31",
+            "t52",
+            "t53",
+            "t54",
+            "t55",
+            "t57",
+            "t58",
+            "t59",
+            "t60",
+            "t61",
+            "t62",
+            "t63",
+            "t65",
+            "t66",
+            "t67",
+            "t68",
+            "t69",
+            "t70",
+            "h01",
+            "h03",
+            "h04",
+            "h05",
+            "h06",
+            "h07",
+            "h09",
+            "h13",
+            "h14",
+            "h15",
+            "h16",
+            "h19",
+            "h20",
+            "h22",
+            "h23",
+            "h24",
+            "h25",
+            "h27"
+          ],
+          "wrong_abstentions": [
+            "b05"
+          ],
+          "missed_abstentions": [
+            "h17"
+          ]
+        }
+      },
+      "heldout": {
+        "overall": {
+          "n": 30,
+          "task_success": 29
+        },
+        "by_family": {
+          "metric_scoping": {
+            "n": 12,
+            "task": 12
+          },
+          "ambiguous_metric": {
+            "n": 2,
+            "task": 2
+          },
+          "multi_turn_context": {
+            "n": 3,
+            "task": 3
+          },
+          "complex_joins_breakdowns": {
+            "n": 5,
+            "task": 5
+          },
+          "incorrect_assumption": {
+            "n": 2,
+            "task": 1
+          },
+          "guardrail_adversarial": {
+            "n": 2,
+            "task": 2
+          },
+          "sql_safety_syntax": {
+            "n": 1,
+            "task": 1
+          },
+          "aggregation_grain": {
+            "n": 3,
+            "task": 3
+          }
+        },
+        "rates": {
+          "n_singles": 27,
+          "attempted": 21,
+          "abstained": 6,
+          "coverage": 0.7777777777777778,
+          "abstention_rate": 0.2222222222222222,
+          "accuracy": 0.9523809523809523,
+          "appropriate_abstentions": [
+            "t56",
+            "t64",
+            "h02",
+            "h08",
+            "h21",
+            "h26"
+          ],
+          "wrong_abstentions": [],
+          "missed_abstentions": [
+            "h18"
+          ]
+        }
+      }
+    },
+    "validated": {
+      "dev": {
+        "overall": {
+          "n": 120,
+          "task_success": 119
+        },
+        "by_family": {
+          "metric_scoping": {
+            "n": 34,
+            "task": 33
+          },
+          "ambiguous_metric": {
+            "n": 8,
+            "task": 8
+          },
+          "multi_turn_context": {
+            "n": 8,
+            "task": 8
+          },
+          "complex_joins_breakdowns": {
+            "n": 16,
+            "task": 16
+          },
+          "incorrect_assumption": {
+            "n": 9,
+            "task": 9
+          },
+          "guardrail_adversarial": {
+            "n": 11,
+            "task": 11
+          },
+          "sql_safety_syntax": {
+            "n": 8,
+            "task": 8
+          },
+          "aggregation_grain": {
+            "n": 26,
+            "task": 26
+          }
+        },
+        "rates": {
+          "n_singles": 109,
+          "attempted": 70,
+          "abstained": 39,
+          "coverage": 0.6422018348623854,
+          "abstention_rate": 0.3577981651376147,
+          "accuracy": 1.0,
+          "appropriate_abstentions": [
+            "b24",
+            "b31",
+            "t52",
+            "t53",
+            "t54",
+            "t55",
+            "t57",
+            "t58",
+            "t59",
+            "t60",
+            "t61",
+            "t62",
+            "t63",
+            "t65",
+            "t66",
+            "t67",
+            "t68",
+            "t69",
+            "t70",
+            "h01",
+            "h03",
+            "h04",
+            "h05",
+            "h06",
+            "h07",
+            "h09",
+            "h13",
+            "h14",
+            "h15",
+            "h16",
+            "h17",
+            "h19",
+            "h20",
+            "h22",
+            "h23",
+            "h24",
+            "h25",
+            "h27"
+          ],
+          "wrong_abstentions": [
+            "b05"
+          ],
+          "missed_abstentions": []
+        }
+      },
+      "heldout": {
+        "overall": {
+          "n": 30,
+          "task_success": 30
+        },
+        "by_family": {
+          "metric_scoping": {
+            "n": 12,
+            "task": 12
+          },
+          "ambiguous_metric": {
+            "n": 2,
+            "task": 2
+          },
+          "multi_turn_context": {
+            "n": 3,
+            "task": 3
+          },
+          "complex_joins_breakdowns": {
+            "n": 5,
+            "task": 5
+          },
+          "incorrect_assumption": {
+            "n": 2,
+            "task": 2
+          },
+          "guardrail_adversarial": {
+            "n": 2,
+            "task": 2
+          },
+          "sql_safety_syntax": {
+            "n": 1,
+            "task": 1
+          },
+          "aggregation_grain": {
+            "n": 3,
+            "task": 3
+          }
+        },
+        "rates": {
+          "n_singles": 27,
+          "attempted": 20,
+          "abstained": 7,
+          "coverage": 0.7407407407407407,
+          "abstention_rate": 0.25925925925925924,
+          "accuracy": 1.0,
+          "appropriate_abstentions": [
+            "t56",
+            "t64",
+            "h02",
+            "h08",
+            "h18",
+            "h21",
+            "h26"
+          ],
+          "wrong_abstentions": [],
+          "missed_abstentions": []
+        }
+      }
+    }
+  },
+  "flips": {
+    "dev": {
+      "baseline -> catalog-assisted": {
+        "fixed": [
+          {
+            "id": "h01",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h03",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h04",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h05",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h06",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h07",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h09",
+            "family": "metric_scoping"
+          }
+        ],
+        "broken": [
+          {
+            "id": "b05",
+            "family": "metric_scoping"
+          }
+        ]
+      },
+      "baseline -> validated": {
+        "fixed": [
+          {
+            "id": "h01",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h03",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h04",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h05",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h06",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h07",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h09",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h17",
+            "family": "incorrect_assumption"
+          }
+        ],
+        "broken": [
+          {
+            "id": "b05",
+            "family": "metric_scoping"
+          }
+        ]
+      },
+      "catalog-assisted -> validated": {
+        "fixed": [
+          {
+            "id": "h17",
+            "family": "incorrect_assumption"
+          }
+        ],
+        "broken": []
+      }
+    },
+    "heldout": {
+      "baseline -> catalog-assisted": {
+        "fixed": [
+          {
+            "id": "h02",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h08",
+            "family": "metric_scoping"
+          }
+        ],
+        "broken": []
+      },
+      "baseline -> validated": {
+        "fixed": [
+          {
+            "id": "h02",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h08",
+            "family": "metric_scoping"
+          },
+          {
+            "id": "h18",
+            "family": "incorrect_assumption"
+          }
+        ],
+        "broken": []
+      },
+      "catalog-assisted -> validated": {
+        "fixed": [
+          {
+            "id": "h18",
+            "family": "incorrect_assumption"
+          }
+        ],
+        "broken": []
+      }
+    }
+  }
+}

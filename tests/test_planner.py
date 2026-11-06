@@ -4,7 +4,128 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from socialpulse_nlq.planner import catalog_metric_ids, guard_sql, plan
+from socialpulse_nlq.planner import (
+    _load_catalog_metrics, build_sql, catalog_metric_ids, guard_sql, plan)
+
+
+def _scope_from_templates(metric):
+    """Dimensions the build_sql template for `metric` actually honors:
+    call it with each filter and check the SQL contains the filter
+    condition. This is the independent side of the catalog-scope check
+    -- it reads the code, not the YAML."""
+    f_base = {"date_start": "2026-01-01", "date_end": "2026-03-31"}
+    needles = {
+        "app": ("primary_app = 'instagram'", "app = 'instagram'",
+                "c.app = 'instagram'", "i.app = 'instagram'"),
+        "country": ("country = 'US'", "u.country = 'US'"),
+        "platform": ("platform = 'android'", "u.platform = 'android'"),
+        "surface": ("surface = 'reels'", "c.surface = 'reels'",
+                    "i.surface = 'reels'"),
+        "acquisition": ("acquisition_source = 'organic'",),
+    }
+    values = {"app": "instagram", "country": "US", "platform": "android",
+              "surface": "reels", "acquisition": "organic"}
+    out = []
+    for dim in ("app", "country", "platform", "surface", "acquisition"):
+        f = dict(f_base, **{dim: values[dim]})
+        sql, _tables, _grain = build_sql(metric, f, None, "test question")
+        if any(n in sql for n in needles[dim]):
+            out.append(dim)
+    return out
+
+
+def test_catalog_scope_matches_templates():
+    """Slice 3: the catalog scope field must be a faithful transcription
+    of what the templates do. A mismatch means the catalog drifted from
+    the code (or the code changed without updating the catalog)."""
+    catalog = _load_catalog_metrics()
+    assert len(catalog) == 20
+    for metric, entry in sorted(catalog.items()):
+        assert entry["scope"] is not None, f"{metric} has no scope line"
+        assert sorted(_scope_from_templates(metric)) == sorted(entry["scope"]), \
+            f"{metric}: templates honor {_scope_from_templates(metric)}, catalog says {entry['scope']}"
+
+
+def test_baseline_default_unchanged():
+    """plan(q) is plan(q, variant='baseline') for a spread of questions."""
+    for q in ("What is the mean daily DAU for instagram?",
+              "What is creator penetration for instagram?",
+              "What was DAU in April 2026?",
+              "List all sessions",
+              "How is the product doing?"):
+        assert plan(q) == plan(q, variant="baseline"), q
+
+
+def test_unknown_variant_raises():
+    try:
+        plan("What is DAU?", variant="nope")
+    except ValueError:
+        return
+    raise AssertionError("unknown variant did not raise")
+
+
+def test_catalog_assisted_scope_trap_clarifies():
+    p = plan("What is creator penetration for instagram?", variant="catalog-assisted")
+    assert p["type"] == "clarification" and p["sql"] is None
+    assert "creator_penetration" in p["clarification"] and "app" in p["clarification"]
+    # No scope requested: the same metric still answers.
+    p2 = plan("What is creator penetration?", variant="catalog-assisted")
+    assert p2["type"] == "query" and p2["metric"] == "creator_penetration"
+
+
+def test_catalog_assisted_app_scoped_dau_still_queries():
+    p = plan("What is the mean daily DAU for instagram?", variant="catalog-assisted")
+    assert p["type"] == "query" and p["metric"] == "dau_mean_daily"
+    assert "primary_app = 'instagram'" in p["sql"]
+
+
+def test_catalog_assisted_reels_metric_not_blocked():
+    """The metric-name conflation: 'reels' in a Reels-metric question is
+    the metric, not a surface-scope request."""
+    for q in ("What is the Reels completion rate?",
+              "What is Reels watch time per viewer?"):
+        p = plan(q, variant="catalog-assisted")
+        assert p["type"] == "query", q
+
+
+def test_catalog_assisted_window_not_fixed():
+    """Documented limitation (docs/ablations.md): the catalog has no
+    window dimension, so catalog-assisted does NOT fix April questions."""
+    p = plan("What was DAU in April 2026?", variant="catalog-assisted")
+    assert p["type"] == "query" and p["metric"] == "dau_mean_daily"
+
+
+def test_catalog_assisted_experiment_registry_agrees():
+    p = plan("What is the primary metric of the Reels ranking experiment?",
+             variant="catalog-assisted")
+    assert p["type"] == "experiment_info"
+    assert p["metric"] == "reels_watch_time_per_viewer_day"
+
+
+def test_validated_scope_trap_clarifies():
+    p = plan("What is creator penetration for instagram?", variant="validated")
+    assert p["type"] == "clarification" and p["sql"] is None
+    assert "app" in p["clarification"]
+
+
+def test_validated_april_clarifies():
+    p = plan("What was DAU in April 2026?", variant="validated")
+    assert p["type"] == "clarification" and p["sql"] is None
+    assert "april" in p["clarification"].lower()
+
+
+def test_validated_normal_query_passes():
+    p = plan("What is the mean daily DAU for instagram?", variant="validated")
+    assert p["type"] == "query" and p["metric"] == "dau_mean_daily"
+
+
+def test_validated_routed_and_weather_pass_through():
+    """Validation applies to query plans only: routed plans and weather
+    reports are not second-guessed."""
+    p = plan("List all sessions", variant="validated")
+    assert p["type"] == "query" and p.get("routed") is True
+    p2 = plan("How is the product doing?", variant="validated")
+    assert p2["type"] == "weather_report"
 
 
 def test_dau_by_app():
