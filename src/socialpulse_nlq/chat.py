@@ -174,6 +174,45 @@ def _find_segment(q):
     return None
 
 
+def _window_label(start, end):
+    """Human label for a plan window (start/end ISO dates).
+
+    Full months get their name ("March 2026"); the two short
+    trailing windows get their span; anything else is spelled out
+    as a date range. Only used to SAY the window in a reply — the
+    window itself always comes from the planner's filters.
+    """
+    import datetime
+    months = {("2026-01-01", "2026-01-31"): "January 2026",
+              ("2026-02-01", "2026-02-28"): "February 2026",
+              ("2026-03-01", "2026-03-31"): "March 2026",
+              ("2026-01-01", "2026-03-31"): "Jan 1 – Mar 31, 2026"}
+    if (start, end) in months:
+        return months[(start, end)]
+    s = datetime.date.fromisoformat(start)
+    e = datetime.date.fromisoformat(end)
+    if s.year == e.year and s.month == e.month:
+        return f"{s.strftime('%b')} {s.day}–{e.day}, {s.year}"
+    return f"{s.strftime('%b %d')} – {e.strftime('%b %d')}, {e.year}"
+
+
+def _window_phrase(start, end):
+    """Question phrasing that reproduces a plan window.
+
+    The planner only produces these windows (_date_range), so the
+    mapping is exhaustive: a full month, a trailing 7/28-day window,
+    or the full 90 days (no phrase needed). Used to re-ask the same
+    daily series for another app with the window carried over.
+    """
+    phrases = {("2026-01-01", "2026-01-31"): " in January 2026",
+               ("2026-02-01", "2026-02-28"): " in February 2026",
+               ("2026-03-01", "2026-03-31"): " in March 2026",
+               ("2026-03-04", "2026-03-31"): " over the last 28 days",
+               ("2026-03-25", "2026-03-31"): " over the last 7 days",
+               ("2026-01-01", "2026-03-31"): ""}
+    return phrases.get((start, end), "")
+
+
 def _fmt(v, unit):
     if v is None:
         return "n/a"
@@ -224,6 +263,11 @@ class ChatSession:
         self.grain_preference = None
         self.filters = {}
         self.corrections = []
+        # Daily-series state (see _daily_series_turn): the window the
+        # last series ran over, so an app-switch follow-up ("what
+        # about WhatsApp?") re-runs the same series for the new app
+        # instead of opening a weather report.
+        self.series_window = None
         # Last single SQL executed by a drill-down/breakdown helper, for
         # the "Show the working" panel. Weather, diagnosis, recommendation
         # and brief turns run many queries or none, so they set nothing
@@ -428,6 +472,89 @@ class ChatSession:
                 "data (the Jan-Mar 2026 window), and the exact SQL is "
                 "in the working panel.")
         return self._reply("mau", text, mau={"app": app, "value": value})
+
+    def _series_question(self, app):
+        """Question that re-asks the stored daily series for an app.
+
+        Same window as the last series (from the planner's filters),
+        so an app-switch follow-up carries the window over instead
+        of silently resetting to the full 90 days.
+        """
+        phrase = _window_phrase(*self.series_window) if self.series_window else ""
+        return f"daily DAU for {app}{phrase}"
+
+    def _daily_series_turn(self, app, question=None):
+        """Standalone daily-series turn (2026-11-06): DAU by day.
+
+        A single metric series, so like the MAU turn it needs no
+        weather report first. The planner's dau_mean_daily series
+        template supplies the date-by-date query, and the working
+        payload carries it with the metric definition, so the shell
+        renders the line chart + table + SQL diagram from the same
+        receipts the single-shot ask UI shows. The turn verifies the
+        plan is really the series (grain "user x day") before
+        running it: a scalar plan ("mean daily DAU") must never be
+        presented as a series, and a question about another metric
+        (creators, messaging) has no daily series in the planner and
+        clarifies instead of inventing one.
+        """
+        from .planner import metric_definition, plan, run_plan
+        self.app = app
+        self.stage = "daily_series"
+        self.topic = None
+        q = question or f"daily DAU for {app}"
+        if not _word(q.lower(), app):
+            # The session app is inherited, not named in the question
+            # (the probe names no app): say it, or the plan would run
+            # the all-apps series while the reply claims one app. The
+            # window and any other slot still come from the question.
+            q = f"{q} for {app}"
+        p = plan(q, variant=self.variant)
+        if (p["type"] != "query" or p.get("metric") != "dau_mean_daily"
+                or p.get("grain") != "user x day" or not p.get("sql")
+                or p.get("filters", {}).get("app") != app):
+            return self._clarify("I could not build a daily DAU series for "
+                                 f"{app} from that question. Try \"Daily DAU for {app} in March 2026\".")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        if not rows:
+            return self._clarify(f"No daily DAU series came back for {app} — the window may be empty.")
+        start = p["filters"]["date_start"]
+        end = p["filters"]["date_end"]
+        self.series_window = (start, end)
+        label = _window_label(start, end)
+        vals = [r[1] for r in rows]
+        dates = [str(r[0]) for r in rows]
+        mean = sum(vals) / len(vals)
+        low_i = vals.index(min(vals))
+        high_i = vals.index(max(vals))
+        definition = metric_definition("dau_mean_daily")
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": cols, "result_rows": rows,
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        phrase = _window_phrase(*self.series_window)
+        self._set_options([
+            {"label": f"Weather — what's happening with {app}?",
+             "send": f"What's happening with {app}?"},
+            {"label": f"Daily DAU for {others[0]}",
+             "send": f"Daily DAU for {others[0]}{phrase}"},
+            {"label": f"Daily DAU for {others[1]}",
+             "send": f"Daily DAU for {others[1]}{phrase}"},
+        ])
+        text = (f"Daily active users for {app} in {label}, by day ({len(rows)} days).\n\n"
+                f"Mean {mean:,.0f} per day, low {min(vals):,} ({dates[low_i]}), "
+                f"high {max(vals):,} ({dates[high_i]}). The full day-by-day series — "
+                "line chart, table, and the exact SQL — is in the working panel.\n\n"
+                "This is the daily series, not the average: ask for \"mean daily DAU\" "
+                "if you want the single average instead.")
+        return self._reply("daily_series", text,
+                           daily_series={"app": app, "start": start, "end": end,
+                                         "days": len(rows), "mean": mean,
+                                         "low": min(vals), "low_date": dates[low_i],
+                                         "high": max(vals), "high_date": dates[high_i]})
 
     def _weather_turn(self, app):
         self.app = app
@@ -1131,7 +1258,7 @@ class ChatSession:
         # send text is what is actually sent, so a letter after a
         # drill-down advances to diagnosis/recommendation/brief instead
         # of re-opening the same drill-down.
-        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage == "mau"):
+        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage in ("mau", "daily_series")):
             idx = ord(q) - ord("a") if q.isalpha() else int(q) - 1
             if 0 <= idx < len(self.options):
                 send = self.options[idx].get("send") or self.options[idx].get("topic")
@@ -1161,6 +1288,10 @@ class ChatSession:
                 # turn, or a bare app name) keeps the MAU intent and
                 # swaps the app, instead of opening a weather report.
                 return self._mau_turn(stripped_clean)
+            if self.stage == "daily_series":
+                # Daily-series follow-up keeps the series intent and
+                # the window, and swaps the app.
+                return self._daily_series_turn(stripped_clean, self._series_question(stripped_clean))
             if q.startswith("same for") and self.topic and self.weather:
                 # Same drill-down, different app: weather the new app
                 # first (so its numbers are the receipt), then re-run
@@ -1198,6 +1329,30 @@ class ChatSession:
             return self._reply("clarification",
                                "Which app's MAU? Reply instagram, whatsapp, or facebook — "
                                "for example, \"What's the MAU for Instagram?\"")
+        # Daily-series intent (2026-11-06): "DAU by day" asks for the
+        # date-by-date series, not the averaged scalar. Placed after
+        # MAU (a "MAU trend" question is a MAU scalar, not a series)
+        # and before breakdown (a series is not a decomposition).
+        # "mean"/"average" stays the scalar; MAU/WAU have no daily
+        # series in the planner; "by country/surface/platform/app/
+        # acquisition" is a breakdown, not a series.
+        if (("dau" in q or "daily active" in q)
+                and ("by day" in q or "individual day" in q or "each day" in q
+                     or "daily" in q or "per day" in q or "trend" in q or "over time" in q)
+                and "mean" not in q and "average" not in q
+                and "mau" not in q and "wau" not in q
+                and " by country" not in q and " by surface" not in q
+                and " by platform" not in q and " by app" not in q
+                and " by acquisition" not in q):
+            app = app_found or self.app
+            if app:
+                return self._daily_series_turn(app, message)
+            self._set_options([
+                {"label": a, "send": f"Daily DAU for {a}?", "topic": None} for a in APPS
+            ])
+            return self._reply("clarification",
+                               "Which app's daily DAU? Reply instagram, whatsapp, or facebook — "
+                               "for example, \"Daily DAU for Instagram in March 2026\".")
         # Breakdown: "creators by country", "creators by surface".
         # This is the country/surface decomposition the user chose
         # first (2026-10-29), ahead of creator cohorts.

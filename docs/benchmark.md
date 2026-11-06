@@ -556,3 +556,230 @@ PYTHONPATH=src python scripts/run_benchmark_v3.py --split heldout  # report only
 PYTHONPATH=src python scripts/run_benchmark_v3.py --split all
 PYTHONPATH=src python scripts/run_benchmark_v3.py --skip-oracle     # benchmark only
 ```
+
+# Benchmark v4 — daily-series turn + two user probes (2026-11-06)
+
+v4 = v3's 150 cases plus the **two user probes (p01–p02)** from
+Siddhartha's live-shell screenshots, wired in by
+`scripts/wire_daily_series_cases.py`. Totals: **152 cases, 122 dev /
+30 held-out** (both new cases in dev; held-out unchanged). Files:
+`evals/benchmark_v4.json` (137 singles), `evals/conversation_v4.json`
+(15 conversations), `evals/oracle_v4.json` (152 entries),
+`evals/benchmark_v4_manifest.json` (152 cases). CLI:
+`scripts/run_benchmark_v4.py` (same flags as the v3 runner; traces to
+`evals/runs/benchmark_v4_<split>_<timestamp>.json`). The harness gains
+a `v4` entry in `VERSIONS`; v1–v3 stay frozen and runnable.
+
+## The two probes (live shell, 2026-11-06)
+
+- **(a) "Give me Instagram MAU trend for the last 2 weeks"** — live
+  answered with the March MAU scalar 210,809 + the March-only
+  explanation. The planner maps "trend" to `mau_march`; MAU is a
+  monthly scalar, there is no 2-week MAU trend. Current behavior is
+  honest and stays as-is; p01 pins it.
+- **(b) "show me the DAU for month of Mar 2026 by individual day in a
+  line chart"** — live answered with the generic "could not map"
+  clarification. Two gaps, both fixed here: the planner mapped "by
+  individual day" to the scalar average, and the chat had no
+  daily-series turn at all.
+
+## The planner mapping fix (`src/socialpulse_nlq/planner.py`)
+
+Three small, precise changes — all in the mapping layer, none in the
+templates or the data:
+
+1. **`_series_or_scalar`: "by day" / "by individual day" / "each day"
+   are series triggers**, checked after the "mean"/"average" scalar
+   check. Before/after, probed with `plan()`:
+
+   | Question | Before | After |
+   |---|---|---|
+   | DAU for month of Mar 2026 by individual day | scalar average | **date-by-date series, March window** |
+   | DAU for instagram by day in March | scalar average | **date-by-date series, March window** |
+   | daily DAU for Instagram in March | series | series (unchanged) |
+   | mean daily DAU for Instagram in March | scalar average | scalar average (unchanged) |
+   | DAU trend for instagram over the last 28 days | series | series (unchanged) |
+
+   No existing case regresses: every `dau_mean_daily` case in v3 uses
+   "mean daily DAU" phrasing (scalar) or "trend"/"over the last N
+   days" (series); none uses "by day"/"by individual day"/"each day".
+
+2. **`_in_is_preposition`: "in a/an ..." is not India.** The probe's
+   "in a line chart" set country IN, so the series would have been
+   India-only as well as averaged. "in a/an" can never be a country
+   reading (no country name is an article). "in India" still scopes;
+   "in January/March" is still a month.
+3. **`_date_range`: month abbreviations Jan/Feb/Mar.** The probe's
+   "month of Mar 2026" fell back to the full 90-day window, because
+   only full month names matched. Abbreviations are word-boundary
+   matched (`\bmar\b`), so "march" and "mark" are unaffected, and the
+   guard in (2) was extended to "in Jan/Feb/Mar" so "in Feb" does not
+   set country IN. No v3 question contains a bare "jan"/"feb"/"mar"
+   (verified by grep), so nothing regresses.
+
+**Deliberately NOT fixed here (narrow scope, pinned by a test):**
+"in the window" (b05) and "in minutes" (b07) still read as country IN
+— the same bug class, but fixing them changes the slice-3 variants'
+b05 outcome under a frozen comparison, so they wait for the planned
+'in'-preposition pass, which must re-run the ablations (see
+`test_in_the_window_and_in_minutes_unchanged`). Out-of-window month
+abbreviations ("in Apr") are likewise unhandled. And `_date_range`
+still only knows "last 7/28/90 days" — a generic "last 2 weeks" window
+falls back to the full 90 days, and the turn states the window it used
+rather than pretending otherwise.
+
+## The daily-series chat turn (`src/socialpulse_nlq/chat.py`)
+
+A standalone turn, like the MAU turn: type **`daily_series`**, no
+weather report required, works as a first turn once the app is known.
+
+- **Routing** (`respond`, after MAU, before breakdown): DAU ("dau" or
+  "daily active") + a series phrase ("by day", "individual day",
+  "each day", "daily", "per day", "trend", "over time"), excluding
+  "mean"/"average" (the scalar), "mau"/"wau" (no daily series), and
+  breakdowns ("by country/surface/platform/app/acquisition").
+- **Verification before running:** the plan must be `dau_mean_daily`
+  with grain exactly "user x day" and an app filter equal to the
+  turn's app; otherwise it clarifies instead of presenting a scalar
+  (or another metric — creators/messaging have no series branch in
+  the planner) as a series.
+- **App inheritance:** the turn plans the user's question, and if the
+  app is not named in it (the probe names no app), it appends
+  "for \<app\>" from the session — otherwise the plan would run the
+  all-apps series while the reply claims one app. Caught by probing
+  before the turn shipped; pinned by a test asserting "instagram" in
+  the SQL.
+- **Window:** stored on the session (`self.series_window`, from the
+  plan's filters), so an app-switch follow-up ("what about WhatsApp?",
+  "same for WhatsApp") re-runs the same series for the new app with
+  the window carried over (`_series_question`, `_window_phrase`).
+  Option buttons mirror the MAU turn (weather + the other two apps'
+  daily DAU, with the window in the send text). Letter options work
+  after the turn (the letter gate now includes `"daily_series"`).
+- **Reply:** "Daily active users for \<app\> in \<window label\>, by
+  day (N days). Mean …, low … (date), high … (date). The full
+  day-by-day series — line chart, table, and the exact SQL — is in the
+  working panel. This is the daily series, not the average: ask for
+  'mean daily DAU' if you want the single average instead." The
+  working payload carries the executed SQL, tables, metric definition,
+  and rows, so the shell renders the line chart + table + SQL diagram
+  from the same receipts as the single-shot ask UI — no frontend
+  change was needed (verified by inspecting a local `/api/chat`
+  response: chart kind `line`, 31 points, diagram stages sources →
+  joins → filters → grouping → aggregation → output).
+- **No-app behavior:** clarifies "Which app's daily DAU?", like the
+  MAU turn — never silently answers one app's series.
+
+## The two cases
+
+- **p01 (single, metric_scoping, dev):** "Give me Instagram MAU
+  trend for the last 2 weeks" — expected `mau_march` scalar, 210,809.
+  Oracle reuses b38's SQL verbatim (same hand-written app-scoped MAU
+  query) + its structural check (`app = 'instagram'`).
+- **p02 (conversation, aggregation_grain, dev):** turn 1 is p01's
+  question (MAU turn, sets the session app to Instagram); turn 2 is
+  probe (b) — expected type `daily_series`, app instagram. The 2-turn
+  shape is the session as asked: the probe names no app, so as a first
+  turn it would correctly clarify which app; the case tests the turn
+  plus app inheritance. The case carries the 31 March values
+  (`expected_values`, `min_rows: 31`) and `checks:
+  {"daily_series_chart_kind": "line"}`. Oracle kind `series` with the
+  aggregate SQL (`agg_user_daily`, Instagram, March); the values were
+  verified **two ways** — the aggregate form and the raw form
+  (`fact_sessions JOIN dim_users` on `primary_app`) agree exactly
+  (Mar 1: 50,601; Mar 31: 42,820; mean 45,385.32). The oracle entry
+  also carries a structural `not_contains: "country = '"` — the "in a
+  line chart" trap — applied to both turns' SQL by the harness.
+
+## Harness extension
+
+- **`check_values` daily-series branch**
+  (`scripts/run_conversation_benchmark.py`, shared by the harness via
+  `_load_conv_runner`): for a reply with a `daily_series` payload, it
+  reads the working payload's visualization rows and compares all
+  values exactly against the case's top-level `expected_values`, and
+  pins the chart kind from `checks["daily_series_chart_kind"]`. Exact
+  equality is right here — both sides are counts from the same
+  deterministic data, not re-derivations with rounding. Old cases are
+  unaffected (no `daily_series` reply, no chart check → no-op).
+
+## v4 counts by family and split
+
+| Family | v3 | + probes | v4 total | v4 dev | v4 held-out |
+|---|---|---|---|---|---|
+| metric_scoping | 46 | 1 (p01) | 47 | 35 | 12 |
+| aggregation_grain | 29 | 1 (p02) | 30 | 27 | 3 |
+| complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
+| ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
+| multi_turn_context | 11 | 0 | 11 | 8 | 3 |
+| incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
+| guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
+| sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
+| **Total** | **150** | **2** | **152** | **122** | **30** |
+
+Held-out is unchanged (30 cases, same ids as v3). **Honest
+limitation:** both probes were run during the build (that is how the
+turn was verified), so v4 held-out means "held out from fixes", not
+pristine — the same caveat as v1–v3.
+
+## v4 results
+
+**Dev run (2026-11-06): 114/122 task success** — the 112 v3 dev passes
+plus both new probe cases. Per family:
+
+| Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
+|---|---|---|---|---|---|---|---|
+| metric_scoping | 35 | 28/35 | 27/27 | 27/27 | 27/27 | 25/25 | 28/35 |
+| aggregation_grain | 27 | 27/27 | 27/27 | 27/27 | 27/27 | 27/27 | 27/27 |
+| complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
+| ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
+| multi_turn_context | 8 | 8/8 | 7/7 | 7/7 | 8/8 | 2/2 | 8/8 |
+| incorrect_assumption | 9 | 8/9 | — | — | 1/1 | — | 8/9 |
+| guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
+| sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
+
+**Oracle agreement: v4 152/152, no inexact entries** (dev run trace;
+p01 exact 210,809; p02 31-row series agrees).
+
+**Held-out run (2026-11-06, `--skip-oracle` — the oracle was already
+verified by the dev run): 27/30 task success**, the same 3 failures as
+v3 (h02, h08, h18 — reported only, drove no fix). Per family:
+metric_scoping 10/12, aggregation_grain 3/3, complex_joins_breakdowns
+5/5, ambiguous_metric 2/2, multi_turn_context 3/3,
+incorrect_assumption 1/2, guardrail_adversarial 2/2,
+sql_safety_syntax 1/1.
+
+**Dev failures (8 total — the same expected findings as v3):** h01,
+h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
+new failures: **p01 and p02 both pass all five rubric items**
+(p02's `result_equiv` is scored by the new `check_values` branch —
+chart kind `line` + all 31 values exact). No "right answer, wrong SQL"
+warnings in either run.
+
+**Test suite (2026-11-06): 149 pass / 1 known fail / 5 skipped**
+(plain runner; the fail is the pre-existing
+`test_docked_chat_only::test_rounded_corners` on an untouched file;
+the 5 skips are the `test_questions` `tmp_path` fixture tests). 10 new
+tests: 4 planner (by-day series, "in a line chart" is not India,
+month abbreviations, b05/b07 unchanged pin) + 6 chat (MAU-trend probe,
+daily-series turn + values + chart, no-app clarification, app-switch
+follow-up keeps the window, mean still clarifies, option letter
+advances).
+
+**Live verification (local server, 2026-11-06):** `/api/chat` for probe
+(a) returns the MAU turn (210,809, working payload with diagram, no
+chart — a scalar); probe (b) in the same session returns the
+daily-series turn (March, 31 days, mean 45,385, line chart with 31
+points, diagram sources → joins → filters → grouping → aggregation →
+output); "what about whatsapp?" re-runs the series for WhatsApp
+(March, 31 days, mean 30,233); probe (b) in a fresh session clarifies
+which app.
+
+## Running v4
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v4.py --split dev      # default
+PYTHONPATH=src python scripts/run_benchmark_v4.py --split heldout  # report only
+PYTHONPATH=src python scripts/run_benchmark_v4.py --split all
+PYTHONPATH=src python scripts/run_benchmark_v4.py --skip-oracle     # benchmark only
+```

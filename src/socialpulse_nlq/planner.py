@@ -461,11 +461,11 @@ def _date_range(q: str):
         return "2026-03-04", DATA_END
     if "last 90 days" in q or "past 90 days" in q:
         return DATA_START, DATA_END
-    if "march" in q:
+    if "march" in q or re.search(r"\bmar\b", q):
         return "2026-03-01", "2026-03-31"
-    if "february" in q:
+    if "february" in q or re.search(r"\bfeb\b", q):
         return "2026-02-01", "2026-02-28"
-    if "january" in q:
+    if "january" in q or re.search(r"\bjan\b", q):
         return "2026-01-01", "2026-01-31"
     return DATA_START, DATA_END
 
@@ -476,16 +476,24 @@ def _word(q: str, w: str) -> bool:
 
 def _in_is_preposition(q: str) -> bool:
     """The word 'in' is both the country code IN and an English
-    preposition. 'in <Month>' ('in January', 'in March') and 'in the
-    last/past ...' are window phrasing, not India -- before this fix
-    (2026-11-05, Phase 1 slice 2b) the planner read them as country IN
-    and silently returned India-only numbers for the most ordinary
-    windowed questions. A genuine India question names the country
-    ('in India', 'for India') and is caught by the 'india' entry,
-    which comes before 'in' in COUNTRIES, so this guard never fires
-    for it."""
-    return (re.search(r"\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\b", q) is not None
-            or re.search(r"\bin\s+the\s+(?:last|past)\b", q) is not None)
+    preposition. 'in <Month>' ('in January', 'in March', and the
+    in-window abbreviations 'in Jan'/'in Feb'/'in Mar', 2026-11-06)
+    and 'in the last/past ...' are window phrasing, not India -- before
+    this fix (2026-11-05, Phase 1 slice 2b) the planner read them as
+    country IN and silently returned India-only numbers for the most
+    ordinary windowed questions. 'in a/an ...' ('in a line chart', 2026-11-06,
+    daily-series turn) is presentation phrasing, never a country --
+    no country name is the article 'a'/'an'. A genuine India question
+    names the country ('in India', 'for India') and is caught by the
+    'india' entry, which comes before 'in' in COUNTRIES, so this guard
+    never fires for it. Narrow by design: 'in the window' / 'in
+    minutes' (b05/b07) are the same bug class but are left for the
+    planned 'in'-preposition pass, which must re-run the slice-3
+    ablation comparison -- changing them here would silently change
+    the variants' b05 outcome under a frozen comparison."""
+    return (re.search(r"\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar)\b", q) is not None
+            or re.search(r"\bin\s+the\s+(?:last|past)\b", q) is not None
+            or re.search(r"\bin\s+(?:a|an)\b", q) is not None)
 
 
 def _extract_filters(q: str):
@@ -559,7 +567,15 @@ def _dim_expr(breakdown, context="user"):
 def _series_or_scalar(q: str):
     if "mean" in q or "average" in q:
         return "scalar"
-    if "trend" in q or "over time" in q or "daily" in q or "per day" in q:
+    # "by day" / "by individual day" / "each day" ask for the
+    # date-by-date series (2026-11-06, daily-series turn): "show me the
+    # DAU for month of Mar 2026 by individual day" used to fall through
+    # to the scalar average, because none of the series triggers
+    # ("daily", "per day", "trend", period phrasing) matched it. The
+    # "mean"/"average" check above still wins for "mean daily DAU",
+    # so the averaged scalar is unchanged.
+    if ("trend" in q or "over time" in q or "daily" in q or "per day" in q
+            or "by day" in q or "individual day" in q or "each day" in q):
         return "series"
     # Changed 2026-10-27 (user decision): naming a period means "show
     # me each day in that period", not "average over that period".

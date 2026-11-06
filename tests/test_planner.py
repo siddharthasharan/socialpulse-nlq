@@ -196,6 +196,68 @@ def test_dau_over_last_returns_series_not_average():
     assert p2["grain"] == "user x day (averaged)" and "AVG(dau)" in p2["sql"]
 
 
+def test_dau_by_day_returns_series_not_average():
+    # 2026-11-06 (daily-series turn): "by day" / "by individual day"
+    # / "each day" ask for the date-by-date series. Before this fix
+    # the probe phrasing fell through to the scalar average, because
+    # none of the series triggers ("daily", "per day", "trend") matched.
+    p = plan("DAU for instagram by day in March")
+    assert p["type"] == "query" and p["grain"] == "user x day"
+    assert "GROUP BY date" in p["sql"] and "AVG(dau)" not in p["sql"]
+    p2 = plan("show me the DAU for month of Mar 2026 by individual day in a line chart")
+    assert p2["grain"] == "user x day" and "GROUP BY date" in p2["sql"]
+    assert p2["filters"]["date_start"] == "2026-03-01" and p2["filters"]["date_end"] == "2026-03-31"
+    assert "country" not in p2["filters"]  # "in a line chart" is not India
+    # Explicit mean/average still returns the scalar average.
+    p3 = plan("What is the mean daily DAU for instagram in March?")
+    assert p3["grain"] == "user x day (averaged)" and "AVG(dau)" in p3["sql"]
+    p4 = plan("What is the average daily DAU for whatsapp?")
+    assert p4["grain"] == "user x day (averaged)"
+
+
+def test_in_a_line_chart_is_not_india():
+    # 2026-11-06: "in a/an ..." is presentation phrasing, never the
+    # country code IN. The probe's "in a line chart" used to set
+    # country IN and silently return India-only numbers.
+    p = plan("DAU for instagram by day in a line chart")
+    assert "country" not in p["filters"]
+    # A genuine India question still scopes.
+    p2 = plan("mean daily DAU in India")
+    assert p2["filters"]["country"] == "IN"
+    p3 = plan("DAU for instagram in India by day")
+    assert p3["filters"]["country"] == "IN" and p3["grain"] == "user x day"
+
+
+def test_month_abbreviations_map_to_month_windows():
+    # 2026-11-06: "Mar"/"Feb"/"Jan" are months, not words to ignore.
+    # The probe's "month of Mar 2026" used to fall back to the full
+    # 90-day window. Abbreviations also must not read as country IN
+    # ("in Feb" / "in Jan" are months, like "in February").
+    p = plan("DAU for instagram in Feb by day")
+    assert p["filters"] == {"date_start": "2026-02-01", "date_end": "2026-02-28",
+                            "app": "instagram"}
+    p2 = plan("daily DAU for whatsapp in Jan")
+    assert p2["filters"] == {"date_start": "2026-01-01", "date_end": "2026-01-31",
+                             "app": "whatsapp"}
+    p3 = plan("What is the mean daily DAU for instagram in Jan?")
+    assert p3["grain"] == "user x day (averaged)"
+    assert p3["filters"]["date_start"] == "2026-01-01"
+
+
+def test_in_the_window_and_in_minutes_unchanged():
+    # Deliberate narrow scope (2026-11-06): the "in a/an" and month
+    # fixes above do NOT touch "in the window" (b05) or "in minutes"
+    # (b07) -- those are the same bug class, but fixing them changes
+    # the slice-3 variants' b05 outcome under a frozen comparison, so
+    # they wait for the planned 'in'-preposition pass, which must
+    # re-run the ablations. Pin the current behavior so that pass
+    # cannot land silently: it must update this test.
+    p = plan("How many new users were there in the window?")
+    assert p["filters"].get("country") == "IN"
+    p2 = plan("What is the median session duration in minutes?")
+    assert p2["filters"].get("country") == "IN"
+
+
 def test_planner_metrics_are_in_catalog():
     ids = catalog_metric_ids(Path(__file__).resolve().parents[1] / "catalog/measures.yaml")
     assert len(ids) == 20

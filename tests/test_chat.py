@@ -364,3 +364,93 @@ def test_mau_option_letter_advances():
     s.respond("What's the MAU for Instagram?")
     r = s.respond("a")
     assert r["type"] == "weather" and r["app"] == "instagram"
+
+
+def test_mau_trend_probe_answers_scalar():
+    # Literal 2026-11-06 shell probe (p01): "MAU trend" maps to the
+    # mau_march scalar -- MAU is a monthly scalar, there is no 2-week
+    # MAU trend, and the honest answer is the March number.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("Give me Instagram MAU trend for the last 2 weeks")
+    assert r["type"] == "mau" and r["app"] == "instagram"
+    assert "210,809" in r["text"]
+
+
+def test_daily_series_turn_standalone_no_weather():
+    # 2026-11-06 (p02): the daily-series turn answers as a later turn
+    # in a chat with no weather report -- here the MAU turn first sets
+    # the app, since the probe itself names no app. 500K seed-42 golds:
+    # March Instagram daily DAU, 31 days, mean 45,385.32.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("Give me Instagram MAU trend for the last 2 weeks")
+    r = s.respond("show me the DAU for month of Mar 2026 by individual day in a line chart")
+    assert r["type"] == "daily_series" and r["app"] == "instagram"
+    assert "March 2026" in r["text"] and "by day" in r["text"]
+    ds = r["daily_series"]
+    assert ds["start"] == "2026-03-01" and ds["end"] == "2026-03-31" and ds["days"] == 31
+    assert abs(ds["mean"] - 45385.32) < 1.0 and ds["low"] == 42781 and ds["high"] == 50601
+    w = r["working"]
+    assert "GROUP BY date" in w["sql"] and "country" not in w["sql"]
+    # The session app must reach the SQL: the probe names no app, so
+    # the turn appends it -- without that, this would be the all-apps
+    # series (~89K/day) presented as Instagram.
+    assert "instagram" in w["sql"] and w["tables"] == ["fact_sessions", "dim_users"]
+    viz = w["visualization"]
+    assert viz["available"] is True and viz["chart"]["kind"] == "line"
+    assert len(viz["chart"]["points"]) == 31
+    assert viz["rows"][0] == ["2026-03-01", 50601] and viz["rows"][-1] == ["2026-03-31", 42820]
+    assert viz["diagram"] is not None
+
+
+def test_daily_series_no_app_clarifies_which_app():
+    # The probe names no app, so as a first turn it correctly clarifies
+    # which app -- it must never silently answer one app's series.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("show me the DAU for month of Mar 2026 by individual day in a line chart")
+    assert r["type"] == "clarification"
+    assert "instagram" in r["text"] and "whatsapp" in r["text"]
+
+
+def test_daily_series_followup_what_about_swaps_app_keeps_window():
+    # App-switch follow-up after a daily-series turn keeps the series
+    # intent AND the window (March), like the MAU follow-up does.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("Give me Instagram MAU trend for the last 2 weeks")
+    s.respond("show me the DAU for month of Mar 2026 by individual day in a line chart")
+    r = s.respond("what about whatsapp?")
+    assert r["type"] == "daily_series" and r["app"] == "whatsapp"
+    ds = r["daily_series"]
+    assert ds["start"] == "2026-03-01" and ds["end"] == "2026-03-31" and ds["days"] == 31
+    assert abs(ds["mean"] - 30232.68) < 1.0
+    assert r["working"]["visualization"]["chart"]["kind"] == "line"
+
+
+def test_daily_series_mean_still_clarifies():
+    # "mean daily DAU" is the scalar average, not a series -- the chat
+    # has no scalar-DAU turn, so it clarifies, exactly as before.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What is the mean daily DAU for instagram?")
+    assert r["type"] == "clarification"
+
+
+def test_daily_series_option_letter_advances():
+    # Option letters work after a daily-series turn (stage ==
+    # "daily_series" satisfies the letter gate): "a" is the weather
+    # option for the same app.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("Give me Instagram MAU trend for the last 2 weeks")
+    s.respond("show me the DAU for month of Mar 2026 by individual day in a line chart")
+    r = s.respond("a")
+    assert r["type"] == "weather" and r["app"] == "instagram"

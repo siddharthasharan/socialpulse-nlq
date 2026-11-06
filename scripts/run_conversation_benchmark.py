@@ -84,6 +84,31 @@ def check_values(conv, replies, failures):
             failures.append("brief: too few PM points")
         if len(brief["eng_points"]) < checks.get("brief_eng_points_min", 0):
             failures.append("brief: too few Eng points")
+    # Daily series (2026-11-06, p02): the reply's working payload
+    # carries the visualization built from the executed series SQL,
+    # so the chart kind and the day-by-day values are checked against
+    # the same receipts the shell shows. The values come from the
+    # case's top-level expected_values (also what the oracle's series
+    # branch checks); the chart kind is pinned in checks so the
+    # conversation's result_equiv item is scored, not "na". Exact
+    # equality is right here: both sides are counts from the same
+    # deterministic data, not re-derivations with rounding.
+    series_reply = next((r for r in replies if r.get("daily_series")), None)
+    if series_reply:
+        viz = (series_reply.get("working") or {}).get("visualization") or {}
+        if "daily_series_chart_kind" in checks:
+            chart = viz.get("chart") or {}
+            if chart.get("kind") != checks["daily_series_chart_kind"]:
+                failures.append(f"daily series chart: expected "
+                                f"{checks['daily_series_chart_kind']}, got {chart.get('kind')}")
+        if conv.get("expected_values") is not None:
+            rows = viz.get("rows") or []
+            got = [float(r[-1]) for r in rows if len(r) > 1]
+            want = [float(v) for v in conv["expected_values"]]
+            if len(got) != len(want):
+                failures.append(f"daily series rows: got {len(got)}, expected {len(want)}")
+            elif any(g != w for g, w in zip(got, want)):
+                failures.append("daily series values differ from expected")
 
 
 def main() -> None:

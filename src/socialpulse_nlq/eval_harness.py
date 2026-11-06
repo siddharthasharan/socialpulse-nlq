@@ -87,6 +87,13 @@ VERSIONS = {
            "singles": "benchmark_v3.json",
            "convs": "conversation_v3.json",
            "oracle": "oracle_v3.json"},
+    # v4 (daily-series turn, 2026-11-06): v3's 150 cases plus the two
+    # user probes p01 (MAU trend, single) and p02 (DAU by day,
+    # conversation). Both in dev; held-out stays 30.
+    "v4": {"manifest": "benchmark_v4_manifest.json",
+           "singles": "benchmark_v4.json",
+           "convs": "conversation_v4.json",
+           "oracle": "oracle_v4.json"},
 }
 
 
