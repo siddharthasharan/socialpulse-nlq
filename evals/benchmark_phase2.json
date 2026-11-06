@@ -4,6 +4,7 @@
     "expected_metric": "dau_mean_daily",
     "expected_type": "scalar",
     "expected_value": 89324.1888888889,
+    "family": "aggregation_grain",
     "id": "b01",
     "question": "What is the mean daily DAU?"
   },
@@ -12,6 +13,7 @@
     "expected_metric": "wau_mean_weekly",
     "expected_type": "scalar",
     "expected_value": 267348.9285714286,
+    "family": "aggregation_grain",
     "id": "b02",
     "question": "What is WAU?"
   },
@@ -20,6 +22,7 @@
     "expected_metric": "mau_march",
     "expected_type": "scalar",
     "expected_value": 468737.0,
+    "family": "metric_scoping",
     "id": "b03",
     "question": "What is MAU in March?"
   },
@@ -28,6 +31,7 @@
     "expected_metric": "dau_mau_stickiness",
     "expected_type": "scalar",
     "expected_value": 0.21535179607905858,
+    "family": "aggregation_grain",
     "id": "b04",
     "question": "What is DAU/MAU stickiness?"
   },
@@ -36,6 +40,7 @@
     "expected_metric": "new_users_in_window",
     "expected_type": "scalar",
     "expected_value": 250222.0,
+    "family": "metric_scoping",
     "id": "b05",
     "question": "How many new users were there in the window?"
   },
@@ -44,6 +49,7 @@
     "expected_metric": "sessions_per_dau",
     "expected_type": "scalar",
     "expected_value": 1.6934842957183305,
+    "family": "aggregation_grain",
     "id": "b06",
     "question": "What is sessions per DAU?"
   },
@@ -52,6 +58,7 @@
     "expected_metric": "median_session_duration_min",
     "expected_type": "scalar",
     "expected_value": 12.0,
+    "family": "aggregation_grain",
     "id": "b07",
     "question": "What is the median session duration in minutes?"
   },
@@ -60,6 +67,7 @@
     "expected_metric": "messaging_dau_mean",
     "expected_type": "scalar",
     "expected_value": 38812.76666666667,
+    "family": "metric_scoping",
     "id": "b08",
     "question": "What is messaging DAU on average per day?"
   },
@@ -68,6 +76,7 @@
     "expected_dim_count": 3,
     "expected_metric": "dau_mean_daily",
     "expected_type": "series_by_dim",
+    "family": "complex_joins_breakdowns",
     "id": "b09",
     "min_rows": 80,
     "question": "What was DAU by app over the last 28 days?"
@@ -77,6 +86,7 @@
     "expected_dim_count": 7,
     "expected_metric": "dau_mean_daily",
     "expected_type": "series_by_dim",
+    "family": "complex_joins_breakdowns",
     "id": "b10",
     "min_rows": 190,
     "question": "What was DAU by country over the last 28 days?"
@@ -86,6 +96,7 @@
     "expected_dim_count": 3,
     "expected_metric": "dau_mean_daily",
     "expected_type": "series_by_dim",
+    "family": "complex_joins_breakdowns",
     "id": "b11",
     "min_rows": 80,
     "question": "What was DAU by platform over the last 28 days?"
@@ -95,6 +106,7 @@
     "expected_metric": "sessions_per_dau",
     "expected_rows": 3,
     "expected_type": "breakdown",
+    "family": "complex_joins_breakdowns",
     "id": "b12",
     "question": "What is sessions per DAU by platform?"
   },
@@ -103,6 +115,7 @@
     "expected_dim_count": 3,
     "expected_metric": "daily_creators_mean",
     "expected_type": "series_by_dim",
+    "family": "complex_joins_breakdowns",
     "id": "b13",
     "min_rows": 200,
     "question": "What are daily creators by app?"
@@ -112,6 +125,7 @@
     "expected_metric": "engagement_rate_per_impression",
     "expected_rows": 3,
     "expected_type": "breakdown",
+    "family": "complex_joins_breakdowns",
     "id": "b14",
     "question": "What is engagement rate by surface?"
   },
@@ -120,6 +134,7 @@
     "expected_dim_count": 3,
     "expected_metric": "messaging_dau_mean",
     "expected_type": "series_by_dim",
+    "family": "complex_joins_breakdowns",
     "id": "b15",
     "min_rows": 80,
     "question": "What is messaging DAU by app over the last 28 days?"
@@ -128,6 +143,7 @@
     "category": "segments",
     "expected_metric": "dau_mean_daily",
     "expected_type": "series",
+    "family": "aggregation_grain",
     "id": "b16",
     "min_rows": 28,
     "question": "What is the DAU trend over the last 28 days?"
@@ -137,6 +153,7 @@
     "expected_metric": "d7_exact_retention",
     "expected_type": "scalar",
     "expected_value": 0.22215985224350848,
+    "family": "aggregation_grain",
     "id": "b17",
     "question": "What is D7 retention?"
   },
@@ -150,6 +167,7 @@
       "paid": 0.19642477768672797,
       "referral": 0.22783555323252166
     },
+    "family": "complex_joins_breakdowns",
     "id": "b18",
     "question": "What is D7 retention by acquisition source?"
   },
@@ -161,6 +179,7 @@
     "expected_values": {
       "paid": 0.19642477768672797
     },
+    "family": "metric_scoping",
     "id": "b19",
     "question": "What is D7 retention for paid users?"
   },
@@ -169,6 +188,7 @@
     "expected_metric": "posts_per_creator_90d",
     "expected_type": "scalar",
     "expected_value": 22.564089743589744,
+    "family": "aggregation_grain",
     "id": "b20",
     "question": "What is posts per creator over 90 days?"
   },
@@ -177,6 +197,7 @@
     "expected_metric": "creator_penetration",
     "expected_type": "scalar",
     "expected_value": 0.20167468513901807,
+    "family": "aggregation_grain",
     "id": "b21",
     "question": "What is creator penetration?"
   },
@@ -184,6 +205,7 @@
     "category": "experiments",
     "expected_metric": null,
     "expected_type": "experiment_list",
+    "family": "metric_scoping",
     "id": "b22",
     "question": "List the experiments in the registry."
   },
@@ -191,6 +213,7 @@
     "category": "experiments",
     "expected_metric": "reels_watch_time_per_viewer_day",
     "expected_type": "experiment_info",
+    "family": "metric_scoping",
     "id": "b23",
     "question": "What is the primary metric for the Reels ranking experiment?"
   },
@@ -199,6 +222,7 @@
     "expected_contains": "cannot evaluate",
     "expected_metric": null,
     "expected_type": "clarification",
+    "family": "incorrect_assumption",
     "id": "b24",
     "question": "Did the new creator discovery boost experiment improve creator retention?"
   },
@@ -207,6 +231,7 @@
     "expected_metric": "orphan_post_rate",
     "expected_type": "scalar",
     "expected_value": 0.24977855101054033,
+    "family": "aggregation_grain",
     "id": "b25",
     "question": "What is the orphan post rate?"
   },
@@ -215,6 +240,7 @@
     "expected_metric": "top1_creator_impression_share",
     "expected_type": "scalar",
     "expected_value": 0.0964383065094456,
+    "family": "aggregation_grain",
     "id": "b26",
     "question": "Are the top 1% of creators capturing a disproportionate share of views?"
   },
@@ -223,6 +249,7 @@
     "expected_metric": "commenter_penetration",
     "expected_type": "scalar",
     "expected_value": 0.09150969488659336,
+    "family": "aggregation_grain",
     "id": "b27",
     "question": "What is commenter penetration?"
   },
@@ -231,6 +258,7 @@
     "expected_metric": "engagement_rate_per_impression",
     "expected_type": "scalar",
     "expected_value": 0.16010749914075573,
+    "family": "aggregation_grain",
     "id": "b28",
     "question": "What is engagement rate per impression?"
   },
@@ -239,6 +267,7 @@
     "expected_metric": "reels_completion_rate",
     "expected_type": "scalar",
     "expected_value": 0.3504851839722351,
+    "family": "aggregation_grain",
     "id": "b29",
     "question": "What is the Reels completion rate?"
   },
@@ -247,6 +276,7 @@
     "expected_metric": "reels_watch_time_per_viewer_day",
     "expected_type": "scalar",
     "expected_value": 0.9052338879573009,
+    "family": "aggregation_grain",
     "id": "b30",
     "question": "What is Reels watch time per viewer per day?"
   },
@@ -255,6 +285,7 @@
     "expected_contains": "France",
     "expected_metric": null,
     "expected_type": "clarification",
+    "family": "incorrect_assumption",
     "id": "b31",
     "question": "What was DAU in France?"
   },
@@ -262,6 +293,7 @@
     "category": "weather_report",
     "expected_metric": null,
     "expected_type": "weather_report",
+    "family": "ambiguous_metric",
     "id": "b32",
     "question": "How is the product doing?"
   },
@@ -275,6 +307,7 @@
     },
     "expected_metric": null,
     "expected_type": "weather_report",
+    "family": "ambiguous_metric",
     "id": "b33",
     "question": "Show me the weather report"
   },
@@ -293,6 +326,7 @@
       "Creator supply softening",
       "Concentration watch"
     ],
+    "family": "ambiguous_metric",
     "id": "b34",
     "question": "What is product health?"
   },
@@ -309,6 +343,7 @@
       28946.0,
       28489.0
     ],
+    "family": "metric_scoping",
     "id": "b35",
     "min_rows": 7,
     "question": "What is the DAU trend for Whatsapp over the last 7 days?"
@@ -347,6 +382,7 @@
       28946.0,
       28489.0
     ],
+    "family": "metric_scoping",
     "id": "b36",
     "min_rows": 28,
     "question": "What was DAU for whatsapp over the last 28 days?"
@@ -365,6 +401,7 @@
       "Retention falling",
       "Creator problem"
     ],
+    "family": "ambiguous_metric",
     "id": "b37",
     "question": "How is Whatsapp doing recently?"
   },
@@ -373,6 +410,7 @@
     "expected_metric": "mau_march",
     "expected_type": "scalar",
     "expected_value": 210809.0,
+    "family": "metric_scoping",
     "id": "b38",
     "question": "What is the MAU for Instagram?"
   },
@@ -381,6 +419,7 @@
     "expected_metric": "dau_mau_stickiness",
     "expected_type": "scalar",
     "expected_value": 0.2152911999992655,
+    "family": "metric_scoping",
     "id": "b39",
     "question": "What is DAU/MAU stickiness for Instagram?"
   }

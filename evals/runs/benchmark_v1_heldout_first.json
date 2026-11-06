@@ -1,0 +1,1333 @@
+{
+  "benchmark": "socialpulse-nlq",
+  "version": "v1",
+  "split": "heldout",
+  "data": {
+    "counts": {
+      "dim_users": 500000,
+      "fact_content_creation": 1759999,
+      "fact_messages": 4654610,
+      "fact_sessions": 13614220
+    },
+    "max_session_date": "2026-03-31",
+    "seed": 42,
+    "users": 500000,
+    "window": [
+      "2026-01-01",
+      "2026-03-31"
+    ]
+  },
+  "oracle": [
+    {
+      "id": "b01",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 89324.1888888889,
+      "stored_value": 89324.1888888889,
+      "detail": ""
+    },
+    {
+      "id": "b02",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 267348.9285714286,
+      "stored_value": 267348.9285714286,
+      "detail": ""
+    },
+    {
+      "id": "b03",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 468737,
+      "stored_value": 468737.0,
+      "detail": ""
+    },
+    {
+      "id": "b04",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.21535179607905858,
+      "stored_value": 0.21535179607905858,
+      "detail": ""
+    },
+    {
+      "id": "b05",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 250222,
+      "stored_value": 250222.0,
+      "detail": ""
+    },
+    {
+      "id": "b06",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 1.6934842957183305,
+      "stored_value": 1.6934842957183305,
+      "detail": ""
+    },
+    {
+      "id": "b07",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 12.0,
+      "stored_value": 12.0,
+      "detail": ""
+    },
+    {
+      "id": "b08",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": true,
+      "oracle_value": 38399.41758241758,
+      "stored_value": 38812.76666666667,
+      "detail": "oracle 38399.41758241758 differs from stored 38812.76666666667 by 1.06% (within tolerance)"
+    },
+    {
+      "id": "b09",
+      "kind": "series",
+      "agree": true,
+      "oracle_value": "84 rows",
+      "stored_value": "expected_rows=None min_rows=80 dims=3",
+      "detail": ""
+    },
+    {
+      "id": "b10",
+      "kind": "series",
+      "agree": true,
+      "oracle_value": "196 rows",
+      "stored_value": "expected_rows=None min_rows=190 dims=7",
+      "detail": ""
+    },
+    {
+      "id": "b11",
+      "kind": "series",
+      "agree": true,
+      "oracle_value": "84 rows",
+      "stored_value": "expected_rows=None min_rows=80 dims=3",
+      "detail": ""
+    },
+    {
+      "id": "b12",
+      "kind": "breakdown",
+      "agree": true,
+      "oracle_value": "3 rows",
+      "stored_value": "expected_rows=3 min_rows=None dims=None",
+      "detail": ""
+    },
+    {
+      "id": "b13",
+      "kind": "series",
+      "agree": true,
+      "oracle_value": "270 rows",
+      "stored_value": "expected_rows=None min_rows=200 dims=3",
+      "detail": ""
+    },
+    {
+      "id": "b14",
+      "kind": "breakdown",
+      "agree": true,
+      "oracle_value": "3 rows",
+      "stored_value": "expected_rows=3 min_rows=None dims=None",
+      "detail": ""
+    },
+    {
+      "id": "b15",
+      "kind": "series",
+      "agree": true,
+      "oracle_value": "84 rows",
+      "stored_value": "expected_rows=None min_rows=80 dims=3",
+      "detail": ""
+    },
+    {
+      "id": "b16",
+      "kind": "series",
+      "agree": true,
+      "oracle_value": "28 rows",
+      "stored_value": "expected_rows=None min_rows=28 dims=None",
+      "detail": ""
+    },
+    {
+      "id": "b17",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.22215985224350848,
+      "stored_value": 0.22215985224350848,
+      "detail": ""
+    },
+    {
+      "id": "b18",
+      "kind": "breakdown",
+      "agree": true,
+      "oracle_value": "3 rows",
+      "stored_value": "expected_rows=3 min_rows=None dims=None",
+      "detail": ""
+    },
+    {
+      "id": "b19",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.19642477768672797,
+      "stored_value": 0.19642477768672797,
+      "detail": ""
+    },
+    {
+      "id": "b20",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 22.564089743589744,
+      "stored_value": 22.564089743589744,
+      "detail": ""
+    },
+    {
+      "id": "b21",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.20167468513901807,
+      "stored_value": 0.20167468513901807,
+      "detail": ""
+    },
+    {
+      "id": "b22",
+      "kind": "registry",
+      "agree": true,
+      "oracle_value": [
+        "exp_reels_ranking_v1",
+        "exp_new_creator_boost_v1",
+        "exp_messaging_reply_nudge_v1"
+      ],
+      "stored_value": "3 experiments",
+      "detail": ""
+    },
+    {
+      "id": "b23",
+      "kind": "registry",
+      "agree": true,
+      "oracle_value": "reels_watch_time_per_viewer_day",
+      "stored_value": "reels_watch_time_per_viewer_day",
+      "detail": ""
+    },
+    {
+      "id": "b24",
+      "kind": "behavioral",
+      "agree": true,
+      "oracle_value": "premise holds",
+      "stored_value": "behavioral spec",
+      "detail": ""
+    },
+    {
+      "id": "b25",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.24977855101054033,
+      "stored_value": 0.24977855101054033,
+      "detail": ""
+    },
+    {
+      "id": "b26",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.0964383065094456,
+      "stored_value": 0.0964383065094456,
+      "detail": ""
+    },
+    {
+      "id": "b27",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.09150969488659336,
+      "stored_value": 0.09150969488659336,
+      "detail": ""
+    },
+    {
+      "id": "b28",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.16010749914075573,
+      "stored_value": 0.16010749914075573,
+      "detail": ""
+    },
+    {
+      "id": "b29",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.3504851839722351,
+      "stored_value": 0.3504851839722351,
+      "detail": ""
+    },
+    {
+      "id": "b30",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.9052338879573009,
+      "stored_value": 0.9052338879573009,
+      "detail": ""
+    },
+    {
+      "id": "b31",
+      "kind": "behavioral",
+      "agree": true,
+      "oracle_value": "premise holds",
+      "stored_value": "behavioral spec",
+      "detail": ""
+    },
+    {
+      "id": "b32",
+      "kind": "weather",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": {
+        "d7_retention": 0.1960631805671892,
+        "daily_creators": 10338.92857142857,
+        "dau": 100627.82142857143,
+        "messaging_dau": 43501.32142857143,
+        "orphan_post_rate": 0.24977855101054033,
+        "top1_share": 0.0964383065094456
+      },
+      "stored_value": {},
+      "detail": ""
+    },
+    {
+      "id": "b33",
+      "kind": "weather",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": {
+        "d7_retention": 0.1960631805671892,
+        "dau": 100627.82142857143,
+        "messaging_dau": 43501.32142857143,
+        "wau": 327201.5
+      },
+      "stored_value": {
+        "d7_retention": 0.1960631805671892,
+        "dau": 100627.82142857143,
+        "messaging_dau": 43501.32142857143,
+        "wau": 327201.5
+      },
+      "detail": ""
+    },
+    {
+      "id": "b34",
+      "kind": "weather",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": {
+        "creator_penetration": 0.1030659408353302,
+        "daily_creators": 10338.92857142857,
+        "orphan_post_rate": 0.24977855101054033,
+        "top1_share": 0.0964383065094456
+      },
+      "stored_value": {
+        "creator_penetration": 0.1030659408353302,
+        "daily_creators": 10338.92857142857,
+        "orphan_post_rate": 0.24977855101054033,
+        "top1_share": 0.0964383065094456
+      },
+      "detail": ""
+    },
+    {
+      "id": "b35",
+      "kind": "series",
+      "agree": true,
+      "oracle_value": "7 rows",
+      "stored_value": "expected_rows=None min_rows=7 dims=None",
+      "detail": ""
+    },
+    {
+      "id": "b36",
+      "kind": "series",
+      "agree": true,
+      "oracle_value": "28 rows",
+      "stored_value": "expected_rows=None min_rows=28 dims=None",
+      "detail": ""
+    },
+    {
+      "id": "b37",
+      "kind": "weather",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": {
+        "d7_retention": 0.1948900772430184,
+        "daily_creators": 3065.8571428571427,
+        "dau": 30139.071428571428,
+        "messaging_dau": 13031.535714285714,
+        "orphan_post_rate": 0.24929822725066847
+      },
+      "stored_value": {
+        "d7_retention": 0.1948900772430184,
+        "daily_creators": 3065.8571428571427,
+        "dau": 30139.071428571428,
+        "messaging_dau": 13031.535714285714
+      },
+      "detail": ""
+    },
+    {
+      "id": "b38",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 210809,
+      "stored_value": 210809.0,
+      "detail": ""
+    },
+    {
+      "id": "b39",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 0.2152911999992655,
+      "stored_value": 0.2152911999992655,
+      "detail": ""
+    },
+    {
+      "id": "c1",
+      "kind": "conversation_values",
+      "agree": true,
+      "oracle_value": {
+        "drilldown_daily_creators": 4680.464285714285,
+        "drilldown_orphan": 0.25013107745669405,
+        "weather_dau": 45249.0
+      },
+      "stored_value": {
+        "drilldown_daily_creators": 4680.464285714285,
+        "drilldown_orphan": 0.25013107745669405,
+        "weather_dau": 45249.0
+      },
+      "detail": ""
+    },
+    {
+      "id": "c10",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 210809,
+      "stored_value": 210809.0,
+      "detail": ""
+    },
+    {
+      "id": "c2",
+      "kind": "conversation_values",
+      "agree": true,
+      "oracle_value": {
+        "weather_d7": 0.1948900772430184
+      },
+      "stored_value": {
+        "weather_d7": 0.1948900772430184
+      },
+      "detail": ""
+    },
+    {
+      "id": "c3",
+      "kind": "behavioral",
+      "agree": true,
+      "oracle_value": "premise holds",
+      "stored_value": "behavioral spec",
+      "detail": ""
+    },
+    {
+      "id": "c4",
+      "kind": "behavioral",
+      "agree": true,
+      "oracle_value": "premise holds",
+      "stored_value": "behavioral spec",
+      "detail": ""
+    },
+    {
+      "id": "c5",
+      "kind": "conversation_values",
+      "agree": true,
+      "oracle_value": {
+        "weather_dau": 45249.0
+      },
+      "stored_value": {
+        "weather_dau": 45249.0
+      },
+      "detail": ""
+    },
+    {
+      "id": "c6",
+      "kind": "behavioral",
+      "agree": true,
+      "oracle_value": "premise holds",
+      "stored_value": "behavioral spec",
+      "detail": ""
+    },
+    {
+      "id": "c7",
+      "kind": "behavioral",
+      "agree": true,
+      "oracle_value": "premise holds",
+      "stored_value": "behavioral spec",
+      "detail": ""
+    },
+    {
+      "id": "c8",
+      "kind": "behavioral",
+      "agree": false,
+      "oracle_value": "premise holds",
+      "stored_value": "behavioral spec",
+      "detail": "top dim DE != ID"
+    },
+    {
+      "id": "c9",
+      "kind": "scalar",
+      "agree": true,
+      "inexact": false,
+      "oracle_value": 210809,
+      "stored_value": 210809.0,
+      "detail": ""
+    }
+  ],
+  "results": [
+    {
+      "id": "b10",
+      "kind": "single",
+      "family": "complex_joins_breakdowns",
+      "question": "What was DAU by country over the last 28 days?",
+      "plan_type": "query",
+      "metric": "dau_mean_daily",
+      "catalog": {
+        "metric": "dau_mean_daily",
+        "definition": "Mean distinct users with at least one session per day.",
+        "grain": "user x day"
+      },
+      "sql": "SELECT u.country AS country, CAST(s.start_time AS DATE) AS date, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.country, date ORDER BY u.country, date",
+      "guard": {
+        "ok": true,
+        "reason": "ok"
+      },
+      "runtime_ms": 2884,
+      "row_count": 196,
+      "columns": [
+        "country",
+        "date",
+        "dau"
+      ],
+      "trace": [
+        {
+          "step": 1,
+          "title": "Interpreted the question",
+          "text": "Deterministic keyword routing (no LLM): filters {'date_start': '2026-03-04', 'date_end': '2026-03-31'}, breakdown country."
+        },
+        {
+          "step": 2,
+          "title": "Mapped to a catalog metric",
+          "text": "dau_mean_daily: Mean distinct users with at least one session per day. Grain: user x day. Denominator: distinct users."
+        },
+        {
+          "step": 3,
+          "title": "Generated SQL from an allowlisted template",
+          "text": "SELECT u.country AS country, CAST(s.start_time AS DATE) AS date, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.country, date ORDER BY u.country, date Tables scanned: fact_sessions, dim_users. Guard: SELECT/WITH only, allowlisted tables."
+        },
+        {
+          "step": 4,
+          "title": "Ran the query",
+          "text": "Query returned 196 row(s) in 2884 ms. First row: ('BR', datetime.date(2026, 3, 4), 14745)."
+        },
+        {
+          "step": 5,
+          "title": "Interpreted the result",
+          "text": "196 row(s) returned at grain user x day, grouped by country; the table and chart show them, not a summary invented here."
+        }
+      ],
+      "items": {
+        "sql_syntax": {
+          "pass": true,
+          "reason": ""
+        },
+        "sql_safety": {
+          "pass": true,
+          "reason": "ok"
+        },
+        "execution": {
+          "pass": true,
+          "reason": "2884ms, 196 rows"
+        },
+        "result_equiv": {
+          "pass": true,
+          "reason": ""
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "task_success": true
+    },
+    {
+      "id": "b15",
+      "kind": "single",
+      "family": "complex_joins_breakdowns",
+      "question": "What is messaging DAU by app over the last 28 days?",
+      "plan_type": "query",
+      "metric": "messaging_dau_mean",
+      "catalog": {
+        "metric": "messaging_dau_mean",
+        "definition": "Mean distinct users sending at least one message per day.",
+        "grain": "user x day"
+      },
+      "sql": "SELECT u.primary_app AS app, CAST(m.sent_at AS DATE) AS date, COUNT(DISTINCT m.sender_id) AS senders FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.primary_app, date ORDER BY u.primary_app, date",
+      "guard": {
+        "ok": true,
+        "reason": "ok"
+      },
+      "runtime_ms": 1521,
+      "row_count": 84,
+      "columns": [
+        "app",
+        "date",
+        "senders"
+      ],
+      "trace": [
+        {
+          "step": 1,
+          "title": "Interpreted the question",
+          "text": "Deterministic keyword routing (no LLM): filters {'date_start': '2026-03-04', 'date_end': '2026-03-31'}, breakdown app."
+        },
+        {
+          "step": 2,
+          "title": "Mapped to a catalog metric",
+          "text": "messaging_dau_mean: Mean distinct users sending at least one message per day. Grain: user x day. Denominator: distinct senders."
+        },
+        {
+          "step": 3,
+          "title": "Generated SQL from an allowlisted template",
+          "text": "SELECT u.primary_app AS app, CAST(m.sent_at AS DATE) AS date, COUNT(DISTINCT m.sender_id) AS senders FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.primary_app, date ORDER BY u.primary_app, date Tables scanned: fact_messages, dim_users. Guard: SELECT/WITH only, allowlisted tables."
+        },
+        {
+          "step": 4,
+          "title": "Ran the query",
+          "text": "Query returned 84 row(s) in 1521 ms. First row: ('facebook', datetime.date(2026, 3, 4), 10770)."
+        },
+        {
+          "step": 5,
+          "title": "Interpreted the result",
+          "text": "84 row(s) returned at grain user x day, grouped by app; the table and chart show them, not a summary invented here."
+        }
+      ],
+      "items": {
+        "sql_syntax": {
+          "pass": true,
+          "reason": ""
+        },
+        "sql_safety": {
+          "pass": true,
+          "reason": "ok"
+        },
+        "execution": {
+          "pass": true,
+          "reason": "1521ms, 84 rows"
+        },
+        "result_equiv": {
+          "pass": true,
+          "reason": ""
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "task_success": true
+    },
+    {
+      "id": "b19",
+      "kind": "single",
+      "family": "metric_scoping",
+      "question": "What is D7 retention for paid users?",
+      "plan_type": "query",
+      "metric": "d7_retention_by_acquisition",
+      "catalog": {
+        "metric": "d7_retention_by_acquisition",
+        "definition": "Same as D7 exact retention, split by acquisition_source.",
+        "grain": "cohort user x acquisition_source"
+      },
+      "sql": "SELECT u.acquisition_source AS acquisition_source, AVG(CASE WHEN EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) THEN 1.0 ELSE 0.0 END) AS value FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21' AND u.acquisition_source = 'paid' GROUP BY u.acquisition_source ORDER BY u.acquisition_source",
+      "guard": {
+        "ok": true,
+        "reason": "ok"
+      },
+      "runtime_ms": 2171,
+      "row_count": 1,
+      "columns": [
+        "acquisition_source",
+        "value"
+      ],
+      "trace": [
+        {
+          "step": 1,
+          "title": "Interpreted the question",
+          "text": "Deterministic keyword routing (no LLM): filters {'date_start': '2026-01-01', 'date_end': '2026-03-31', 'acquisition': 'paid'}, breakdown None."
+        },
+        {
+          "step": 2,
+          "title": "Mapped to a catalog metric",
+          "text": "d7_retention_by_acquisition: Same as D7 exact retention, split by acquisition_source. Grain: cohort user x acquisition_source. Denominator: eligible cohort users per source."
+        },
+        {
+          "step": 3,
+          "title": "Generated SQL from an allowlisted template",
+          "text": "SELECT u.acquisition_source AS acquisition_source, AVG(CASE WHEN EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) THEN 1.0 ELSE 0.0 END) AS value FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21' AND u.acquisition_source = 'paid' GROUP BY u.acquisition_source ORDER BY u.acquisition_source Tables scanned: dim_users, fact_sessions. Guard: SELECT/WITH only, allowlisted tables."
+        },
+        {
+          "step": 4,
+          "title": "Ran the query",
+          "text": "Query returned 1 row(s) in 2171 ms. First row: ('paid', 0.19642477768672797)."
+        },
+        {
+          "step": 5,
+          "title": "Interpreted the result",
+          "text": "Single value result: ('paid', 0.19642477768672797). Grain: cohort user x acquisition_source."
+        }
+      ],
+      "items": {
+        "sql_syntax": {
+          "pass": true,
+          "reason": ""
+        },
+        "sql_safety": {
+          "pass": true,
+          "reason": "ok"
+        },
+        "execution": {
+          "pass": true,
+          "reason": "2171ms, 1 rows"
+        },
+        "result_equiv": {
+          "pass": true,
+          "reason": ""
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "task_success": true
+    },
+    {
+      "id": "b23",
+      "kind": "single",
+      "family": "metric_scoping",
+      "question": "What is the primary metric for the Reels ranking experiment?",
+      "plan_type": "experiment_info",
+      "metric": "reels_watch_time_per_viewer_day",
+      "catalog": {
+        "metric": "reels_watch_time_per_viewer_day",
+        "definition": "Total watch minutes divided by viewer-days with a video play.",
+        "grain": "viewer x day"
+      },
+      "sql": null,
+      "guard": {
+        "ok": true,
+        "reason": "no SQL"
+      },
+      "runtime_ms": 0,
+      "row_count": 0,
+      "columns": [],
+      "trace": null,
+      "items": {
+        "sql_syntax": {
+          "pass": null,
+          "reason": "no SQL: registry lookup"
+        },
+        "sql_safety": {
+          "pass": null,
+          "reason": "nothing executed"
+        },
+        "execution": {
+          "pass": null,
+          "reason": "nothing to execute"
+        },
+        "result_equiv": {
+          "pass": null,
+          "reason": "no result: registry lookup"
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": "type experiment_info metric reels_watch_time_per_viewer_day"
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "task_success": true
+    },
+    {
+      "id": "b30",
+      "kind": "single",
+      "family": "aggregation_grain",
+      "question": "What is Reels watch time per viewer per day?",
+      "plan_type": "query",
+      "metric": "reels_watch_time_per_viewer_day",
+      "catalog": {
+        "metric": "reels_watch_time_per_viewer_day",
+        "definition": "Total watch minutes divided by viewer-days with a video play.",
+        "grain": "viewer x day"
+      },
+      "sql": "SELECT SUM(watch_ms) / 60000.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(play_time AS DATE))), 0) AS value FROM fact_video_plays",
+      "guard": {
+        "ok": true,
+        "reason": "ok"
+      },
+      "runtime_ms": 2513,
+      "row_count": 1,
+      "columns": [
+        "value"
+      ],
+      "trace": [
+        {
+          "step": 1,
+          "title": "Interpreted the question",
+          "text": "Deterministic keyword routing (no LLM): filters {'date_start': '2026-01-01', 'date_end': '2026-03-31', 'surface': 'reels'}, breakdown None."
+        },
+        {
+          "step": 2,
+          "title": "Mapped to a catalog metric",
+          "text": "reels_watch_time_per_viewer_day: Total watch minutes divided by viewer-days with a video play. Grain: viewer x day. Denominator: viewer-days."
+        },
+        {
+          "step": 3,
+          "title": "Generated SQL from an allowlisted template",
+          "text": "SELECT SUM(watch_ms) / 60000.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(play_time AS DATE))), 0) AS value FROM fact_video_plays Tables scanned: fact_video_plays. Guard: SELECT/WITH only, allowlisted tables."
+        },
+        {
+          "step": 4,
+          "title": "Ran the query",
+          "text": "Query returned 1 row(s) in 2513 ms. First row: (0.9052338879573009,)."
+        },
+        {
+          "step": 5,
+          "title": "Interpreted the result",
+          "text": "Single value result: (0.9052338879573009,). Grain: viewer x day."
+        }
+      ],
+      "items": {
+        "sql_syntax": {
+          "pass": true,
+          "reason": ""
+        },
+        "sql_safety": {
+          "pass": true,
+          "reason": "ok"
+        },
+        "execution": {
+          "pass": true,
+          "reason": "2513ms, 1 rows"
+        },
+        "result_equiv": {
+          "pass": true,
+          "reason": ""
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "task_success": true
+    },
+    {
+      "id": "b36",
+      "kind": "single",
+      "family": "metric_scoping",
+      "question": "What was DAU for whatsapp over the last 28 days?",
+      "plan_type": "query",
+      "metric": "dau_mean_daily",
+      "catalog": {
+        "metric": "dau_mean_daily",
+        "definition": "Mean distinct users with at least one session per day.",
+        "grain": "user x day"
+      },
+      "sql": "SELECT CAST(s.start_time AS DATE) AS date, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp' GROUP BY date ORDER BY date",
+      "guard": {
+        "ok": true,
+        "reason": "ok"
+      },
+      "runtime_ms": 1176,
+      "row_count": 28,
+      "columns": [
+        "date",
+        "dau"
+      ],
+      "trace": [
+        {
+          "step": 1,
+          "title": "Interpreted the question",
+          "text": "Deterministic keyword routing (no LLM): filters {'date_start': '2026-03-04', 'date_end': '2026-03-31', 'app': 'whatsapp'}, breakdown None."
+        },
+        {
+          "step": 2,
+          "title": "Mapped to a catalog metric",
+          "text": "dau_mean_daily: Mean distinct users with at least one session per day. Grain: user x day. Denominator: distinct users."
+        },
+        {
+          "step": 3,
+          "title": "Generated SQL from an allowlisted template",
+          "text": "SELECT CAST(s.start_time AS DATE) AS date, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp' GROUP BY date ORDER BY date Tables scanned: fact_sessions, dim_users. Guard: SELECT/WITH only, allowlisted tables."
+        },
+        {
+          "step": 4,
+          "title": "Ran the query",
+          "text": "Query returned 28 row(s) in 1176 ms. First row: (datetime.date(2026, 3, 4), 29337)."
+        },
+        {
+          "step": 5,
+          "title": "Interpreted the result",
+          "text": "28 row(s) returned at grain user x day; the table and chart show them, not a summary invented here."
+        }
+      ],
+      "items": {
+        "sql_syntax": {
+          "pass": true,
+          "reason": ""
+        },
+        "sql_safety": {
+          "pass": true,
+          "reason": "ok"
+        },
+        "execution": {
+          "pass": true,
+          "reason": "1176ms, 28 rows"
+        },
+        "result_equiv": {
+          "pass": true,
+          "reason": ""
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "task_success": true
+    },
+    {
+      "id": "b37",
+      "kind": "single",
+      "family": "ambiguous_metric",
+      "question": "How is Whatsapp doing recently?",
+      "plan_type": "weather_report",
+      "metric": null,
+      "catalog": null,
+      "sql": null,
+      "guard": {
+        "ok": true,
+        "reason": "no SQL"
+      },
+      "runtime_ms": 34775,
+      "row_count": 0,
+      "columns": [],
+      "trace": null,
+      "items": {
+        "sql_syntax": {
+          "pass": null,
+          "reason": "no SQL: weather report"
+        },
+        "sql_safety": {
+          "pass": null,
+          "reason": "no SQL: weather report"
+        },
+        "execution": {
+          "pass": true,
+          "reason": "weather report computed"
+        },
+        "result_equiv": {
+          "pass": true,
+          "reason": ""
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "task_success": true
+    },
+    {
+      "id": "b39",
+      "kind": "single",
+      "family": "metric_scoping",
+      "question": "What is DAU/MAU stickiness for Instagram?",
+      "plan_type": "query",
+      "metric": "dau_mau_stickiness",
+      "catalog": {
+        "metric": "dau_mau_stickiness",
+        "definition": "Mean March DAU divided by March MAU.",
+        "grain": "month"
+      },
+      "sql": "SELECT AVG(dau) / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'), 0) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram' GROUP BY d)",
+      "guard": {
+        "ok": true,
+        "reason": "ok"
+      },
+      "runtime_ms": 3882,
+      "row_count": 1,
+      "columns": [
+        "value"
+      ],
+      "trace": [
+        {
+          "step": 1,
+          "title": "Interpreted the question",
+          "text": "Deterministic keyword routing (no LLM): filters {'date_start': '2026-01-01', 'date_end': '2026-03-31', 'app': 'instagram'}, breakdown None."
+        },
+        {
+          "step": 2,
+          "title": "Mapped to a catalog metric",
+          "text": "dau_mau_stickiness: Mean March DAU divided by March MAU. Grain: month. Denominator: MAU."
+        },
+        {
+          "step": 3,
+          "title": "Generated SQL from an allowlisted template",
+          "text": "SELECT AVG(dau) / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'), 0) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram' GROUP BY d) Tables scanned: fact_sessions. Guard: SELECT/WITH only, allowlisted tables."
+        },
+        {
+          "step": 4,
+          "title": "Ran the query",
+          "text": "Query returned 1 row(s) in 3882 ms. First row: (0.2152911999992655,)."
+        },
+        {
+          "step": 5,
+          "title": "Interpreted the result",
+          "text": "Single value result: (0.2152911999992655,). Grain: month."
+        }
+      ],
+      "items": {
+        "sql_syntax": {
+          "pass": true,
+          "reason": ""
+        },
+        "sql_safety": {
+          "pass": true,
+          "reason": "ok"
+        },
+        "execution": {
+          "pass": true,
+          "reason": "3882ms, 1 rows"
+        },
+        "result_equiv": {
+          "pass": true,
+          "reason": ""
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [
+        {
+          "label": "stickiness SQL filters to Instagram in BOTH numerator (mean DAU) and denominator (MAU)",
+          "pass": true,
+          "found": 2,
+          "want": 2
+        }
+      ],
+      "task_success": true
+    },
+    {
+      "id": "c2",
+      "kind": "conversation",
+      "family": "multi_turn_context",
+      "description": "Whatsapp: growth up, retention down, creators down. Diagnosis priority is creators first (documented), retention second \u2014 the diagnosis text must not claim creator-only when retention also fired.",
+      "items": {
+        "sql_syntax": {
+          "pass": null,
+          "reason": "no SQL in any turn"
+        },
+        "sql_safety": {
+          "pass": null,
+          "reason": "no SQL in any turn"
+        },
+        "execution": {
+          "pass": true,
+          "reason": ""
+        },
+        "result_equiv": {
+          "pass": true,
+          "reason": ""
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "turns": [
+        {
+          "user": "How is Whatsapp doing?",
+          "type": "weather",
+          "app": "whatsapp",
+          "topic": null,
+          "text": "Whatsapp growth is up: mean daily DAU 30,139 in 2026-03-04 to 2026-03-31, +4.1% vs the prior 28 days. Retention is down: D7 19.5% for cohorts 2026-02-25 to 2026-03-24, -2.2 points vs prior cohorts. Creator supply is down: 3,066 daily creators, penetration 10.2%.\n\nWatchouts:\n- Retention falling: D7 d",
+          "sql": null,
+          "tables": null,
+          "row_count": null,
+          "runtime_ms": 35417,
+          "turn_failures": []
+        },
+        {
+          "user": "retention",
+          "type": "drilldown",
+          "app": "whatsapp",
+          "topic": "retention",
+          "text": "Retention for whatsapp: D7 19.5% (down, -2.2 points vs prior cohorts), DAU 30,139 (up), WAU 98,059 (up).\n\nNext: use the buttons below for a diagnosis, an experiment recommendation, or the PM/Eng brief \u2014 or type another topic name (retention, growth, messaging) to switch drill-downs.",
+          "sql": null,
+          "tables": null,
+          "row_count": null,
+          "runtime_ms": 0,
+          "turn_failures": []
+        },
+        {
+          "user": "what's the diagnosis?",
+          "type": "diagnosis",
+          "app": "whatsapp",
+          "topic": "creators",
+          "text": "The problematic metric is creator supply for whatsapp. Daily creators are 3,066 (down), and 24.9% of posts get zero engagement (whole window). Growth is up and retention is down, so creators are the first problem, not the only one.\n\nGood cards: dau, wau, messaging_dau. Bad cards: d7_retention, daily",
+          "sql": null,
+          "tables": null,
+          "row_count": null,
+          "runtime_ms": 0,
+          "turn_failures": []
+        }
+      ],
+      "task_success": true
+    },
+    {
+      "id": "c8",
+      "kind": "conversation",
+      "family": "multi_turn_context",
+      "description": "Turn-by-turn ranking (2026-10-29 22:55 PDT screenshot): after WhatsApp creators by country, 'which country had the most drop in the last 2 weeks' must rank by change, not clarify \u2014 ID is the largest drop on both absolute (-12) and percent (-7.0%) in Mar 18-31 vs Mar 4-17.",
+      "items": {
+        "sql_syntax": {
+          "pass": true,
+          "reason": ""
+        },
+        "sql_safety": {
+          "pass": true,
+          "reason": ""
+        },
+        "execution": {
+          "pass": true,
+          "reason": ""
+        },
+        "result_equiv": {
+          "pass": null,
+          "reason": "no numeric checks in this conversation"
+        },
+        "final_answer": {
+          "pass": true,
+          "reason": ""
+        }
+      },
+      "sql_semantic": true,
+      "structural": [],
+      "turns": [
+        {
+          "user": "What's happening with WhatsApp?",
+          "type": "weather",
+          "app": "whatsapp",
+          "topic": null,
+          "text": "Whatsapp growth is up: mean daily DAU 30,139 in 2026-03-04 to 2026-03-31, +4.1% vs the prior 28 days. Retention is down: D7 19.5% for cohorts 2026-02-25 to 2026-03-24, -2.2 points vs prior cohorts. Creator supply is down: 3,066 daily creators, penetration 10.2%.\n\nWatchouts:\n- Retention falling: D7 d",
+          "sql": null,
+          "tables": null,
+          "row_count": null,
+          "runtime_ms": 39915,
+          "turn_failures": []
+        },
+        {
+          "user": "creators by country",
+          "type": "breakdown",
+          "app": "whatsapp",
+          "topic": "creators",
+          "text": "Breakdown for whatsapp: creators by country, current period 2026-03-04 to 2026-03-31:\n- US: 6,089 (29,642 posts) (30.1% of the total)\n- IN: 5,066 (24,601 posts) (25.1% of the total)\n- BR: 3,096 (15,478 posts) (15.3% of the total)\n- ID: 2,034 (9,846 posts) (10.1% of the total)\n- MX: 1,589 (7,455 post",
+          "sql": "SELECT u.country, COUNT(DISTINCT f.creator_id) AS creators, COUNT(*) AS posts FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id JOIN dim_users u ON u.user_id = f.creator_id WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND c.app = 'whatsapp' GROUP BY u.country ORDER BY creators DESC",
+          "tables": [
+            "fact_content_creation",
+            "dim_content",
+            "dim_users"
+          ],
+          "row_count": 7,
+          "runtime_ms": 1097,
+          "turn_failures": []
+        },
+        {
+          "user": "Which country had the most drop in the last 2 weeks",
+          "type": "ranking",
+          "app": "whatsapp",
+          "topic": "creators",
+          "text": "Ranking for whatsapp: creators (creators) by country, last 14 days (2026-03-18 to 2026-03-31) vs prior 14 days (2026-03-04 to 2026-03-17), sorted by largest drop:\n\nThe country with the largest drop is DE: 906 vs 930, -24, -2.6%.\n\n- DE: 906 (was 930, -24, -2.6%) (posts 2,740 (was 2,813))\n- GB: 962 (w",
+          "sql": null,
+          "tables": null,
+          "row_count": null,
+          "runtime_ms": 971,
+          "turn_failures": []
+        }
+      ],
+      "task_success": true
+    }
+  ],
+  "summary": {
+    "overall": {
+      "n": 10,
+      "task_success": 10
+    },
+    "by_family": {
+      "complex_joins_breakdowns": {
+        "n": 2,
+        "task_success": 2,
+        "items": {
+          "sql_syntax": {
+            "pass": 2,
+            "applicable": 2
+          },
+          "sql_safety": {
+            "pass": 2,
+            "applicable": 2
+          },
+          "execution": {
+            "pass": 2,
+            "applicable": 2
+          },
+          "result_equiv": {
+            "pass": 2,
+            "applicable": 2
+          },
+          "final_answer": {
+            "pass": 2,
+            "applicable": 2
+          }
+        }
+      },
+      "metric_scoping": {
+        "n": 4,
+        "task_success": 4,
+        "items": {
+          "sql_syntax": {
+            "pass": 3,
+            "applicable": 3
+          },
+          "sql_safety": {
+            "pass": 3,
+            "applicable": 3
+          },
+          "execution": {
+            "pass": 3,
+            "applicable": 3
+          },
+          "result_equiv": {
+            "pass": 3,
+            "applicable": 3
+          },
+          "final_answer": {
+            "pass": 4,
+            "applicable": 4
+          }
+        }
+      },
+      "aggregation_grain": {
+        "n": 1,
+        "task_success": 1,
+        "items": {
+          "sql_syntax": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "sql_safety": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "execution": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "result_equiv": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "final_answer": {
+            "pass": 1,
+            "applicable": 1
+          }
+        }
+      },
+      "ambiguous_metric": {
+        "n": 1,
+        "task_success": 1,
+        "items": {
+          "sql_syntax": {
+            "pass": 0,
+            "applicable": 0
+          },
+          "sql_safety": {
+            "pass": 0,
+            "applicable": 0
+          },
+          "execution": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "result_equiv": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "final_answer": {
+            "pass": 1,
+            "applicable": 1
+          }
+        }
+      },
+      "multi_turn_context": {
+        "n": 2,
+        "task_success": 2,
+        "items": {
+          "sql_syntax": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "sql_safety": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "execution": {
+            "pass": 2,
+            "applicable": 2
+          },
+          "result_equiv": {
+            "pass": 1,
+            "applicable": 1
+          },
+          "final_answer": {
+            "pass": 2,
+            "applicable": 2
+          }
+        }
+      }
+    }
+  }
+}

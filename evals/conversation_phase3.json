@@ -11,6 +11,7 @@
       "weather_dau_tolerance": 10.0
     },
     "description": "Instagram full flow: weather -> creators drill-down -> diagnosis -> hypothesis recommendation -> PM/Eng brief. The demo flow from Phase 3 planning.",
+    "family": "multi_turn_context",
     "id": "c1",
     "turns": [
       {
@@ -47,6 +48,7 @@
       "weather_d7_tolerance": 0.01
     },
     "description": "Whatsapp: growth up, retention down, creators down. Diagnosis priority is creators first (documented), retention second \u2014 the diagnosis text must not claim creator-only when retention also fired.",
+    "family": "multi_turn_context",
     "id": "c2",
     "turns": [
       {
@@ -69,6 +71,7 @@
   {
     "checks": {},
     "description": "Negative case: evaluating a past experiment without assignment tables must clarify, not invent a lift \u2014 even mid-conversation.",
+    "family": "incorrect_assumption",
     "id": "c3",
     "turns": [
       {
@@ -85,6 +88,7 @@
   {
     "checks": {},
     "description": "Letter choice: after Instagram weather, 'a' picks the first offered drill-down (creators).",
+    "family": "multi_turn_context",
     "id": "c4",
     "turns": [
       {
@@ -105,6 +109,7 @@
       "weather_dau_tolerance": 10.0
     },
     "description": "Turn-by-turn Step 1: 'current state' phrasing maps to weather, 'what about WhatsApp?' inherits the weather intent with a new app, 'creators by country' is a breakdown, and a why question is a decomposition, not a cause.",
+    "family": "multi_turn_context",
     "id": "c5",
     "turns": [
       {
@@ -132,6 +137,7 @@
   {
     "checks": {},
     "description": "Turn-by-turn Step 1: same drill-down, different app ('same for whatsapp' after a creators drill-down), then creators by surface.",
+    "family": "multi_turn_context",
     "id": "c6",
     "turns": [
       {
@@ -160,6 +166,7 @@
   {
     "checks": {},
     "description": "Turn-by-turn Step 1: segment follow-up 'creators in India' filters the drill-down, and the past-experiment refusal still holds after new turns.",
+    "family": "multi_turn_context",
     "id": "c7",
     "turns": [
       {
@@ -181,6 +188,7 @@
   {
     "checks": {},
     "description": "Turn-by-turn ranking (2026-10-29 22:55 PDT screenshot): after WhatsApp creators by country, 'which country had the most drop in the last 2 weeks' must rank by change, not clarify \u2014 ID is the largest drop on both absolute (-12) and percent (-7.0%) in Mar 18-31 vs Mar 4-17.",
+    "family": "multi_turn_context",
     "id": "c8",
     "turns": [
       {
@@ -203,6 +211,7 @@
   {
     "checks": {},
     "description": "MAU standalone turn (2026-11-04 shell probe): 'What's the MAU for Instagram?' as the first turn in a new chat must answer app-scoped March 2026 MAU (210,809), with no weather turn required.",
+    "family": "metric_scoping",
     "id": "c9",
     "turns": [
       {
@@ -215,6 +224,7 @@
   {
     "checks": {},
     "description": "MAU typo probe, literal user wording (2026-11-04): 'What's teh MAU for Instagram?' must map on the 'mau' keyword to the same app-scoped answer (210,809). No general spell-correction is built; only the keyword mapping matters.",
+    "family": "metric_scoping",
     "id": "c10",
     "turns": [
       {

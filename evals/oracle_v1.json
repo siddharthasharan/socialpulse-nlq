@@ -1,0 +1,451 @@
+{
+  "entries": [
+    {
+      "id": "b01",
+      "kind": "scalar",
+      "note": "Canonical definition, copied from sql/canonical_metrics.sql (the definition source), not via planner.build_sql().",
+      "sql": "SELECT AVG(dau) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions GROUP BY d)"
+    },
+    {
+      "id": "b02",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT AVG(wau) AS value FROM (SELECT DATE_TRUNC('week', CAST(start_time AS DATE)) AS w, COUNT(DISTINCT user_id) AS wau FROM fact_sessions GROUP BY w)"
+    },
+    {
+      "id": "b03",
+      "kind": "scalar",
+      "note": "Canonical definition (all-apps March MAU).",
+      "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+    },
+    {
+      "id": "b04",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT AVG(dau) / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'), 0) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' GROUP BY d)"
+    },
+    {
+      "id": "b05",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT COUNT(*) AS value FROM dim_users WHERE signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31'"
+    },
+    {
+      "id": "b06",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(start_time AS DATE))), 0) AS value FROM fact_sessions"
+    },
+    {
+      "id": "b07",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT MEDIAN(duration_minutes) AS value FROM fact_sessions"
+    },
+    {
+      "id": "b08",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT AVG(senders) AS value FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS senders FROM fact_messages GROUP BY d)"
+    },
+    {
+      "id": "b09",
+      "kind": "series",
+      "note": "Daily DAU by app over the last 28 days, computed directly from fact_sessions. Compares row count (>= 80) and distinct apps (3) against the stored expectation.",
+      "sql": "SELECT app AS dim, CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY app, d ORDER BY dim, d"
+    },
+    {
+      "id": "b10",
+      "kind": "series",
+      "note": "Daily DAU by country over the last 28 days, via the session user's country. Compares row count (>= 190) and distinct countries (7).",
+      "sql": "SELECT u.country AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.country, d ORDER BY dim, d"
+    },
+    {
+      "id": "b11",
+      "kind": "series",
+      "note": "Daily DAU by platform over the last 28 days, via the session user's platform. Compares row count (>= 80) and distinct platforms (3).",
+      "sql": "SELECT u.platform AS dim, CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.platform, d ORDER BY dim, d"
+    },
+    {
+      "id": "b12",
+      "kind": "breakdown",
+      "note": "Sessions per DAU by platform, computed directly. Compares row count (3); values are recorded, not asserted against a stored list (the case stores no expected values).",
+      "sql": "SELECT u.platform AS dim, COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT (s.user_id, CAST(s.start_time AS DATE))), 0) AS value FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id GROUP BY u.platform ORDER BY dim"
+    },
+    {
+      "id": "b13",
+      "kind": "series",
+      "note": "Daily creators by app over the whole window, via content app. Compares row count (>= 200) and distinct apps (3).",
+      "sql": "SELECT c.app AS dim, CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS value FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id GROUP BY c.app, d ORDER BY dim, d"
+    },
+    {
+      "id": "b14",
+      "kind": "breakdown",
+      "note": "Engagement rate by surface: engagements (via content surface) over sampled impressions (via impression surface). Compares row count (3); values recorded, not asserted (the case stores no expected values).",
+      "sql": "SELECT s.dim AS dim, e.engs * 1.0 / NULLIF(s.imps, 0) AS value FROM (SELECT surface AS dim, COUNT(*) AS imps FROM fact_content_impressions GROUP BY surface) s JOIN (SELECT c.surface AS dim, COUNT(*) AS engs FROM fact_content_engagements e JOIN dim_content c ON c.content_id = e.content_id GROUP BY c.surface) e USING (dim) ORDER BY dim"
+    },
+    {
+      "id": "b15",
+      "kind": "series",
+      "note": "Daily messaging senders by app (sender's primary_app) over the last 28 days. Compares row count (>= 80) and distinct apps (3).",
+      "sql": "SELECT u.primary_app AS dim, CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS value FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY u.primary_app, d ORDER BY dim, d"
+    },
+    {
+      "id": "b16",
+      "kind": "series",
+      "note": "Daily DAU trend over the last 28 days. Compares row count (>= 28).",
+      "sql": "SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d ORDER BY d"
+    },
+    {
+      "id": "b17",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21')"
+    },
+    {
+      "id": "b18",
+      "kind": "breakdown",
+      "note": "Canonical definition, returns label/value rows. Compares the per-source values against the stored expected_values.",
+      "sql": "SELECT acquisition_source AS dim, AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, u.acquisition_source, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21') GROUP BY acquisition_source ORDER BY acquisition_source"
+    },
+    {
+      "id": "b19",
+      "kind": "scalar",
+      "note": "Canonical D7 restricted to the paid cohort, written out by hand.",
+      "sql": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-01' AND DATE '2026-02-21' AND u.acquisition_source = 'paid')"
+    },
+    {
+      "id": "b20",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT COUNT(*) * 1.0 / NULLIF(COUNT(DISTINCT creator_id), 0) AS value FROM fact_content_creation"
+    },
+    {
+      "id": "b21",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT AVG(creators * 1.0 / NULLIF(dau, 0)) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS creators FROM fact_content_creation GROUP BY d) c JOIN (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions GROUP BY d) s USING (d)"
+    },
+    {
+      "id": "b22",
+      "kind": "registry",
+      "note": "Reads catalog/experiments.yaml directly (regex over the file, not the planner's _experiment_plan). Expectation: 3 experiments listed; the planner must return type experiment_list.",
+      "registry": {
+        "expect": "list"
+      }
+    },
+    {
+      "id": "b23",
+      "kind": "registry",
+      "note": "Reads catalog/experiments.yaml directly. Expectation: the Reels ranking experiment's primary_metric is reels_watch_time_per_viewer_day.",
+      "registry": {
+        "expect": "field",
+        "experiment": "exp_reels_ranking_v1",
+        "field": "primary_metric",
+        "value": "reels_watch_time_per_viewer_day"
+      }
+    },
+    {
+      "evidence": {
+        "data_dir_has_no_file_matching": "*experiment*"
+      },
+      "id": "b24",
+      "kind": "behavioral",
+      "note": "Correct behavior is clarification containing 'cannot evaluate'. Premise checked against the data dir, not the planner: no experiment assignment table exists in data/phase1 (verified: no file matching *experiment*). Assignment tables arrive Phase 3."
+    },
+    {
+      "id": "b25",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c)"
+    },
+    {
+      "id": "b26",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "WITH creator_imps AS (SELECT c.creator_id, COUNT(*) AS imps FROM fact_content_impressions i JOIN dim_content c ON c.content_id = i.content_id GROUP BY c.creator_id), ranked AS (SELECT creator_id, imps, NTILE(100) OVER (ORDER BY imps DESC) AS tile FROM creator_imps) SELECT SUM(CASE WHEN tile = 1 THEN imps ELSE 0 END) * 1.0 / NULLIF(SUM(imps), 0) AS value FROM ranked"
+    },
+    {
+      "id": "b27",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT AVG(commenters * 1.0 / NULLIF(dau, 0)) AS value FROM (SELECT CAST(e.created_at AS DATE) AS d, COUNT(DISTINCT e.user_id) AS commenters FROM fact_content_engagements e WHERE e.action_type = 'comment' GROUP BY d) c JOIN (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions GROUP BY d) s USING (d)"
+    },
+    {
+      "id": "b28",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT (SELECT COUNT(*) FROM fact_content_engagements) * 1.0 / NULLIF((SELECT COUNT(*) FROM fact_content_impressions), 0) AS value"
+    },
+    {
+      "id": "b29",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT AVG(CASE WHEN completion_pct >= 0.95 THEN 1.0 ELSE 0.0 END) AS value FROM fact_video_plays"
+    },
+    {
+      "id": "b30",
+      "kind": "scalar",
+      "note": "Canonical definition.",
+      "sql": "SELECT SUM(watch_ms) / 60000.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(play_time AS DATE))), 0) AS value FROM fact_video_plays"
+    },
+    {
+      "evidence_expect_absent": [
+        "FR",
+        "France"
+      ],
+      "evidence_sql": "SELECT DISTINCT country FROM dim_users ORDER BY 1",
+      "id": "b31",
+      "kind": "behavioral",
+      "note": "Correct behavior is clarification naming France as not in the data. Premise checked against the data, not the planner: the evidence SQL lists the countries present in dim_users; France must be absent."
+    },
+    {
+      "cards": {
+        "d7_retention": {
+          "current": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24')",
+          "prior": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-28' AND DATE '2026-02-23')"
+        },
+        "daily_creators": {
+          "current": "SELECT AVG(c) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)",
+          "prior": "SELECT AVG(c) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d)"
+        },
+        "dau": {
+          "current": "SELECT AVG(dau) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)",
+          "prior": "SELECT AVG(dau) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d)"
+        },
+        "messaging_dau": {
+          "current": "SELECT AVG(s) AS value FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS s FROM fact_messages WHERE CAST(sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)"
+        },
+        "orphan_post_rate": {
+          "current": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c)"
+        },
+        "top1_share": {
+          "current": "WITH creator_imps AS (SELECT c.creator_id, COUNT(*) AS imps FROM fact_content_impressions i JOIN dim_content c ON c.content_id = i.content_id GROUP BY c.creator_id), ranked AS (SELECT creator_id, imps, NTILE(100) OVER (ORDER BY imps DESC) AS tile FROM creator_imps) SELECT SUM(CASE WHEN tile = 1 THEN imps ELSE 0 END) * 1.0 / NULLIF(SUM(imps), 0) AS value FROM ranked"
+        }
+      },
+      "id": "b32",
+      "kind": "weather",
+      "note": "No stored expected values for this case (type weather_report, no expected_cards) \u2014 the oracle recomputes the headline cards directly and records them, so a future stored expectation can be checked. Watchouts are derived from the oracle cards using the documented rules."
+    },
+    {
+      "cards": {
+        "d7_retention": {
+          "current": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24')"
+        },
+        "dau": {
+          "current": "SELECT AVG(dau) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)"
+        },
+        "messaging_dau": {
+          "current": "SELECT AVG(s) AS value FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS s FROM fact_messages WHERE CAST(sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)"
+        },
+        "wau": {
+          "current": "SELECT AVG(wau) AS value FROM (SELECT DATE_TRUNC('week', CAST(start_time AS DATE)) AS w, COUNT(DISTINCT user_id) AS wau, COUNT(DISTINCT CAST(start_time AS DATE)) AS days FROM fact_sessions GROUP BY w HAVING days = 7 ORDER BY w DESC LIMIT 4)"
+        }
+      },
+      "id": "b33",
+      "kind": "weather",
+      "note": "Recomputes the four stored cards directly. The stored dau (100627.8) is the current-period mean, not the whole-window mean \u2014 the oracle uses the same current period (Mar 4-31)."
+    },
+    {
+      "cards": {
+        "creator_penetration": {
+          "current": "SELECT AVG(c * 1.0 / NULLIF(dau, 0)) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d) c JOIN (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d) s USING (d)",
+          "prior": "SELECT AVG(c * 1.0 / NULLIF(dau, 0)) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d) c JOIN (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d) s USING (d)"
+        },
+        "daily_creators": {
+          "current": "SELECT AVG(c) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d)",
+          "prior": "SELECT AVG(c) AS value FROM (SELECT CAST(published_at AS DATE) AS d, COUNT(DISTINCT creator_id) AS c FROM fact_content_creation WHERE CAST(published_at AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' GROUP BY d)"
+        },
+        "orphan_post_rate": {
+          "current": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c)"
+        },
+        "top1_share": {
+          "current": "WITH creator_imps AS (SELECT c.creator_id, COUNT(*) AS imps FROM fact_content_impressions i JOIN dim_content c ON c.content_id = i.content_id GROUP BY c.creator_id), ranked AS (SELECT creator_id, imps, NTILE(100) OVER (ORDER BY imps DESC) AS tile FROM creator_imps) SELECT SUM(CASE WHEN tile = 1 THEN imps ELSE 0 END) * 1.0 / NULLIF(SUM(imps), 0) AS value FROM ranked"
+        }
+      },
+      "id": "b34",
+      "kind": "weather",
+      "note": "Recomputes the four stored cards directly; watchout phrases are checked against watchouts derived from the oracle cards (creators/penetration direction needs prior values, included)."
+    },
+    {
+      "id": "b35",
+      "kind": "series",
+      "note": "Daily WhatsApp DAU over the last 7 days (Mar 25-31), computed directly. Compares the value column in order against the stored 7 values.",
+      "sql": "SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE app = 'whatsapp' AND CAST(start_time AS DATE) BETWEEN DATE '2026-03-25' AND DATE '2026-03-31' GROUP BY d ORDER BY d"
+    },
+    {
+      "id": "b36",
+      "kind": "series",
+      "note": "Daily WhatsApp DAU over the last 28 days (Mar 4-31), computed directly. Compares the value column in order against the stored 28 values.",
+      "sql": "SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE app = 'whatsapp' AND CAST(start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' GROUP BY d ORDER BY d"
+    },
+    {
+      "cards": {
+        "d7_retention": {
+          "current": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24' AND u.primary_app = 'whatsapp')",
+          "prior": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-01-28' AND DATE '2026-02-23' AND u.primary_app = 'whatsapp')"
+        },
+        "daily_creators": {
+          "current": "SELECT AVG(c) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND c.app = 'whatsapp' GROUP BY d)"
+        },
+        "dau": {
+          "current": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp' GROUP BY d)",
+          "prior": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-02-04' AND DATE '2026-03-03' AND u.primary_app = 'whatsapp' GROUP BY d)"
+        },
+        "messaging_dau": {
+          "current": "SELECT AVG(s) AS value FROM (SELECT CAST(m.sent_at AS DATE) AS d, COUNT(DISTINCT m.sender_id) AS s FROM fact_messages m JOIN dim_users u ON u.user_id = m.sender_id WHERE CAST(m.sent_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'whatsapp' GROUP BY d)"
+        },
+        "orphan_post_rate": {
+          "current": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c WHERE c.app = 'whatsapp')"
+        }
+      },
+      "id": "b37",
+      "kind": "weather",
+      "note": "WhatsApp-scoped cards, recomputed directly. User metrics scope via dim_users.primary_app, content via dim_content.app, messaging via the sender's primary_app \u2014 the scoping rules documented in weather.py. Watchout 'Retention falling' needs the prior D7, included."
+    },
+    {
+      "id": "b38",
+      "kind": "scalar",
+      "note": "App-scoped MAU, written out by hand (NOT the planner's build_sql): distinct Instagram users with a session in March 2026.",
+      "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'",
+      "structural": [
+        {
+          "contains": "app = 'instagram'",
+          "label": "MAU SQL filters to Instagram (app-scoped, not all-apps)"
+        }
+      ]
+    },
+    {
+      "id": "b39",
+      "kind": "scalar",
+      "note": "App-scoped stickiness, written out by hand: mean March DAU for Instagram divided by March MAU for Instagram. Both numerator and denominator are app-scoped \u2014 scoping only the denominator would mix populations.",
+      "sql": "SELECT AVG(dau) / NULLIF((SELECT COUNT(DISTINCT user_id) FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'), 0) AS value FROM (SELECT CAST(start_time AS DATE) AS d, COUNT(DISTINCT user_id) AS dau FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram' GROUP BY d)",
+      "structural": [
+        {
+          "contains": "app = 'instagram'",
+          "label": "stickiness SQL filters to Instagram in BOTH numerator (mean DAU) and denominator (MAU)",
+          "min_count": 2
+        }
+      ]
+    },
+    {
+      "checks": {
+        "drilldown_daily_creators": {
+          "sql": "SELECT AVG(c) AS value FROM (SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS c FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND c.app = 'instagram' GROUP BY d)",
+          "tolerance": 1.0
+        },
+        "drilldown_orphan": {
+          "sql": "SELECT AVG(CASE WHEN engaged THEN 0.0 ELSE 1.0 END) AS value FROM (SELECT c.content_id, EXISTS (SELECT 1 FROM fact_content_engagements e WHERE e.content_id = c.content_id) AS engaged FROM dim_content c WHERE c.app = 'instagram')",
+          "tolerance": 0.01
+        },
+        "weather_dau": {
+          "sql": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'instagram' GROUP BY d)",
+          "tolerance": 10.0
+        }
+      },
+      "id": "c1",
+      "kind": "conversation_values",
+      "note": "Numeric checks from the conversation file, recomputed directly. Weather DAU and drill-down creators are the Instagram current-period means (Mar 4-31, scoped via primary_app / content app); orphan is the Instagram whole-window rate."
+    },
+    {
+      "checks": {
+        "weather_d7": {
+          "sql": "SELECT AVG(CASE WHEN retained THEN 1.0 ELSE 0.0 END) AS value FROM (SELECT u.user_id, EXISTS (SELECT 1 FROM fact_sessions s WHERE s.user_id = u.user_id AND CAST(s.start_time AS DATE) = u.signup_date + INTERVAL 7 DAY) AS retained FROM dim_users u WHERE u.signup_date BETWEEN DATE '2026-02-25' AND DATE '2026-03-24' AND u.primary_app = 'whatsapp')",
+          "tolerance": 0.01
+        }
+      },
+      "id": "c2",
+      "kind": "conversation_values",
+      "note": "WhatsApp D7 for recent cohorts (Feb 25-Mar 24), recomputed directly."
+    },
+    {
+      "evidence": {
+        "data_dir_has_no_file_matching": "*experiment*"
+      },
+      "id": "c3",
+      "kind": "behavioral",
+      "note": "Same premise as b24: no experiment assignment tables exist, so evaluating a past experiment must clarify. Turn-type expectations in the conversation file are the behavioral spec; the harness checks those directly from ChatSession replies."
+    },
+    {
+      "id": "c4",
+      "kind": "behavioral",
+      "note": "No numeric expectation. The behavioral spec is the turn-type/app/topic expectations in the conversation file (letter 'a' picks the creators drill-down after Instagram weather)."
+    },
+    {
+      "checks": {
+        "weather_dau": {
+          "sql": "SELECT AVG(dau) AS value FROM (SELECT CAST(s.start_time AS DATE) AS d, COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-31' AND u.primary_app = 'instagram' GROUP BY d)",
+          "tolerance": 10.0
+        }
+      },
+      "id": "c5",
+      "kind": "conversation_values",
+      "note": "Instagram weather DAU, recomputed directly (same SQL as c1 weather_dau)."
+    },
+    {
+      "id": "c6",
+      "kind": "behavioral",
+      "note": "No numeric expectation. The behavioral spec is the turn-type/app/topic expectations in the conversation file (same drill-down, different app; creators by surface)."
+    },
+    {
+      "evidence": {
+        "data_dir_has_no_file_matching": "*experiment*"
+      },
+      "id": "c7",
+      "kind": "behavioral",
+      "note": "Segment follow-up plus the past-experiment refusal. The refusal premise is the same as b24/c3 (no assignment tables). Turn-type expectations in the conversation file are the behavioral spec."
+    },
+    {
+      "evidence_expect_top_dim": "ID",
+      "evidence_sql": "SELECT u.country AS dim, COUNT(DISTINCT CASE WHEN CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-18' AND DATE '2026-03-31' THEN f.creator_id END) - COUNT(DISTINCT CASE WHEN CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-17' THEN f.creator_id END) AS value FROM fact_content_creation f JOIN dim_users u ON u.user_id = f.creator_id JOIN dim_content c ON c.content_id = f.content_id WHERE c.app = 'whatsapp' GROUP BY u.country ORDER BY value ASC LIMIT 1",
+      "id": "c8",
+      "kind": "behavioral",
+      "note": "Ranking follow-up: the conversation file description claims ID is the largest creator drop (Mar 18-31 vs Mar 4-17, WhatsApp, -12 and -7.0%). The evidence SQL uses the ranking turn's own definition (chat._ranking_rows: COUNT(DISTINCT creator_id) per country per 14-day window). Expectation stays ID so a disagreement surfaces as a finding rather than silently adopting a new number."
+    },
+    {
+      "id": "c9",
+      "kind": "scalar",
+      "note": "Same independent check as b38 (app-scoped Instagram MAU). The conversation file stores no numeric value; the harness compares the oracle value against the MAU ground truth 210809 recorded in the design draft and the b38 stored value.",
+      "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'",
+      "structural": [
+        {
+          "contains": "app = 'instagram'",
+          "label": "MAU turn SQL filters to Instagram"
+        }
+      ]
+    },
+    {
+      "id": "c10",
+      "kind": "scalar",
+      "note": "Same independent check as b38/c9: the typo probe must map to the same app-scoped answer.",
+      "sql": "SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31' AND app = 'instagram'",
+      "structural": [
+        {
+          "contains": "app = 'instagram'",
+          "label": "MAU turn SQL filters to Instagram"
+        }
+      ]
+    }
+  ],
+  "method": "Each entry is an independent check of the stored expected value in evals/benchmark_phase2.json or evals/conversation_phase3.json. 'sql' entries are hand-written DuckDB SQL executed directly on the parquet views \u2014 they never call the planner (no plan(), no build_sql()). Scalar/breakdown/series SQL is re-derived from catalog/measures.yaml and sql/canonical_metrics.sql (the documented definitions), with app/country/platform filters written out by hand where the case is scoped. 'weather' entries recompute report cards directly from the raw tables using the period definitions documented in src/socialpulse_nlq/weather.py (current = last 28 days of sessions, prior = the 28 days before; retention cohorts end at max-date minus 7 days). The oracle runner first asserts MAX(session date) = 2026-03-31, so the hardcoded periods fail loudly if the data ever changes. 'behavioral' entries check the premise of a clarification/refusal against the data or registry instead of against the planner. 'registry' entries read catalog/experiments.yaml directly. The oracle NEVER compares SQL text: agreement is always on executed values. Where the oracle disagrees with a stored expected value, the stored value is NOT changed \u2014 the disagreement is reported as a finding.",
+  "periods": {
+    "current": [
+      "2026-03-04",
+      "2026-03-31"
+    ],
+    "max_session_date": "2026-03-31",
+    "prior": [
+      "2026-02-04",
+      "2026-03-03"
+    ],
+    "retention_current_cohorts": [
+      "2026-02-25",
+      "2026-03-24"
+    ],
+    "retention_prior_cohorts": [
+      "2026-01-28",
+      "2026-02-23"
+    ]
+  },
+  "version": "v1"
+}
