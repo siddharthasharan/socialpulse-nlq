@@ -1,8 +1,9 @@
-"""Benchmark harness v1 for the SocialPulse evaluation study.
+"""Benchmark harness for the SocialPulse evaluation study (v1 and v2).
 
-Runs the frozen benchmark (evals/benchmark_v1_manifest.json) against the
-deterministic planner/chat and scores every case on the FIVE rubric items
-from docs/phase1-design — separately, never collapsed into one number:
+Runs a frozen benchmark version (evals/benchmark_v1_manifest.json or
+evals/benchmark_v2_manifest.json) against the deterministic planner/chat
+and scores every case on the FIVE rubric items from docs/phase1-design —
+separately, never collapsed into one number:
 
   1. sql_syntax      — the planned SQL parses (DuckDB EXPLAIN, no execution).
   2. sql_safety      — the read-only guard accepts the SQL, reason recorded.
@@ -43,9 +44,10 @@ working payload (planner.build_trace / chat last_working), it does not
 invent a second trace format.
 
 The harness refuses to run (exit non-zero, no results) when the frozen
-state disagrees: manifest version != v1, a case id missing from or
-duplicated in either side, a family tag outside the 8, or the data pin
-(users / table counts / max session date) not matching the data dir.
+state disagrees: manifest version != the requested version, a case id
+missing from or duplicated in either side, a family tag outside the 8,
+or the data pin (users / table counts / max session date) not matching
+the data dir.
 """
 import importlib.util
 import json
@@ -65,6 +67,20 @@ FAMILIES = ["metric_scoping", "ambiguous_metric", "multi_turn_context",
             "complex_joins_breakdowns", "incorrect_assumption",
             "guardrail_adversarial", "sql_safety_syntax", "aggregation_grain"]
 MANIFEST_VERSION = "v1"
+# One frozen file set per benchmark version. v2 reuses the v1 conversations
+# file (it already carries the corrected c8 description); only the singles,
+# oracle, and manifest are versioned. Default stays v1 so existing callers
+# (and the v1 runner) keep running the frozen baseline unchanged.
+VERSIONS = {
+    "v1": {"manifest": "benchmark_v1_manifest.json",
+           "singles": "benchmark_phase2.json",
+           "convs": "conversation_phase3.json",
+           "oracle": "oracle_v1.json"},
+    "v2": {"manifest": "benchmark_v2_manifest.json",
+           "singles": "benchmark_v2.json",
+           "convs": "conversation_phase3.json",
+           "oracle": "oracle_v2.json"},
+}
 
 
 class ManifestError(Exception):
@@ -89,16 +105,19 @@ def _na(reason):
 # Loading + frozen-state validation
 # --------------------------------------------------------------------------
 
-def load_manifest(root=ROOT):
-    path = Path(root) / "evals/benchmark_v1_manifest.json"
+def load_manifest(root=ROOT, version=MANIFEST_VERSION):
+    if version not in VERSIONS:
+        raise ManifestError(f"unknown benchmark version {version!r}; known: "
+                            f"{sorted(VERSIONS)}")
+    path = Path(root) / "evals" / VERSIONS[version]["manifest"]
     try:
         manifest = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError) as e:
         raise ManifestError(f"cannot read manifest {path}: {e}")
-    if manifest.get("version") != MANIFEST_VERSION:
+    if manifest.get("version") != version:
         raise ManifestError(
-            f"manifest version {manifest.get('version')!r} != {MANIFEST_VERSION!r}; "
-            "the harness only runs the frozen v1 benchmark")
+            f"manifest version {manifest.get('version')!r} != {version!r}; "
+            "the harness only runs the frozen benchmark for that version")
     entries = manifest.get("cases", [])
     ids = [c["id"] for c in entries]
     if len(ids) != len(set(ids)):
@@ -113,14 +132,18 @@ def load_manifest(root=ROOT):
     return manifest
 
 
-def load_cases(root=ROOT):
+def load_cases(root=ROOT, version=MANIFEST_VERSION):
     """Return (single-shot cases, conversations, oracle entries by id)."""
-    singles = json.loads((Path(root) / "evals/benchmark_phase2.json").read_text())
-    convs = json.loads((Path(root) / "evals/conversation_phase3.json").read_text())
-    oracle = json.loads((Path(root) / "evals/oracle_v1.json").read_text())
-    if oracle.get("version") != MANIFEST_VERSION:
+    if version not in VERSIONS:
+        raise ManifestError(f"unknown benchmark version {version!r}; known: "
+                            f"{sorted(VERSIONS)}")
+    files = VERSIONS[version]
+    singles = json.loads((Path(root) / "evals" / files["singles"]).read_text())
+    convs = json.loads((Path(root) / "evals" / files["convs"]).read_text())
+    oracle = json.loads((Path(root) / "evals" / files["oracle"]).read_text())
+    if oracle.get("version") != version:
         raise ManifestError(
-            f"oracle version {oracle.get('version')!r} != {MANIFEST_VERSION!r}")
+            f"oracle version {oracle.get('version')!r} != {version!r}")
     return singles, convs, {e["id"]: e for e in oracle["entries"]}
 
 
@@ -737,11 +760,12 @@ def cases_for_split(manifest, split):
             if split == "all" or c["split"] == split}
 
 
-def run_benchmark(root=ROOT, data_dir=None, split="dev", with_oracle=True):
+def run_benchmark(root=ROOT, data_dir=None, split="dev", with_oracle=True,
+                  version=MANIFEST_VERSION):
     """Run the frozen benchmark for one split. Returns the full report dict."""
     data_dir = Path(data_dir or (Path(root) / "data/phase1"))
-    manifest = load_manifest(root)
-    singles, convs, oracle_by_id = load_cases(root)
+    manifest = load_manifest(root, version=version)
+    singles, convs, oracle_by_id = load_cases(root, version=version)
     validate_case_set(manifest, singles, convs)
     con = open_connection(data_dir)
     try:

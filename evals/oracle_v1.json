@@ -45,8 +45,8 @@
     {
       "id": "b08",
       "kind": "scalar",
-      "note": "Canonical definition.",
-      "sql": "SELECT AVG(senders) AS value FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS senders FROM fact_messages GROUP BY d)"
+      "note": "Canonical definition. Window filter added 2026-11-05 (Phase 1 slice 2, user-approved fix): sql/canonical_metrics.sql messaging_dau_mean used to be unwindowed, and one stray 2026-04-01 message date dragged the mean to 38,399.42 instead of the correct stored 38,812.77. The windowed value is 38,812.76666666667.",
+      "sql": "SELECT AVG(senders) AS value FROM (SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS senders FROM fact_messages WHERE CAST(sent_at AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' GROUP BY d)"
     },
     {
       "id": "b09",
@@ -396,11 +396,11 @@
       "note": "Segment follow-up plus the past-experiment refusal. The refusal premise is the same as b24/c3 (no assignment tables). Turn-type expectations in the conversation file are the behavioral spec."
     },
     {
-      "evidence_expect_top_dim": "ID",
+      "evidence_expect_top_dim": "DE",
       "evidence_sql": "SELECT u.country AS dim, COUNT(DISTINCT CASE WHEN CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-18' AND DATE '2026-03-31' THEN f.creator_id END) - COUNT(DISTINCT CASE WHEN CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-04' AND DATE '2026-03-17' THEN f.creator_id END) AS value FROM fact_content_creation f JOIN dim_users u ON u.user_id = f.creator_id JOIN dim_content c ON c.content_id = f.content_id WHERE c.app = 'whatsapp' GROUP BY u.country ORDER BY value ASC LIMIT 1",
       "id": "c8",
       "kind": "behavioral",
-      "note": "Ranking follow-up: the conversation file description claims ID is the largest creator drop (Mar 18-31 vs Mar 4-17, WhatsApp, -12 and -7.0%). The evidence SQL uses the ranking turn's own definition (chat._ranking_rows: COUNT(DISTINCT creator_id) per country per 14-day window). Expectation stays ID so a disagreement surfaces as a finding rather than silently adopting a new number."
+      "note": "Ranking follow-up: corrected 2026-11-05 (Phase 1 slice 2, user-approved fix). The description used to claim ID was the largest creator drop (Mar 18-31 vs Mar 4-17, WhatsApp, -12 and -7.0%) \u2014 stale from the 50K era. On the 500K data the largest drop is DE (-24, -2.6%), and the chat itself answers DE. The evidence SQL uses the ranking turn's own definition (chat._ranking_rows: COUNT(DISTINCT creator_id) per country per 14-day window)."
     },
     {
       "id": "c9",

@@ -79,9 +79,15 @@ SELECT AVG(CASE WHEN completion_pct >= 0.95 THEN 1.0 ELSE 0.0 END) AS value FROM
 SELECT SUM(watch_ms) / 60000.0 / NULLIF(COUNT(DISTINCT (user_id, CAST(play_time AS DATE))), 0) AS value
 FROM fact_video_plays;
 -- metric: messaging_dau_mean
+-- Window filter added 2026-11-05 (Phase 1 slice 2 fix): the query used to
+-- be unwindowed, and one stray 2026-04-01 message date dragged the mean
+-- down to 38,399.42 instead of the correct 38,812.77. The window is part
+-- of the definition (Jan 1-Mar 31 2026); do not remove it.
 SELECT AVG(senders) AS value FROM (
   SELECT CAST(sent_at AS DATE) AS d, COUNT(DISTINCT sender_id) AS senders
-  FROM fact_messages GROUP BY d
+  FROM fact_messages
+  WHERE CAST(sent_at AS DATE) BETWEEN DATE '2026-01-01' AND DATE '2026-03-31'
+  GROUP BY d
 );
 -- metric: two_way_conversation_rate
 SELECT AVG(CASE WHEN senders >= 2 THEN 1.0 ELSE 0.0 END) AS value FROM (

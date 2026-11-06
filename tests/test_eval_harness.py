@@ -202,3 +202,82 @@ def test_oracle_covers_every_case_and_families_valid():
         assert c.get("family") in FAMILIES, c["id"]
     for c in manifest["cases"]:
         assert c["family"] in FAMILIES
+
+
+# --------------------------------------------------------------------------
+# v2 (slice 2, part A): the versioned loader must serve v2 alongside v1,
+# and the v1 default must be unchanged.
+# --------------------------------------------------------------------------
+
+V2_HELDOUT = {"t06", "t08", "t10", "t13", "t16", "t19", "t25", "t30",
+              "t40", "t45", "t47", "t51", "t56", "t64",
+              "b10", "b15", "b19", "b23", "b30", "b36", "b37", "b39", "c2", "c8"}
+
+
+def test_v1_still_default():
+    manifest = load_manifest(ROOT)
+    assert manifest["version"] == "v1"
+    assert len(manifest["cases"]) == 49
+    singles, _, oracle = load_cases(ROOT)
+    assert len(singles) == 39 and len(oracle) == 49
+
+
+def test_v2_split_integrity():
+    manifest = load_manifest(ROOT, version="v2")
+    assert manifest["version"] == "v2"
+    singles, convs, _ = load_cases(ROOT, version="v2")
+    validate_case_set(manifest, singles, convs)
+    ids = [c["id"] for c in manifest["cases"]]
+    assert len(ids) == len(set(ids)) == 119
+    assert len(singles) == 109 and len(convs) == 10
+    dev = cases_for_split(manifest, "dev")
+    held = cases_for_split(manifest, "heldout")
+    assert dev & held == set()
+    assert dev | held == set(ids)
+    assert len(held) == 24 and len(dev) == 95
+    assert held == V2_HELDOUT
+
+
+def test_v2_oracle_covers_every_case_and_templated_labeled():
+    manifest = load_manifest(ROOT, version="v2")
+    singles, convs, oracle = load_cases(ROOT, version="v2")
+    assert set(oracle) == {c["id"] for c in singles + convs}
+    assert len(oracle) == 119
+    for c in singles + convs:
+        assert c.get("family") in FAMILIES, c["id"]
+    # Every templated case is labeled as such in its oracle note, and its
+    # id is in the t01-t70 range -- templated cases never count as
+    # independent observations.
+    templated = [c for c in singles if c["id"].startswith("t")]
+    assert len(templated) == 70
+    for c in templated:
+        assert "Templated" in oracle[c["id"]].get("note", ""), c["id"]
+    # The two approved fixes carried into v2.
+    assert oracle["c8"].get("evidence_expect_top_dim") == "DE"
+    assert "2026-01-01" in oracle["b08"]["sql"] and "2026-03-31" in oracle["b08"]["sql"]
+
+
+def test_unknown_version_refused():
+    try:
+        load_manifest(ROOT, version="v99")
+    except ManifestError:
+        pass
+    else:
+        raise AssertionError("unknown benchmark version was not refused")
+    try:
+        load_cases(ROOT, version="v99")
+    except ManifestError:
+        pass
+    else:
+        raise AssertionError("unknown benchmark version was not refused for cases")
+
+
+def test_v2_families_all_covered():
+    # v1 had zero guardrail_adversarial and sql_safety_syntax cases;
+    # slice 2 fills both, and every family now has dev cases.
+    manifest = load_manifest(ROOT, version="v2")
+    from collections import Counter
+    fam = Counter(c["family"] for c in manifest["cases"])
+    assert fam["guardrail_adversarial"] == 8
+    assert fam["sql_safety_syntax"] == 6
+    assert set(fam) == set(FAMILIES)
