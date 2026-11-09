@@ -244,18 +244,39 @@ def test_month_abbreviations_map_to_month_windows():
     assert p3["filters"]["date_start"] == "2026-01-01"
 
 
-def test_in_the_window_and_in_minutes_unchanged():
-    # Deliberate narrow scope (2026-11-06): the "in a/an" and month
-    # fixes above do NOT touch "in the window" (b05) or "in minutes"
-    # (b07) -- those are the same bug class, but fixing them changes
-    # the slice-3 variants' b05 outcome under a frozen comparison, so
-    # they wait for the planned 'in'-preposition pass, which must
-    # re-run the ablations. Pin the current behavior so that pass
-    # cannot land silently: it must update this test.
+def test_in_the_window_and_in_minutes_are_prepositions():
+    # 2026-11-08 ('in'-preposition pass): "in the window" (b05) and
+    # "in minutes" (b07) are prepositions, not the country code IN.
+    # The old test pinned the buggy behavior (country IN); this one
+    # pins the fix, which also subsumes the slice-2b guard: bare "in"
+    # is a country only when it is literally the code ("in IN"), so
+    # "in Brazil" / "in the UK" now scope to the named country instead
+    # of silently reading as India. b05 must answer under ALL THREE
+    # variants -- before the fix the variants wrongly clarified.
     p = plan("How many new users were there in the window?")
-    assert p["filters"].get("country") == "IN"
+    assert "country" not in p["filters"]
+    for variant in ("baseline", "catalog-assisted", "validated"):
+        pv = plan("How many new users were there in the window?", variant=variant)
+        assert pv["type"] == "query" and pv["sql"] is not None
+        assert "country" not in pv["sql"]
     p2 = plan("What is the median session duration in minutes?")
-    assert p2["filters"].get("country") == "IN"
+    assert "country" not in p2["filters"]
+    assert "country" not in (p2["sql"] or "")
+    # Genuine India phrasings still scope.
+    p3 = plan("mean daily DAU in India")
+    assert p3["filters"]["country"] == "IN"
+    p4 = plan("What is DAU in IN?")
+    assert p4["filters"]["country"] == "IN"
+    p5 = plan("DAU in India in January")
+    assert p5["filters"]["country"] == "IN"
+    assert p5["filters"]["date_start"] == "2026-01-01"
+    # Slice-2b behavior intact: months are windows, not India.
+    p6 = plan("mean daily DAU for Instagram in January")
+    assert "country" not in p6["filters"]
+    # The wider class: a named non-India country after "in" scopes
+    # to that country, not India.
+    assert plan("What is DAU in Brazil?")["filters"]["country"] == "BR"
+    assert plan("What is DAU in the UK?")["filters"]["country"] == "GB"
 
 
 def test_planner_metrics_are_in_catalog():

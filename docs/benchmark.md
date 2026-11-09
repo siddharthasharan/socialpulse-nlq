@@ -387,6 +387,10 @@ kept as the pre-approval proposal record and is still read by nothing.
    h10–h12 pass as regression cases (h11 in dev, h10/h12 in dev — the
    fix was verified against h11's question, so h11 is dev, not held-out).
    The "drop in DAU" question still returns a query, not a refusal.
+   (Superseded 2026-11-08/09 by the 'in'-preposition pass: the
+   `_in_is_preposition` guard is deleted; bare "in" is the country
+   code IN only when it is literally the code, "in IN" — see the v4
+   section note and `docs/ablations.md`.)
 2. **Unsafe-word guard widened** (`plan()`): the list now also catches
    "drop database" and "drop the database". Before, "Drop the database"
    clarified only because no metric mapped (safe by accident); now it
@@ -612,7 +616,10 @@ templates or the data:
    "mean daily DAU" phrasing (scalar) or "trend"/"over the last N
    days" (series); none uses "by day"/"by individual day"/"each day".
 
-2. **`_in_is_preposition`: "in a/an ..." is not India.** The probe's
+2. **"in a/an ..." is not India** (at v4 time, the `_in_is_preposition`
+   guard; superseded 2026-11-08/09 by the 'in'-preposition pass — bare
+   "in" is the country code IN only when it is literally the code,
+   "in IN"). The probe's
    "in a line chart" set country IN, so the series would have been
    India-only as well as averaged. "in a/an" can never be a country
    reading (no country name is an article). "in India" still scopes;
@@ -625,15 +632,22 @@ templates or the data:
    set country IN. No v3 question contains a bare "jan"/"feb"/"mar"
    (verified by grep), so nothing regresses.
 
-**Deliberately NOT fixed here (narrow scope, pinned by a test):**
-"in the window" (b05) and "in minutes" (b07) still read as country IN
-— the same bug class, but fixing them changes the slice-3 variants'
-b05 outcome under a frozen comparison, so they wait for the planned
-'in'-preposition pass, which must re-run the ablations (see
-`test_in_the_window_and_in_minutes_unchanged`). Out-of-window month
-abbreviations ("in Apr") are likewise unhandled. And `_date_range`
-still only knows "last 7/28/90 days" — a generic "last 2 weeks" window
-falls back to the full 90 days, and the turn states the window it used
+**Fixed by the 'in'-preposition pass (2026-11-08/09), not here:**
+"in the window" (b05) and "in minutes" (b07) used to read as
+country IN — the same bug class, but fixing them changed the
+slice-3 variants' b05 outcome under a frozen comparison, so they
+waited for the planned pass, which re-ran the ablations. The pass
+changed the rule itself: bare "in" is the country code IN only
+when it is literally the code ("in IN"); every other "in" is a
+preposition, and a named country after "in" ("in Brazil", "in the
+UK") now scopes to that country instead of India. The pinning test
+was renamed to `test_in_the_window_and_in_minutes_are_prepositions`
+and now pins the fixed behavior (no country filter for b05/b07-style
+phrasings; b05 answers 250,222 under all three variants; b07's SQL
+carries no country filter). Out-of-window month abbreviations
+("in Apr") are likewise unhandled. And `_date_range` still only
+knows "last 7/28/90 days" — a generic "last 2 weeks" window falls
+back to the full 90 days, and the turn states the window it used
 rather than pretending otherwise.
 
 ## The daily-series chat turn (`src/socialpulse_nlq/chat.py`)
@@ -791,12 +805,15 @@ probe below, not the harness; see the p03 note under "The three
 cases"). No "right answer, wrong SQL"
 warnings in either run.
 
-**Test suite (2026-11-06): 149 pass / 1 known fail / 5 skipped**
+**Test suite (2026-11-06, re-run 2026-11-09 after the
+'in'-preposition pass): 149 pass / 1 known fail / 5 skipped**
 (plain runner; the fail is the pre-existing
 `test_docked_chat_only::test_rounded_corners` on an untouched file;
 the 5 skips are the `test_questions` `tmp_path` fixture tests). 10 new
-tests: 4 planner (by-day series, "in a line chart" is not India,
-month abbreviations, b05/b07 unchanged pin) + 6 chat (MAU-trend probe,
+tests at v4 time: 4 planner (by-day series, "in a line chart" is not India,
+month abbreviations, b05/b07 pin — renamed 2026-11-09 to
+`test_in_the_window_and_in_minutes_are_prepositions`, now pinning
+the fixed behavior) + 6 chat (MAU-trend probe,
 daily-series turn + values + chart, no-app clarification, app-switch
 follow-up keeps the window, mean still clarifies, option letter
 advances).

@@ -157,12 +157,12 @@
       "dev": {
         "overall": {
           "n": 120,
-          "task_success": 118
+          "task_success": 119
         },
         "by_family": {
           "metric_scoping": {
             "n": 34,
-            "task": 33
+            "task": 34
           },
           "ambiguous_metric": {
             "n": 8,
@@ -195,11 +195,11 @@
         },
         "rates": {
           "n_singles": 109,
-          "attempted": 71,
-          "abstained": 38,
-          "coverage": 0.6513761467889908,
-          "abstention_rate": 0.3486238532110092,
-          "accuracy": 0.9859154929577465,
+          "attempted": 72,
+          "abstained": 37,
+          "coverage": 0.6605504587155964,
+          "abstention_rate": 0.3394495412844037,
+          "accuracy": 0.9861111111111112,
           "appropriate_abstentions": [
             "b24",
             "b31",
@@ -239,9 +239,7 @@
             "h25",
             "h27"
           ],
-          "wrong_abstentions": [
-            "b05"
-          ],
+          "wrong_abstentions": [],
           "missed_abstentions": [
             "h17"
           ]
@@ -312,12 +310,12 @@
       "dev": {
         "overall": {
           "n": 120,
-          "task_success": 119
+          "task_success": 120
         },
         "by_family": {
           "metric_scoping": {
             "n": 34,
-            "task": 33
+            "task": 34
           },
           "ambiguous_metric": {
             "n": 8,
@@ -350,10 +348,10 @@
         },
         "rates": {
           "n_singles": 109,
-          "attempted": 70,
-          "abstained": 39,
-          "coverage": 0.6422018348623854,
-          "abstention_rate": 0.3577981651376147,
+          "attempted": 71,
+          "abstained": 38,
+          "coverage": 0.6513761467889908,
+          "abstention_rate": 0.3486238532110092,
           "accuracy": 1.0,
           "appropriate_abstentions": [
             "b24",
@@ -395,9 +393,7 @@
             "h25",
             "h27"
           ],
-          "wrong_abstentions": [
-            "b05"
-          ],
+          "wrong_abstentions": [],
           "missed_abstentions": []
         }
       },
@@ -495,12 +491,7 @@
             "family": "metric_scoping"
           }
         ],
-        "broken": [
-          {
-            "id": "b05",
-            "family": "metric_scoping"
-          }
-        ]
+        "broken": []
       },
       "baseline -> validated": {
         "fixed": [
@@ -537,12 +528,7 @@
             "family": "incorrect_assumption"
           }
         ],
-        "broken": [
-          {
-            "id": "b05",
-            "family": "metric_scoping"
-          }
-        ]
+        "broken": []
       },
       "catalog-assisted -> validated": {
         "fixed": [

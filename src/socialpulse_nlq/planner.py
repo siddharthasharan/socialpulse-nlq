@@ -474,28 +474,6 @@ def _word(q: str, w: str) -> bool:
     return re.search(rf"\b{re.escape(w)}\b", q) is not None
 
 
-def _in_is_preposition(q: str) -> bool:
-    """The word 'in' is both the country code IN and an English
-    preposition. 'in <Month>' ('in January', 'in March', and the
-    in-window abbreviations 'in Jan'/'in Feb'/'in Mar', 2026-11-06)
-    and 'in the last/past ...' are window phrasing, not India -- before
-    this fix (2026-11-05, Phase 1 slice 2b) the planner read them as
-    country IN and silently returned India-only numbers for the most
-    ordinary windowed questions. 'in a/an ...' ('in a line chart', 2026-11-06,
-    daily-series turn) is presentation phrasing, never a country --
-    no country name is the article 'a'/'an'. A genuine India question
-    names the country ('in India', 'for India') and is caught by the
-    'india' entry, which comes before 'in' in COUNTRIES, so this guard
-    never fires for it. Narrow by design: 'in the window' / 'in
-    minutes' (b05/b07) are the same bug class but are left for the
-    planned 'in'-preposition pass, which must re-run the slice-3
-    ablation comparison -- changing them here would silently change
-    the variants' b05 outcome under a frozen comparison."""
-    return (re.search(r"\bin\s+(?:january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar)\b", q) is not None
-            or re.search(r"\bin\s+the\s+(?:last|past)\b", q) is not None
-            or re.search(r"\bin\s+(?:a|an)\b", q) is not None)
-
-
 def _extract_filters(q: str):
     filters = {}
     filters["date_start"], filters["date_end"] = _date_range(q)
@@ -504,7 +482,27 @@ def _extract_filters(q: str):
             filters["app"] = app
             break
     for name, code in COUNTRIES.items():
-        if name == "in" and _in_is_preposition(q):
+        if name == "in":
+            # "in" is the country code IN only when it is literally the
+            # code: "in IN". Every other bare "in" is the English
+            # preposition -- "in the window" (b05), "in minutes" (b07),
+            # "in January", "in the last 7 days", "in a line chart" --
+            # and the country, if any, is named by its real name, which
+            # this loop reaches next ("india", "brazil", "uk", ...).
+            # Before this fix (2026-11-08, 'in'-preposition pass) any
+            # standalone "in" set country IN unless _in_is_preposition()
+            # (slice 2b: months, "in the last/past", "in a/an") caught
+            # it -- so "in the window", "in minutes", "in Brazil" and
+            # "in the UK" all silently read as India. The two named
+            # cases are b05 (the variants wrongly clarified -- the
+            # one-case cost in the slice-3 H1/H3 verdicts) and b07
+            # (India-only median 12.0, identical to the all-apps
+            # value, so only a structural check can see it). The
+            # _in_is_preposition() guard is deleted with this change:
+            # the code-only rule subsumes every case it covered.
+            if re.search(r"\bin\s+in\b", q):
+                filters["country"] = code
+                break
             continue
         if _word(q, name):
             filters["country"] = code

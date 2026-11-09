@@ -224,13 +224,51 @@ Machine-readable comparison:
 The baseline re-run reproduces the slice-2b numbers exactly
 (112/120, 27/30) — the flags did not change default behavior.
 
+### Re-run after the 'in'-preposition pass (2026-11-08/09)
+
+The slice-3 numbers above carry a known one-case cost: b05 (§Failure
+example 12). The 'in'-preposition pass fixed the filter-extraction
+bug behind it (bare "in" is the country code IN only when it is
+literally the code, "in IN"; every other "in" is a preposition —
+see `src/socialpulse_nlq/planner.py`, `_extract_filters`) and
+re-ran baseline + all three variants on the same frozen v3 set,
+plus the variants on v4+p03. No benchmark, oracle, or manifest file
+was edited; the only code change is the extractor, and the only test
+change is the renamed pin
+(`test_in_the_window_and_in_minutes_are_prepositions`). New traces
+are the `*_inpass.json` files in `evals/runs/`; the comparison JSON
+above was regenerated from them. Results:
+
+| Trace | Result |
+|---|---|
+| `evals/runs/benchmark_v3_baseline_dev_inpass.json` | dev 112/120 |
+| `evals/runs/benchmark_v3_baseline_heldout_inpass.json` | held-out 27/30 |
+| `evals/runs/benchmark_v3_catalog-assisted_dev_inpass.json` | dev **119/120** |
+| `evals/runs/benchmark_v3_catalog-assisted_heldout_inpass.json` | held-out 29/30 |
+| `evals/runs/benchmark_v3_validated_dev_inpass.json` | dev **120/120** |
+| `evals/runs/benchmark_v3_validated_heldout_inpass.json` | held-out 30/30 |
+
+Oracle still 150/150 agree, 0 inexact, in all three dev runs. The
+baseline is unchanged (112/120, 27/30) — the fix changed no
+baseline outcome, only the variants' reading of b05. Catalog-assisted
+gains exactly one case (b05); validated gains exactly one case
+(b05). **No case newly fails under any variant on either split.**
+The v4+p03 variant runs (first variant runs on v4 — see "Variant
+runs on v4+p03" below) agree:
+baseline 115/123 / 27/30, catalog-assisted 122/123 / 29/30,
+validated 123/123 / 30/30, oracle 153/153 in all three dev runs.
+Everything below in this section — family tables, rates, flips,
+verdicts, examples 12–13 — is updated to the re-run numbers; the
+slice-3 tables above are kept so the one-case move is visible.
+
 ### Task success by family
 
-Dev (120 cases):
+Dev (120 cases) — re-run numbers (slice-3 numbers in parentheses
+where they differ):
 
 | Family | n | Baseline | Catalog-assisted | Validated |
 |---|---|---|---|---|
-| metric_scoping | 34 | 27/34 | 33/34 | 33/34 |
+| metric_scoping | 34 | 27/34 | 34/34 (was 33/34) | 34/34 (was 33/34) |
 | aggregation_grain | 26 | 26/26 | 26/26 | 26/26 |
 | complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 |
 | ambiguous_metric | 8 | 8/8 | 8/8 | 8/8 |
@@ -238,7 +276,7 @@ Dev (120 cases):
 | incorrect_assumption | 9 | 8/9 | 8/9 | 9/9 |
 | guardrail_adversarial | 11 | 11/11 | 11/11 | 11/11 |
 | sql_safety_syntax | 8 | 8/8 | 8/8 | 8/8 |
-| **Overall** | **120** | **112** | **118** | **119** |
+| **Overall** | **120** | **112** | **119 (was 118)** | **120 (was 119)** |
 
 Held-out (30 cases, run once at the end, never used to decide a fix):
 
@@ -264,15 +302,15 @@ Singles: dev n=109, held-out n=27. (Conversations excluded, as designed:
 h30 expects a clarification turn, so a case-level abstention rate over
 conversations would be meaningless.)
 
-Dev:
+Dev (re-run; slice-3 values in parentheses where they differ):
 
 | Variant | Coverage (attempted) | Abstention | Accuracy among attempted | Appropriate abst. | Wrong abst. (cost) | Missed abst. |
 |---|---|---|---|---|---|---|
 | Baseline | 79/109 (72.5%) | 27.5% | 89.9% (71/79) | 30 | 0 | 8 |
-| Catalog-assisted | 71/109 (65.1%) | 34.9% | 98.6% (70/71) | 37 | 1 (b05) | 1 (h17) |
-| Validated | 70/109 (64.2%) | 35.8% | 100.0% (70/70) | 38 | 1 (b05) | 0 |
+| Catalog-assisted | 72/109 (66.1%) (was 71/109, 65.1%) | 33.9% | 98.6% (71/72) | 37 | 0 (was 1, b05) | 1 (h17) |
+| Validated | 71/109 (65.1%) (was 70/109, 64.2%) | 34.9% | 100.0% (71/71) | 38 | 0 (was 1, b05) | 0 |
 
-Held-out:
+Held-out (unchanged by the re-run — b05 is a dev case):
 
 | Variant | Coverage (attempted) | Abstention | Accuracy among attempted | Appropriate abst. | Wrong abst. (cost) | Missed abst. |
 |---|---|---|---|---|---|---|
@@ -283,20 +321,28 @@ Held-out:
 Read plainly: the baseline answers more and is wrong more often
 (8 missed abstentions on dev, 3 on held-out). Both variants trade
 ~7–11 points of coverage for accuracy: validated answers nothing
-wrongly on either split (70/70 and 20/20 among attempted — small n,
-do not overclaim beyond this benchmark), and its only cost anywhere
-is one dev case, b05. Catalog-assisted pays the same one case and
-additionally misses the April questions, by design.
+wrongly on either split (71/71 and 20/20 among attempted — small n,
+do not overclaim beyond this benchmark), and after the
+'in'-preposition pass its coverage cost is **zero on both splits**
+— the one dev case it used to pay, b05, is gone (example 12).
+Catalog-assisted pays no coverage cost either; its only remaining
+miss is the April question h17, by design. Note the denominators:
+validated's 100% is 71/71 dev + 20/20 held-out — strong on this
+benchmark at small n. It says "on these 150 cases the validator
+never let a wrong answer through"; it does not say "the validator
+never lets a wrong answer through."
 
 ### Paired flips (which cases move, by family — no naive CIs)
 
-Dev, baseline → catalog-assisted: **7 fixed, 1 broken.**
+Dev, baseline → catalog-assisted: **7 fixed, 0 broken** (re-run;
+slice 3 was 7 fixed, 1 broken — b05 no longer breaks).
 Fixed: h01, h03, h04, h05, h06, h07, h09 (all metric_scoping).
-Broken: b05 (metric_scoping).
+Broken: none.
 
-Dev, baseline → validated: **8 fixed, 1 broken.**
+Dev, baseline → validated: **8 fixed, 0 broken** (re-run; slice 3
+was 8 fixed, 1 broken — b05 no longer breaks).
 Fixed: h01, h03, h04, h05, h06, h07, h09, h17.
-Broken: b05.
+Broken: none.
 
 Dev, catalog-assisted → validated: **1 fixed, 0 broken.** Fixed: h17.
 (The only difference between the two variants on dev is the April
@@ -309,23 +355,29 @@ Held-out, baseline → catalog-assisted: **2 fixed, 0 broken**
 
 ### Hypothesis verdicts
 
-- **H1 (catalog assistance reduces wrong-scope answers): HELD as a
-  mechanism, with a miss on the exact prediction.** It fixed all
-  nine app-scope traps across both splits (7 dev + h02, h08
-  held-out) and broke nothing on held-out. But the pre-registered
-  dev prediction was 119/120 and the actual is 118/120: the
-  prediction did not anticipate the b05 coverage cost (see example
-  12). The hypothesis is right about the mechanism; the exact score
-  was off by one case, and that one case is itself a finding.
+- **H1 (catalog assistance reduces wrong-scope answers): HELD —
+  including the exact prediction.** It fixed all nine app-scope
+  traps across both splits (7 dev + h02, h08 held-out) and broke
+  nothing on held-out. In slice 3 the pre-registered dev prediction
+  was 119/120 and the actual was 118/120 — the prediction did not
+  anticipate the b05 coverage cost (see example 12). After the
+  'in'-preposition pass removed that cost, the re-run is exactly
+  119/120: the mechanism was right, and the score now matches the
+  prediction. The one-case miss is still recorded here as part of
+  the history, because the fix — not a re-reading of the
+  prediction — is what closed it.
 - **H3 (validation / abstention improves trustworthiness at a
-  coverage cost): HELD, with the same one-case miss.** It fixed all
-  eleven known findings across both splits (8 dev + 3 held-out),
+  coverage cost): HELD — including the exact prediction.** It fixed
+  all eleven known findings across both splits (8 dev + 3 held-out),
   missed zero abstentions on either split, and was 100% accurate
   among attempted answers on both splits. The pre-registered dev
-  prediction was 120/120 *if* the coverage cost were zero; the cost
-  was one case (b05), so 119/120. The cost is real, small, and
-  diagnosed below — it is not a vague "trade-off", it is one named
-  case with one named cause.
+  prediction was 120/120 *if* the coverage cost were zero; in slice
+  3 the cost was one case (b05), so 119/120. After the
+  'in'-preposition pass the cost is zero, and the re-run is exactly
+  120/120. The cost was real, small, diagnosed in §7.12 — one named
+  case with one named cause, not a vague "trade-off" — and it is
+  now gone because the cause was fixed in the extractor, not
+  because validation got more lenient.
 - **H2 and H4: NOT TESTED.** No LLM planner and no router exist in
   this slice, as labeled in the design. Nothing here speaks to them.
 
@@ -406,49 +458,64 @@ mean WAU) as "April WAU"; validated clarifies; catalog-assisted
 still answers. Held-out confirmation of the designed boundary.
 
 **12. b05 — "How many new users were there in the window?"
-(metric_scoping, dev). The coverage cost — the only case either
-variant breaks.** Baseline answers correctly (250,222). Both
+(metric_scoping, dev). The coverage cost — in slice 3, the only
+case either variant broke; fixed by the 'in'-preposition pass.**
+Slice-3 behavior: baseline answers correctly (250,222) while both
 variants clarify, wrongly. Cause, diagnosed by probing
-`_extract_filters`: the question's "in the window" is read as
+`_extract_filters`: the question's "in the window" was read as
 country code IN (the slice-2b "in → IN" fix exempted only "in
-\<Month\>" and "in the last/past ..."). So both variants believe a
-country filter was requested: catalog-assisted finds country not
-in `new_users_in_window`'s scope and clarifies; validated finds no
-country condition in the SQL and abstains. The variants inherit
+\<Month\>" and "in the last/past ..."). So both variants believed a
+country filter was requested: catalog-assisted found country not
+in `new_users_in_window`'s scope and clarified; validated found no
+country condition in the SQL and abstained. The variants inherited
 the filter-extraction noise — validation can only check the plan
 against the planner's own (here wrong) reading of the question.
-This was NOT fixed in this slice: fixing the extractor would
-change baseline behavior mid-experiment (it is the control), and
-the "in" ambiguity is a wider bug class than one case (see 13).
-It is recorded here as future planner work, not tuned away.
+It was deliberately NOT fixed in slice 3: fixing the extractor
+would change baseline behavior mid-experiment (it is the control).
+The 'in'-preposition pass (2026-11-08/09) fixed it at the source:
+bare "in" is the country code IN only when it is literally the
+code ("in IN"); every other "in" is a preposition. Re-run: b05
+passes under all three variants (query, 250,222, no country filter
+in the SQL), the baseline is unchanged at 112/120, and the
+coverage cost is zero — which is why H1 and H3 now meet their
+exact predictions (§Hypothesis verdicts). The one-case miss is
+kept in the record: the cost was closed by fixing the cause, not
+by re-reading the prediction.
 
 **13. b07 — "What is the median session duration in minutes?"
 (aggregation_grain, dev). A latent wrong-scope answer no variant
-catches — and the benchmark cannot see it.** The question's "in
-minutes" is read as country IN, so the baseline SQL is
+caught — and the benchmark could not see it; fixed by the
+'in'-preposition pass.** Slice-3 behavior: the question's "in
+minutes" was read as country IN, so the baseline SQL was
 `... WHERE ... AND u.country = 'IN'` — an India-only median
-presented as the overall median. It passes under all three
-variants (validated: the SQL *does* contain the requested country
-filter, so validation passes; catalog-assisted: country *is* in
-`median_session_duration_min`'s scope). And the value cannot
+presented as the overall median. It passed under all three
+variants (validated: the SQL *did* contain the requested country
+filter, so validation passed; catalog-assisted: country *is* in
+`median_session_duration_min`'s scope). And the value could not
 betray it: India-only median is **12.0**, all-apps median is
 **12.0** — identical. Only a structural check ("no country filter
 unless asked") would catch it, and b07 carries none. The sweep
 found the same spurious-IN reading in b22 ("List the experiments
 in the registry" — harmless, no SQL) and in the invalid-country
 cases b31/t55/t56 (harmless — the invalid-country branch fires
-first). The "in" preposition bug is a wider class than the
-month cases slice 2b fixed; b05 is where it costs a case, b07 is
-where it hides entirely. Both are out of scope for slice 3 and
-belong to the next planner fix, with the baseline re-baselined
-afterward.
+first). The 'in'-preposition pass fixed the reading at the source
+(same rule as b05): re-run, the b07 SQL under all three variants
+carries no country filter, value still 12.0 — now the scope is
+right as well as the value. The structural check the benchmark
+lacked is now pinned by the renamed test
+(`test_in_the_window_and_in_minutes_are_prepositions`), which
+asserts no country filter for b05- and b07-style phrasings and
+that "in Brazil" / "in the UK" scope to BR / GB, not IN. b07
+passes in this report, and the report says so plainly rather than
+counting it as evidence of correctness — the value alone never
+could have shown the fix.
 
 ### What this slice does not show
 
 - The held-out sets are still "held out from fixes", not pristine
   (all 31 hard cases were probed during drafting). The 30/30 for
   validated is a confirmation, not a pristine generalization claim.
-- Validated's 100% accuracy among attempted answers is 70/70 dev +
+- Validated's 100% accuracy among attempted answers is 71/71 dev +
   20/20 held-out — a strong result on this benchmark, small n.
   It says "on these 150 cases the validator never let a wrong
   answer through"; it does not say "the validator never lets a
@@ -457,6 +524,40 @@ afterward.
   nine metrics still cannot be app-scoped, April still has no
   window check in the baseline. The variants *detect* the gap and
   abstain; they do not close it. Closing it (app-scoping nine
-  metrics, the April check, the "in" preposition fix) is planner
-  work for a later slice, after which the baseline — and these
-  variants — must be re-run on the same frozen benchmark.
+  metrics, the April check) is planner work for a later slice,
+  after which the baseline — and these variants — must be re-run on
+  the same frozen benchmark. The "in" preposition fix, listed here
+  as future work in slice 3, is done: the 'in'-preposition pass
+  (2026-11-08/09) fixed the extractor and re-ran all six v3 runs
+  plus the six v4+p03 variant runs above.
+
+## Variant runs on v4+p03 (first variant runs on v4)
+
+The 'in'-preposition pass also ran all three variants on v4+p03
+(153 cases, 123 dev / 30 held-out) — the three probe cases (p01–
+p03) had never been run under the variants before. Traces:
+`evals/runs/benchmark_v4_*_inpass.json` (baseline dev/held-out,
+catalog-assisted dev/held-out, validated dev/held-out). Oracle
+153/153 agree, 0 inexact, in all three dev runs.
+
+| Variant | Dev (123) | Held-out (30) |
+|---|---|---|
+| Baseline | 115/123 | 27/30 |
+| Catalog-assisted | 122/123 | 29/30 |
+| Validated | 123/123 | 30/30 |
+
+Failures: baseline dev the same 8 as v3 (h01, h03, h04, h05, h06,
+h07, h09, h17); catalog-assisted dev only h17; validated dev none.
+Held-out: baseline h02, h08, h18; catalog-assisted h18; validated
+none. Per family, dev: metric_scoping 28/35 → 35/35 → 35/35;
+incorrect_assumption 8/9 → 8/9 → 9/9; all other families full
+under all variants. Singles-only rates (dev n=111, held-out n=27):
+baseline dev coverage 81/111 (73.0%), accuracy 90.1% (73/81);
+catalog-assisted 74/111 (66.7%), 98.6% (73/74), wrong abstentions
+0, missed 1 (h17); validated 73/111 (65.8%), 100.0% (73/73),
+wrong abstentions 0, missed 0. Held-out rates are identical to
+the v3 held-out rates (same 30 cases). The v4 runs change no
+ablation conclusion: the variants fix the same findings on the
+three added cases as on v3 (all three probes pass under every
+variant), and the 'in' fix is what moves catalog-assisted and
+validated to 122 and 123 on dev.
