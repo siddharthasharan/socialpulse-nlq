@@ -378,6 +378,163 @@ def test_mau_trend_probe_answers_scalar():
     assert "210,809" in r["text"]
 
 
+def test_mau_breakdown_by_surface_after_mau_turn():
+    # 2026-11-09 live-shell probe (p04): after the MAU turn,
+    # "do you have this data by surface" must run the breakdown
+    # instead of deflecting to "ask for a weather report first".
+    # The MAU turn sets the app but never sets self.weather, so the
+    # breakdown gate now accepts MAU context: March 2026, the MAU
+    # period, for that app. No topic named -> creators by surface,
+    # stated plainly in the reply. 500K seed-42 golds (verified two
+    # ways in the oracle): reels 75,450 posts / 24,388 creators,
+    # feed 58,096 / 22,096, stories 33,509 / 17,145.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What is the current MAU for Instagram?")
+    r = s.respond("do you have this data by surface")
+    assert r["type"] == "breakdown" and r["app"] == "instagram"
+    assert r["breakdown"]["topic"] == "creators"
+    assert r["breakdown"]["dimension"] == "surface"
+    assert "creators" in r["text"] and "instagram" in r["text"]
+    assert "March 2026" in r["text"]
+    rows = {row["label"]: row for row in r["breakdown"]["rows"]}
+    assert rows["reels"]["count"] == 75450 and rows["reels"]["extra"] == "24,388 creators"
+    assert rows["feed"]["count"] == 58096 and rows["feed"]["extra"] == "22,096 creators"
+    assert rows["stories"]["count"] == 33509 and rows["stories"]["extra"] == "17,145 creators"
+    assert abs(sum(row["share"] for row in rows.values()) - 1.0) < 0.01
+    w = r["working"]
+    assert "c.app = 'instagram'" in w["sql"] and "country" not in w["sql"]
+    assert "2026-03-01" in w["sql"] and "2026-03-31" in w["sql"]
+
+
+def test_mau_breakdown_named_and_bare_phrasings():
+    # "creators by surface" after MAU works, and so does the bare
+    # "by surface" (no topic named) -- both default to creators.
+    # The country dimension works off MAU context too (same gate,
+    # March 2026), while a breakdown with no context at all still
+    # asks for a weather report first.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What is the current MAU for Instagram?")
+    r = s.respond("creators by surface")
+    assert r["type"] == "breakdown" and r["breakdown"]["dimension"] == "surface"
+    assert {row["label"] for row in r["breakdown"]["rows"]} == {"reels", "feed", "stories"}
+    s2 = _real_session()
+    if s2 is None:
+        return
+    s2.respond("What is the current MAU for Instagram?")
+    r = s2.respond("by surface")
+    assert r["type"] == "breakdown" and r["breakdown"]["topic"] == "creators"
+    # The country dimension works off MAU context too (same gate,
+    # March 2026) -- probed in its own session, straight after the
+    # MAU turn.
+    s2b = _real_session()
+    if s2b is None:
+        return
+    s2b.respond("What is the current MAU for Instagram?")
+    r = s2b.respond("creators by country")
+    assert r["type"] == "breakdown" and r["breakdown"]["dimension"] == "country"
+    assert "March 2026" in r["text"]
+    # Chained breakdown (2026-11-09, sticky flag): the MAU context
+    # is sticky, not the current stage, so a second breakdown in the
+    # same session still resolves to March 2026 for the same app --
+    # the dimension switch after "by surface" works. 500K seed-42
+    # golds (verified two ways in the oracle): US 9,286 creators /
+    # 49,531 posts, IN 7,843 / 42,372, BR 4,785 / 25,720,
+    # ID 3,149 / 16,537, MX 2,488 / 13,344, GB 1,897 / 9,884,
+    # DE 1,849 / 9,667.
+    r = s2.respond("creators by country")
+    assert r["type"] == "breakdown" and r["breakdown"]["dimension"] == "country"
+    assert "March 2026" in r["text"]
+    rows = {row["label"]: row for row in r["breakdown"]["rows"]}
+    assert rows["US"]["count"] == 9286 and rows["US"]["extra"] == "49,531 posts"
+    assert rows["IN"]["count"] == 7843 and rows["IN"]["extra"] == "42,372 posts"
+    assert rows["BR"]["count"] == 4785 and rows["BR"]["extra"] == "25,720 posts"
+    assert rows["ID"]["count"] == 3149 and rows["ID"]["extra"] == "16,537 posts"
+    assert rows["MX"]["count"] == 2488 and rows["MX"]["extra"] == "13,344 posts"
+    assert rows["GB"]["count"] == 1897 and rows["GB"]["extra"] == "9,884 posts"
+    assert rows["DE"]["count"] == 1849 and rows["DE"]["extra"] == "9,667 posts"
+    assert "2026-03-01" in r["working"]["sql"] and "2026-03-31" in r["working"]["sql"]
+    s3 = _real_session()
+    if s3 is None:
+        return
+    r = s3.respond("creators by surface")
+    assert r["type"] == "clarification" and "weather report first" in r["text"]
+
+
+def test_mau_breakdown_context_is_mau_only():
+    # The gate accepts MAU context only: after a daily-series turn
+    # (stage daily_series, no weather) a breakdown still clarifies,
+    # and so do diagnosis / recommendation / brief after MAU -- their
+    # gates still require a weather report.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("Give me Instagram MAU trend for the last 2 weeks")
+    s.respond("show me the DAU for month of Mar 2026 by individual day in a line chart")
+    r = s.respond("creators by surface")
+    assert r["type"] == "clarification" and "weather report first" in r["text"]
+    s2 = _real_session()
+    if s2 is None:
+        return
+    s2.respond("What is the current MAU for Instagram?")
+    r = s2.respond("what's the diagnosis?")
+    assert r["type"] == "clarification" and "weather report first" in r["text"]
+
+
+def test_mau_breakdown_chained_repeat_and_clearing():
+    # Sticky flag (2026-11-09): repeating the same breakdown works
+    # too; a weather or daily-series turn clears the flag, so the
+    # next breakdown runs off the weather period or clarifies; a new
+    # MAU turn (app-switch follow-up) re-sets it, and the chained
+    # second breakdown still works after the re-set.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What is the current MAU for Instagram?")
+    r = s.respond("by surface")
+    assert r["type"] == "breakdown"
+    r = s.respond("by surface")
+    assert r["type"] == "breakdown" and r["breakdown"]["dimension"] == "surface"
+    # Weather clears the flag: the next breakdown runs off the
+    # weather period (current period 2026-03-04 to 2026-03-31),
+    # not the MAU period.
+    s.respond("What's happening with Instagram?")
+    r = s.respond("creators by surface")
+    assert r["type"] == "breakdown"
+    assert "current period 2026-03-04 to 2026-03-31" in r["text"]
+    assert "MAU period" not in r["text"]
+    # Daily-series clears the flag even after a breakdown ran.
+    s2 = _real_session()
+    if s2 is None:
+        return
+    s2.respond("What is the current MAU for Instagram?")
+    s2.respond("by surface")
+    s2.respond("show me the DAU for month of Mar 2026 by individual day in a line chart")
+    r = s2.respond("creators by surface")
+    assert r["type"] == "clarification" and "weather report first" in r["text"]
+    # A new MAU turn re-sets the flag (app-switch follow-up from
+    # the MAU turn). WhatsApp March surface golds, verified by
+    # independent SQL: stories 76,263 posts / 18,778 creators,
+    # feed 33,072 / 13,606.
+    s3 = _real_session()
+    if s3 is None:
+        return
+    s3.respond("What is the current MAU for Instagram?")
+    s3.respond("what about whatsapp?")
+    r = s3.respond("creators by surface")
+    assert r["type"] == "breakdown" and r["app"] == "whatsapp"
+    assert "March 2026" in r["text"]
+    rows = {row["label"]: row for row in r["breakdown"]["rows"]}
+    assert rows["stories"]["count"] == 76263 and rows["stories"]["extra"] == "18,778 creators"
+    assert rows["feed"]["count"] == 33072 and rows["feed"]["extra"] == "13,606 creators"
+    r = s3.respond("creators by country")
+    assert r["type"] == "breakdown" and r["app"] == "whatsapp"
+    assert "March 2026" in r["text"]
+
+
 def test_daily_series_turn_standalone_no_weather():
     # 2026-11-06 (p02): the daily-series turn answers as a later turn
     # in a chat with no weather report -- here the MAU turn first sets

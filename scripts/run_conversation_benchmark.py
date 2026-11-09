@@ -109,6 +109,41 @@ def check_values(conv, replies, failures):
                 failures.append(f"daily series rows: got {len(got)}, expected {len(want)}")
             elif any(g != w for g, w in zip(got, want)):
                 failures.append("daily series values differ from expected")
+    # Chained breakdown (2026-11-09, p05): the second breakdown in
+    # the same session (creators by country after creators by
+    # surface, both off the sticky MAU context) is checked against
+    # the case's stored breakdown_country_values. Country rows carry
+    # creators in "count" and posts in the "extra" field ("9,286
+    # posts") -- the mirror image of the surface rows, so the parse
+    # is swapped. Exact equality, as above. A missing
+    # country-dimension reply is itself a failure: without it the
+    # values check would silently pass on nothing.
+    if "breakdown_country_values" in checks:
+        br_country = next((r.get("breakdown") for r in replies
+                           if r.get("breakdown")
+                           and r["breakdown"].get("dimension") == "country"), None)
+        if br_country is None:
+            failures.append("breakdown country: no country-dimension breakdown reply")
+        else:
+            got = {}
+            for row in br_country.get("rows") or []:
+                posts = None
+                extra = row.get("extra") or ""
+                if "posts" in extra:
+                    posts = int(extra.split()[0].replace(",", ""))
+                got[row["label"]] = {"creators": row["count"], "posts": posts}
+            want = checks["breakdown_country_values"]
+            if set(got) != set(want):
+                failures.append(f"breakdown country segments: got {sorted(got)}, "
+                                f"expected {sorted(want)}")
+            else:
+                for label, vals in want.items():
+                    if got[label]["creators"] != vals["creators"]:
+                        failures.append(f"breakdown country {label} creators: expected "
+                                        f"{vals['creators']}, got {got[label]['creators']}")
+                    if got[label]["posts"] != vals["posts"]:
+                        failures.append(f"breakdown country {label} posts: expected "
+                                        f"{vals['posts']}, got {got[label]['posts']}")
 
 
 def main() -> None:

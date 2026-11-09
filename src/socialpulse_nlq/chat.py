@@ -268,6 +268,15 @@ class ChatSession:
         # about WhatsApp?") re-runs the same series for the new app
         # instead of opening a weather report.
         self.series_window = None
+        # Sticky MAU context (see _breakdown_period): the app + March
+        # 2026 period the last MAU turn established, so a breakdown
+        # works off it even after the first breakdown moves the stage
+        # off "mau" -- chained breakdowns in one session keep
+        # resolving to the same app and period. Cleared by a weather
+        # or daily-series turn (those establish their own context);
+        # never cleared by a breakdown turn (that is the point); a
+        # new MAU turn re-sets it.
+        self.mau_context = None
         # Last single SQL executed by a drill-down/breakdown helper, for
         # the "Show the working" panel. Weather, diagnosis, recommendation
         # and brief turns run many queries or none, so they set nothing
@@ -442,6 +451,11 @@ class ChatSession:
         self.app = app
         self.stage = "mau"
         self.topic = None
+        # Sticky context for breakdowns: March 2026, the MAU period.
+        # Survives the breakdown turn, so chained breakdowns keep
+        # resolving to this app and period until a weather or
+        # daily-series turn clears it.
+        self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
         p = plan(f"MAU for {app}", variant=self.variant)
         if p["type"] != "query" or not p.get("sql"):
             return self._clarify("I could not build the MAU query for "
@@ -502,6 +516,10 @@ class ChatSession:
         self.app = app
         self.stage = "daily_series"
         self.topic = None
+        # A daily series establishes its own context and is not a
+        # breakdown context, so it clears the sticky MAU context:
+        # after this turn a breakdown asks for weather first again.
+        self.mau_context = None
         q = question or f"daily DAU for {app}"
         if not _word(q.lower(), app):
             # The session app is inherited, not named in the question
@@ -561,6 +579,10 @@ class ChatSession:
         self.weather = compute_weather(self.data_dir, app=app)
         self.stage = "weather"
         self.topic = None
+        # Weather establishes its own context (and wins over MAU
+        # context in _breakdown_period), so the sticky flag is
+        # cleared: later breakdowns run off the weather period.
+        self.mau_context = None
         # Drill-downs follow the watchouts: creators first when a creator
         # watchout fired, retention next when retention fell, then growth.
         cards = _cards(self.weather)
@@ -812,9 +834,10 @@ class ChatSession:
         surface uses the content's surface (dim_content), so surface
         only exists for content topics (creators, engagement).
         """
-        if not self.weather:
+        period = self._breakdown_period()
+        if period is None:
             return None
-        start, end = self.weather["current_period"]
+        start, end, _label = period
         con = self._connect()
         app_filter_u = f" AND u.primary_app = '{self.app}'" if self.app else ""
         app_filter_c = f" AND c.app = '{self.app}'" if self.app else ""
@@ -872,6 +895,26 @@ class ChatSession:
                                                  [r["share"]] for r in rows]}
         return rows
 
+    def _breakdown_period(self):
+        """(start, end, label) for a breakdown: the weather current
+        period, or — after a MAU turn — March 2026, the MAU period.
+        Returns None when neither context exists, so the breakdown
+        turn still clarifies instead of inventing a window. MAU only:
+        the daily-series turn is not breakdown context, and the
+        diagnosis / recommendation / brief gates still require weather.
+        The MAU context is sticky (self.mau_context): it survives the
+        breakdown turn, so a second breakdown in the same session
+        still resolves to March 2026 for the same app. A weather or
+        daily-series turn clears it; a new MAU turn re-sets it.
+        """
+        if self.weather:
+            start, end = self.weather["current_period"]
+            return start, end, f"current period {start} to {end}"
+        if self.mau_context:
+            return (self.mau_context["start"], self.mau_context["end"],
+                    "March 2026 (the MAU period, Mar 1 to Mar 31)")
+        return None
+
     def _breakdown_turn(self, topic, dimension):
         """Decomposition turn: where the numbers sit, never why.
 
@@ -879,7 +922,8 @@ class ChatSession:
         decomposition, ahead of creator cohorts, because it needs no
         generator change — the cuts already exist in the tables.
         """
-        if not self.weather:
+        period = self._breakdown_period()
+        if period is None:
             return self._clarify("Ask for a weather report first, then ask for a breakdown — "
                                  "for example, \"creators by country\".")
         rows = self._breakdown_rows(topic, dimension)
@@ -889,7 +933,7 @@ class ChatSession:
                                  "or messaging by country.")
         self.topic = topic
         self.stage = "breakdown"
-        start, end = self.weather["current_period"]
+        start, end, period_label = period
         lines = []
         for r in rows:
             extra = f" ({r['extra']})" if r.get("extra") else ""
@@ -899,7 +943,7 @@ class ChatSession:
             {"label": "Experiment recommendation — hypothesis to test", "send": "what experiment would you recommend?", "topic": topic},
             {"label": "PM/Eng brief — talking points for a meeting", "send": "give me the PM/Eng brief", "topic": topic},
         ])
-        text = (f"Breakdown for {self.app}: {topic} by {dimension}, current period {start} to {end}:\n" +
+        text = (f"Breakdown for {self.app}: {topic} by {dimension}, {period_label}:\n" +
                 "\n".join(lines) +
                 "\n\nThis is a decomposition, not a cause: it shows where the numbers sit, "
                 "not why they moved. Next: use the buttons below for a diagnosis, "
@@ -1355,9 +1399,11 @@ class ChatSession:
                                "for example, \"Daily DAU for Instagram in March 2026\".")
         # Breakdown: "creators by country", "creators by surface".
         # This is the country/surface decomposition the user chose
-        # first (2026-10-29), ahead of creator cohorts.
-        if " by country" in q or " by surface" in q:
-            dimension = "country" if " by country" in q else "surface"
+        # first (2026-10-29), ahead of creator cohorts. The trigger
+        # has no leading-space requirement so a bare "by surface"
+        # (no topic named) also lands here and defaults to creators.
+        if "by country" in q or "by surface" in q:
+            dimension = "country" if "by country" in q else "surface"
             topic = topic_found or self.topic or "creators"
             return self._breakdown_turn(topic, dimension)
         # Ranking by change: "which country had the most drop in the

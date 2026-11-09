@@ -839,3 +839,306 @@ PYTHONPATH=src python scripts/run_benchmark_v4.py --split heldout  # report only
 PYTHONPATH=src python scripts/run_benchmark_v4.py --split all
 PYTHONPATH=src python scripts/run_benchmark_v4.py --skip-oracle     # benchmark only
 ```
+
+# Benchmark v5 — MAU-to-breakdown wiring + sticky MAU context + two user probes (2026-11-09)
+
+v5 = v4's 153 cases plus the **user probes p04 and p05** from
+Siddhartha's live-shell screenshot, wired in by
+`scripts/wire_mau_breakdown_cases.py`. Totals: **155 cases, 125 dev /
+30 held-out** (the new cases in dev; held-out unchanged). Files:
+`evals/benchmark_v5.json` (138 singles, unchanged from v4),
+`evals/conversation_v5.json` (17 conversations),
+`evals/oracle_v5.json` (155 entries),
+`evals/benchmark_v5_manifest.json` (155 cases). CLI:
+`scripts/run_benchmark_v5.py` (same flags as the v4 runner; traces to
+`evals/runs/benchmark_v5_<split>_<timestamp>.json`). The harness gains
+a `v5` entry in `VERSIONS`; v1–v4 stay frozen and runnable.
+
+## The probe (live shell, 2026-11-09)
+
+After the MAU turn ("What is the current MAU for Instagram?",
+210,809), Siddhartha asked **"do you have this data by surface"**
+and the chat answered with the weather-first clarification ("Ask for
+a weather report first, then ask for a breakdown"). He expected the
+MAU turn's context to carry into the breakdown — the data was right
+there. He was right about the mechanism and wrong about one premise:
+the surface data was never the blocker. The fact tables have carried
+a surface on every row (reels/feed/stories) since Phase 1, with an
+`agg_surface_daily` aggregate and a planner that knows surfaces; the
+gap was the chat wiring. `_breakdown_turn` gates on `self.weather`,
+which only `_weather_turn` sets; `_mau_turn` sets the app, the stage,
+and `last_working` (the MAU SQL + result in the working panel) but
+never `self.weather`. So the breakdown turn never saw the MAU result.
+
+## The wiring (`src/socialpulse_nlq/chat.py`)
+
+Three small, precise changes — all in the chat turn layer, none in
+the planner, the templates, or the data (no generator change):
+
+1. **`_breakdown_period()`: the breakdown's window comes from the
+   weather current period, or — after a MAU turn — March 2026.**
+   It returns `(start, end, label)` or `None` when neither context
+   exists. Weather context is unchanged (label "current period
+   {start} to {end}", byte-identical reply text). MAU context is
+   March 2026 (Mar 1–31, the MAU period), label "March 2026 (the
+   MAU period, Mar 1 to Mar 31)", so the reply states the topic +
+   app + period plainly: "Breakdown for instagram: creators by
+   surface, March 2026 (the MAU period, Mar 1 to Mar 31):".
+2. **`_breakdown_rows` and `_breakdown_turn` use the helper** instead
+   of gating on `self.weather` directly. The gate now accepts MAU
+   context; with neither context it still clarifies "Ask for a
+   weather report first". MAU only: the daily-series turn is **not**
+   breakdown context (after a daily-series turn, "creators by
+   surface" still clarifies), and the diagnosis / recommendation /
+   brief gates still require a weather report (unchanged, verified by
+   probe).
+3. **The breakdown trigger no longer requires a leading space** (`"by
+   country" in q or "by surface" in q`), so a bare "by surface" (no
+   topic named) lands in the breakdown turn and defaults to creators
+   — the same default the turn already used when the topic slot was
+   empty (`topic_found or self.topic or "creators"`). "creators by
+   surface", "show me this by surface", and "do you have this data by
+   surface" all route the same way.
+
+## The sticky flag (2026-11-09, chained breakdowns)
+
+The wiring above lets *one* breakdown run off MAU context — but the
+breakdown turn moves the stage off "mau", so a second breakdown in
+the same session ("creators by country" after "by surface") still
+asked for a weather report first. That is the next probe Siddhartha
+would try, so it was authorized as an extension the same day. The
+fix is a sticky flag, `self.mau_context` (app + March 2026 period),
+set by the MAU turn and consulted by `_breakdown_period()` instead
+of the current stage:
+
+- **Set** by `_mau_turn` (re-set by a new MAU turn, including an
+  app-switch follow-up — "what about whatsapp?" from the MAU turn
+  re-sets it to WhatsApp).
+- **Cleared** by a weather turn (which establishes its own context
+  and wins in `_breakdown_period()` anyway) and by a daily-series
+  turn (not breakdown context — after it, a breakdown asks for
+  weather first again).
+- **Not cleared** by a breakdown turn — that is the point. Chained
+  breakdowns for the same app and period keep resolving to March
+  2026. App-switching breakdowns ("creators by country for
+  WhatsApp" after an Instagram MAU) are out of scope and not built:
+  the breakdown routing never switches the app, so the question
+  answers the session app.
+
+Unchanged, verified by probe: after a breakdown, "what about
+whatsapp?" opens a weather report for WhatsApp (the pre-existing
+bare-app-name routing when the stage is not "mau" / "daily_series"),
+and the weather turn then clears the flag — so that path was already
+weather context, not MAU context.
+
+Unchanged, verified by probe: "MAU for Instagram by country" still
+clarifies (MAU is per-app only — held behavior, confirmed with the
+user 2026-11-06); "Instagram by device" still clarifies (device is
+not a breakdown dimension — `dim_devices` exists in the data but no
+turn uses it; explicitly out of scope); weather → "creators by
+country" still works with the same text and period; MAU → "what about
+whatsapp?" still works (140,378); a breakdown with no context at all
+still asks for a weather report first. The country dimension also
+works off MAU context now (same gate, March 2026) — a consequence of
+the shared helper, not a separate change.
+
+## The case (p04)
+
+- **p04 (conversation, multi_turn_context, dev):** turn 1 is the MAU
+  question (expected type `mau`, app instagram); turn 2 is the probe
+  — expected type `breakdown`, app instagram, topic creators. The
+  2-turn shape is the session as asked: the probe names no app and no
+  topic, so as a first turn it would correctly clarify which app; the
+  case tests the turn plus app/topic inheritance. The case carries
+  `checks["breakdown_values"]` (posts + creators per surface) and the
+  six scalar values the oracle checks. Oracle kind
+  `conversation_values`, exact tolerance (counts): posts via an
+  IN-subquery on `dim_content`, creators via a DISTINCT-pairs CTE —
+  independent formulations that agree exactly with the direct GROUP
+  BY form (reels 75,450 posts / 24,388 creators; feed 58,096 /
+  22,096; stories 33,509 / 17,145), and the per-surface posts sum to
+  the 167,055 total. No aggregate table carries posts/creators by
+  surface (`agg_surface_daily` has dau/impressions/engagements
+  only), so the cross-check is two independent raw formulations plus
+  the totals check, not agg-vs-raw — stated in the oracle note. The
+  oracle entry also carries structural checks (`app = 'instagram'`
+  must be present — it holds for both turns' SQL, the MAU SQL and
+  the breakdown SQL — and `country = '` must not be).
+
+- **p05 (conversation, multi_turn_context, dev):** the same session
+  chained one turn further — turn 3 is "creators by country",
+  expected type `breakdown`, app instagram, topic creators. Before
+  the sticky flag, turn 3 deflected to weather-first; the flag lets
+  it run: creators by country, Instagram, March 2026. The case
+  carries `checks["breakdown_values"]` (the p04 surface values for
+  turn 2) plus `checks["breakdown_country_values"]` (creators +
+  posts per country for turn 3) and the fourteen scalar values the
+  oracle checks. Oracle kind `conversation_values`, exact tolerance
+  (counts): posts via an IN-subquery on `dim_content` for the app
+  filter, creators via a DISTINCT-pairs CTE — independent
+  formulations that agree exactly with the direct GROUP BY form
+  (US 9,286 creators / 49,531 posts; IN 7,843 / 42,372; BR 4,785 /
+  25,720; ID 3,149 / 16,537; MX 2,488 / 13,344; GB 1,897 / 9,884;
+  DE 1,849 / 9,667), the per-country posts sum to the 167,055 total
+  and the per-country creators sum to the 31,297 distinct Instagram
+  March creators. No aggregate table carries posts/creators by
+  country, so the cross-check is two independent raw formulations
+  plus the totals checks, not agg-vs-raw — stated in the oracle
+  note. The oracle entry also carries a structural check (`app =
+  'instagram'` must be present in the chained breakdown SQL).
+
+## Harness extension
+
+- **`check_values` breakdown branch**
+  (`scripts/run_conversation_benchmark.py`, shared by the harness via
+  `_load_conv_runner`): for a reply with a `breakdown` payload, it
+  reads the turn's rows (label/count/extra/share) and compares posts
+  and creators per segment exactly against the case's
+  `checks["breakdown_values"]` (the "extra" field is the creators
+  count formatted as "24,388 creators"). Exact equality is right
+  here — both sides are counts from the same deterministic data, not
+  re-derivations with rounding. Old cases are unaffected (no
+  `breakdown` reply with a `breakdown_values` check → no-op).
+- **Chained-breakdown branch (p05):** for a reply with a
+  `breakdown` payload whose dimension is `"country"`, it compares
+  creators and posts per country exactly against the case's
+  `checks["breakdown_country_values"]`. Country rows carry creators
+  in "count" and posts in the "extra" field ("9,286 posts") — the
+  mirror image of the surface rows, so the parse is swapped. A
+  missing country-dimension reply is itself a failure (otherwise
+  the values check would silently pass on nothing). Old cases are
+  unaffected (no `breakdown_country_values` check → no-op).
+
+## v5 counts by family and split
+
+| Family | v4 | + probes | v5 total | v5 dev | v5 held-out |
+|---|---|---|---|---|---|
+| metric_scoping | 47 | 0 | 47 | 35 | 12 |
+| aggregation_grain | 31 | 0 | 31 | 28 | 3 |
+| complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
+| ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
+| multi_turn_context | 11 | 2 (p04, p05) | 13 | 10 | 3 |
+| incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
+| guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
+| sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
+| **Total** | **153** | **2** | **155** | **125** | **30** |
+
+Held-out is unchanged (30 cases, same ids as v4). **Honest
+limitation:** the probes were run during the build (that is how the
+wiring was verified), so v5 held-out means "held out from fixes", not
+pristine — the same caveat as v1–v4.
+
+## v5 results
+
+**Dev run (2026-11-09): 117/125 task success** — the 115 v4 dev
+passes plus p04 and p05. Per family:
+
+| Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
+|---|---|---|---|---|---|---|---|
+| metric_scoping | 35 | 28/35 | 27/27 | 27/27 | 27/27 | 25/25 | 28/35 |
+| aggregation_grain | 28 | 28/28 | 28/28 | 28/28 | 28/28 | 28/28 | 28/28 |
+| complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
+| ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
+| multi_turn_context | 10 | 10/10 | 9/9 | 9/9 | 10/10 | 4/4 | 10/10 |
+| incorrect_assumption | 9 | 8/9 | — | — | 1/1 | — | 8/9 |
+| guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
+| sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
+
+**Oracle agreement: v5 155/155, no inexact entries** (dev run trace;
+the held-out run also verified the oracle, 155/155 — unlike v4, it
+was not run with `--skip-oracle`).
+
+**Held-out run (2026-11-09): 27/30 task success**, the same 3
+failures as v4 (h02, h08, h18 — reported only, drove no fix). Per
+family: metric_scoping 10/12, aggregation_grain 3/3,
+complex_joins_breakdowns 5/5, ambiguous_metric 2/2,
+multi_turn_context 3/3, incorrect_assumption 1/2,
+guardrail_adversarial 2/2, sql_safety_syntax 1/1.
+
+**Dev failures (8 total — the same expected findings as v4):** h01,
+h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
+new failures: **p04 passes all five rubric items** (`result_equiv`
+is scored by the new `check_values` breakdown branch — posts +
+creators per surface exact: reels 75,450/24,388, feed 58,096/22,096,
+stories 33,509/17,145), and **p05 passes all five rubric items**
+(`result_equiv` is scored by the new chained-breakdown branch —
+creators + posts per country exact: US 9,286/49,531, IN 7,843/42,372,
+BR 4,785/25,720, ID 3,149/16,537, MX 2,488/13,344, GB 1,897/9,884,
+DE 1,849/9,667). No "right answer, wrong SQL" warnings in
+either run.
+
+**v4 regression with the new code (same day, same data): dev 115/123,
+held-out 27/30, oracle 153/153 agree in both runs** (traces
+`evals/runs/benchmark_v4_baseline_dev_stickyflag.json` and
+`evals/runs/benchmark_v4_baseline_heldout_stickyflag.json`). The
+wiring and the sticky flag changed no v4 outcome: the failures are
+exactly the 8 known dev findings and the 3 known held-out findings,
+and p01–p03 still pass. The breakdown gate is the only behavior that
+changed, and no v4 case exercises a breakdown after a MAU turn.
+
+**Test suite (2026-11-09): 153 pass / 1 known fail / 5 skipped**
+(plain runner; the fail is the pre-existing
+`test_docked_chat_only::test_rounded_corners` on an untouched file;
+the 5 skips are the `test_questions` `tmp_path` fixture tests). 4
+MAU-breakdown tests: MAU → "do you have this data by surface"
+(probe + gold values + SQL checks), named/bare phrasings + chained
+country dimension off MAU context (gold rows + March SQL window) +
+no-context clarification, MAU-only context (daily-series and
+diagnosis/recommendation/brief after MAU still clarify), and the new
+chained repeat/clearing test (repeat "by surface", weather clears to
+the weather period, daily-series clears to a clarification, and the
+re-set by a new MAU turn — WhatsApp surface golds verified by
+independent SQL). One test-fix worth recording: the phrasings test
+first chained a second breakdown ("creators by country") after a
+first ("by surface") in the same session and failed — the breakdown
+turn moves the stage off "mau", so the MAU context is the *current*
+stage, not a sticky flag. The test was corrected to probe the country
+dimension in its own session straight after the MAU turn (the
+authorized design), and it pinned the second-breakdown-clarifies
+behavior with a comment. **That pinned behavior is now replaced by
+the sticky-flag extension below (2026-11-09):** the phrasings test
+asserts the chained country breakdown with the full gold rows, and a
+new test covers repeating the same breakdown, both clearing rules
+(weather / daily-series), and the re-set by a new MAU turn
+(app-switch follow-up).
+
+**Live verification (local server probe, workspace ChatSession on
+the 500K data):** MAU → "do you have this data by surface" returns
+the breakdown turn — "Breakdown for instagram: creators by surface,
+March 2026 (the MAU period, Mar 1 to Mar 31):" with rows reels
+75,450 (24,388 creators), feed 58,096 (22,096), stories 33,509
+(17,145); the SQL carries `c.app = 'instagram'`, no country filter,
+March window. MAU → "creators by surface" and MAU → bare "by
+surface" both return the breakdown; MAU → "what about whatsapp?"
+still returns the MAU turn (140,378); weather → "creators by
+country" still works with the same text and period; "MAU for
+Instagram by country" still clarifies; "Instagram by device" still
+clarifies; a breakdown with no context at all still asks for a
+weather report first.
+
+**Chained breakdowns (sticky flag, 2026-11-09):** MAU → "by surface"
+→ "creators by country" returns the breakdown both times
+(creators by country, Instagram, March 2026 — US 9,286 creators /
+49,531 posts, IN 7,843 / 42,372, BR 4,785 / 25,720, ID 3,149 /
+16,537, MX 2,488 / 13,344, GB 1,897 / 9,884, DE 1,849 / 9,667; SQL
+carries the March window and `c.app = 'instagram'`). MAU → "by
+surface" → "by surface" again returns the breakdown both times.
+Clearing: MAU → weather → "creators by surface" runs off the
+weather period (current period 2026-03-04 to 2026-03-31, no MAU
+label); MAU → daily-series → "creators by surface" asks for a
+weather report first. Re-set: MAU (Instagram) → "what about
+whatsapp?" → "creators by surface" returns the WhatsApp breakdown
+for March 2026 (stories 76,263 posts / 18,778 creators, feed 33,072
+/ 13,606), and the chained country breakdown still works after the
+re-set. After a breakdown, "what about whatsapp?" opens a weather
+report for WhatsApp (pre-existing bare-app-name routing) and the
+weather turn clears the flag.
+
+## Running v5
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v5.py --split dev      # default
+PYTHONPATH=src python scripts/run_benchmark_v5.py --split heldout  # report only
+PYTHONPATH=src python scripts/run_benchmark_v5.py --split all
+PYTHONPATH=src python scripts/run_benchmark_v5.py --skip-oracle     # benchmark only
+```

@@ -94,6 +94,13 @@ VERSIONS = {
            "singles": "benchmark_v4.json",
            "convs": "conversation_v4.json",
            "oracle": "oracle_v4.json"},
+    # v5 (MAU-to-breakdown wiring, 2026-11-09): v4's 153 cases plus
+    # the user probe p04 (MAU -> "do you have this data by surface",
+    # conversation). In dev; held-out stays 30.
+    "v5": {"manifest": "benchmark_v5_manifest.json",
+           "singles": "benchmark_v5.json",
+           "convs": "conversation_v5.json",
+           "oracle": "oracle_v5.json"},
 }
 
 
