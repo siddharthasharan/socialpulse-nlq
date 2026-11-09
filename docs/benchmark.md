@@ -557,20 +557,20 @@ PYTHONPATH=src python scripts/run_benchmark_v3.py --split all
 PYTHONPATH=src python scripts/run_benchmark_v3.py --skip-oracle     # benchmark only
 ```
 
-# Benchmark v4 — daily-series turn + two user probes (2026-11-06)
+# Benchmark v4 — daily-series turn + three user probes (2026-11-06)
 
-v4 = v3's 150 cases plus the **two user probes (p01–p02)** from
+v4 = v3's 150 cases plus the **three user probes (p01–p03)** from
 Siddhartha's live-shell screenshots, wired in by
-`scripts/wire_daily_series_cases.py`. Totals: **152 cases, 122 dev /
-30 held-out** (both new cases in dev; held-out unchanged). Files:
-`evals/benchmark_v4.json` (137 singles), `evals/conversation_v4.json`
-(15 conversations), `evals/oracle_v4.json` (152 entries),
-`evals/benchmark_v4_manifest.json` (152 cases). CLI:
+`scripts/wire_daily_series_cases.py`. Totals: **153 cases, 123 dev /
+30 held-out** (all three new cases in dev; held-out unchanged). Files:
+`evals/benchmark_v4.json` (138 singles), `evals/conversation_v4.json`
+(15 conversations), `evals/oracle_v4.json` (153 entries),
+`evals/benchmark_v4_manifest.json` (153 cases). CLI:
 `scripts/run_benchmark_v4.py` (same flags as the v3 runner; traces to
 `evals/runs/benchmark_v4_<split>_<timestamp>.json`). The harness gains
 a `v4` entry in `VERSIONS`; v1–v3 stay frozen and runnable.
 
-## The two probes (live shell, 2026-11-06)
+## The three probes (live shell, 2026-11-06)
 
 - **(a) "Give me Instagram MAU trend for the last 2 weeks"** — live
   answered with the March MAU scalar 210,809 + the March-only
@@ -582,6 +582,14 @@ a `v4` entry in `VERSIONS`; v1–v3 stay frozen and runnable.
   clarification. Two gaps, both fixed here: the planner mapped "by
   individual day" to the scalar average, and the chat had no
   daily-series turn at all.
+- **(c) "What's the DAU trend for Instagram?"** — live answered with
+  the generic "could not map" clarification, because the live app was
+  still on the pre-daily-series code (commit 3100fc6). The turn was
+  already built by then: the question names the app, so as a first
+  turn it must answer the daily-series turn directly — the full
+  90-day window, Jan 1–Mar 31 2026, line chart. p03 pins the "trend"
+  routing (series, not the scalar average) and the full-window
+  series.
 
 ## The planner mapping fix (`src/socialpulse_nlq/planner.py`)
 
@@ -670,7 +678,7 @@ weather report required, works as a first turn once the app is known.
 - **No-app behavior:** clarifies "Which app's daily DAU?", like the
   MAU turn — never silently answers one app's series.
 
-## The two cases
+## The three cases
 
 - **p01 (single, metric_scoping, dev):** "Give me Instagram MAU
   trend for the last 2 weeks" — expected `mau_march` scalar, 210,809.
@@ -690,6 +698,29 @@ weather report required, works as a first turn once the app is known.
   (Mar 1: 50,601; Mar 31: 42,820; mean 45,385.32). The oracle entry
   also carries a structural `not_contains: "country = '"` — the "in a
   line chart" trap — applied to both turns' SQL by the harness.
+- **p03 (single, aggregation_grain, dev):** "What's the DAU trend
+  for Instagram?" — expected `dau_mean_daily` series, Instagram, the
+  full 90-day window (Jan 1–Mar 31 2026), 90 daily values
+  (`expected_values`, `min_rows: 90`). Family aggregation_grain, like
+  p02: what is at stake is the series grain (90 daily values), not
+  the metric — `dau_mean_daily` is unambiguous here; the case pins
+  the "trend" routing (series, not the scalar average) and the
+  full-window series. Oracle kind `series` with the aggregate SQL
+  (`agg_user_daily`, Instagram, Jan 1–Mar 31); the values were
+  verified **two ways** — aggregate and raw forms agree exactly
+  (Jan 1: 21,299; Mar 31: 42,820; mean 40,207; low 21,299 on
+  2026-01-01, high 50,601 on 2026-03-01 — the mean/low/high also
+  cross-checked against the independent turn probe of the same
+  question). The oracle entry carries structural checks
+  (`app = 'instagram'` must be present, `country = '` must not be).
+  The case carries `checks: {"daily_series_chart_kind": "line"}` for
+  the record, but the harness scores singles through `plan()` only —
+  `check_values` (chart kind + working-payload rows) runs for
+  conversations, so the chart kind is **not** harness-evaluated for
+  p03; it is verified by the fresh-session turn probe below, and the
+  chart-kind mechanism itself is pinned by p02. If the chart kind
+  ever needs harness enforcement for p03, the case would have to
+  become a 1-turn conversation.
 
 ## Harness extension
 
@@ -708,29 +739,29 @@ weather report required, works as a first turn once the app is known.
 | Family | v3 | + probes | v4 total | v4 dev | v4 held-out |
 |---|---|---|---|---|---|
 | metric_scoping | 46 | 1 (p01) | 47 | 35 | 12 |
-| aggregation_grain | 29 | 1 (p02) | 30 | 27 | 3 |
+| aggregation_grain | 29 | 2 (p02, p03) | 31 | 28 | 3 |
 | complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
 | ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
 | multi_turn_context | 11 | 0 | 11 | 8 | 3 |
 | incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
 | guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
 | sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
-| **Total** | **150** | **2** | **152** | **122** | **30** |
+| **Total** | **150** | **3** | **153** | **123** | **30** |
 
 Held-out is unchanged (30 cases, same ids as v3). **Honest
-limitation:** both probes were run during the build (that is how the
+limitation:** all three probes were run during the build (that is how the
 turn was verified), so v4 held-out means "held out from fixes", not
 pristine — the same caveat as v1–v3.
 
 ## v4 results
 
-**Dev run (2026-11-06): 114/122 task success** — the 112 v3 dev passes
-plus both new probe cases. Per family:
+**Dev run (2026-11-06): 115/123 task success** — the 112 v3 dev passes
+plus all three new probe cases. Per family:
 
 | Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
 |---|---|---|---|---|---|---|---|
 | metric_scoping | 35 | 28/35 | 27/27 | 27/27 | 27/27 | 25/25 | 28/35 |
-| aggregation_grain | 27 | 27/27 | 27/27 | 27/27 | 27/27 | 27/27 | 27/27 |
+| aggregation_grain | 28 | 28/28 | 28/28 | 28/28 | 28/28 | 28/28 | 28/28 |
 | complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
 | ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
 | multi_turn_context | 8 | 8/8 | 7/7 | 7/7 | 8/8 | 2/2 | 8/8 |
@@ -738,8 +769,8 @@ plus both new probe cases. Per family:
 | guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
 | sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
 
-**Oracle agreement: v4 152/152, no inexact entries** (dev run trace;
-p01 exact 210,809; p02 31-row series agrees).
+**Oracle agreement: v4 153/153, no inexact entries** (dev run trace;
+p01 exact 210,809; p02 31-row series agrees; p03 90-row series agrees).
 
 **Held-out run (2026-11-06, `--skip-oracle` — the oracle was already
 verified by the dev run): 27/30 task success**, the same 3 failures as
@@ -751,9 +782,13 @@ sql_safety_syntax 1/1.
 
 **Dev failures (8 total — the same expected findings as v3):** h01,
 h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
-new failures: **p01 and p02 both pass all five rubric items**
+new failures: **p01, p02, and p03 all pass all five rubric items**
 (p02's `result_equiv` is scored by the new `check_values` branch —
-chart kind `line` + all 31 values exact). No "right answer, wrong SQL"
+chart kind `line` + all 31 values exact; p03's `result_equiv` is
+scored by the single path — the planner series + all 90 values
+exact — while its chart kind is verified by the fresh-session turn
+probe below, not the harness; see the p03 note under "The three
+cases"). No "right answer, wrong SQL"
 warnings in either run.
 
 **Test suite (2026-11-06): 149 pass / 1 known fail / 5 skipped**
@@ -773,7 +808,11 @@ daily-series turn (March, 31 days, mean 45,385, line chart with 31
 points, diagram sources → joins → filters → grouping → aggregation →
 output); "what about whatsapp?" re-runs the series for WhatsApp
 (March, 31 days, mean 30,233); probe (b) in a fresh session clarifies
-which app.
+which app. Probe (c) ("What's the DAU trend for Instagram?") in a
+fresh session returns the daily-series turn directly (90 days, Jan 1–
+Mar 31, mean 40,207, low 21,299 on 2026-01-01, high 50,601 on
+2026-03-01, line chart with 90 points) — no app inheritance needed,
+the question names Instagram.
 
 ## Running v4
 

@@ -59,7 +59,7 @@
    "t56",
    "t64"
   ],
-  "note": "v4 held-out (30): unchanged from v3 -- both new probe cases (p01, p02) are in dev. HONEST LIMITATION: both probes were run during the build (that is how the daily-series turn was verified), so like v1-v3, v4 held-out means 'held out from fixes', not pristine. Truly fresh held-out cases (designed without probing) have not arrived yet. The 120/30 target split is exceeded at 152 cases (122 dev / 30 held-out).",
+  "note": "v4 held-out (30): unchanged from v3 -- all three new probe cases (p01, p02, p03) are in dev. HONEST LIMITATION: all three probes were run during the build (that is how the daily-series turn was verified), so like v1-v3, v4 held-out means 'held out from fixes', not pristine. Truly fresh held-out cases (designed without probing) have not arrived yet. The 120/30 target split is exceeded at 153 cases (123 dev / 30 held-out).",
   "rationale": "Different (metric, app, window) combinations plus hard cases held back entirely."
  },
  "rules": [
@@ -69,7 +69,7 @@
   "New cases (slice 2b) get a manifest entry with family + split at creation time, before any fix is made against them. The version bumps to v3 when the case set changes.",
   "Templated cases (t01-t70) are labeled as such in the case file and in docs/benchmark.md; they are not independent observations. The family, not the individual case, is the unit of uncertainty.",
   "Hard cases (h01-h31) are labeled as such in their oracle notes; they are hand-designed, not templated, and their expected behavior (clarification/refusal) is the finding, not a value.",
-  "Probe cases (p01-p02) are labeled with their origin (user probe 2026-11-06) in the case file and in docs/benchmark.md; they pin behavior the user actually saw in the live shell, not behavior designed in advance."
+  "Probe cases (p01-p03) are labeled with their origin (user probe 2026-11-06) in the case file and in docs/benchmark.md; they pin behavior the user actually saw in the live shell, not behavior designed in advance."
  ],
  "version": "v4",
  "cases": [
@@ -983,6 +983,12 @@
    "family": "aggregation_grain",
    "id": "p02",
    "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "p03",
+   "kind": "single",
    "split": "dev"
   }
  ]

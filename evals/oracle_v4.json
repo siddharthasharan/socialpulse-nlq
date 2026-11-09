@@ -1358,6 +1358,22 @@
      "not_contains": "country = '"
     }
    ]
+  },
+  {
+   "id": "p03",
+   "kind": "series",
+   "note": "Probe (user probe 2026-11-06, aggregation_grain). The full 90-day Instagram daily DAU series (Jan 1-Mar 31 2026) from agg_user_daily; the raw-table form (fact_sessions JOIN dim_users on primary_app) agrees exactly, so the stored values are verified two ways. Mean 40,207/day, low 21,299 (2026-01-01), high 50,601 (2026-03-01) -- cross-checked against the independent turn probe of the same question. The case is a single, so the harness scores the planner series + values + structural checks; the chart kind in checks is verified by the fresh-session turn probe, not the harness.",
+   "sql": "SELECT date, COUNT(DISTINCT user_id) AS dau FROM agg_user_daily\nWHERE date BETWEEN DATE '2026-01-01' AND DATE '2026-03-31' AND app = 'instagram'\nGROUP BY date ORDER BY date",
+   "structural": [
+    {
+     "label": "Series SQL must be app-scoped to Instagram (the question names the app)",
+     "contains": "app = 'instagram'"
+    },
+    {
+     "label": "Series SQL must not contain a country filter the question did not ask for",
+     "not_contains": "country = '"
+    }
+   ]
   }
  ],
  "version": "v4"
