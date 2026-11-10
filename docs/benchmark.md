@@ -1142,3 +1142,276 @@ PYTHONPATH=src python scripts/run_benchmark_v5.py --split heldout  # report only
 PYTHONPATH=src python scripts/run_benchmark_v5.py --split all
 PYTHONPATH=src python scripts/run_benchmark_v5.py --skip-oracle     # benchmark only
 ```
+
+## The probe (live shell, 2026-11-10)
+
+After seeing the v5 breakdowns work live (MAU → "do you have this
+data by surface" → creators by surface, then "creators by country"),
+Siddhartha asked for **"MAU for Instagram by country"** to work too —
+and asked whether an LLM connection could parse the text and
+understand it. The MAU turn still clarified ("MAU is only defined per
+app, not broken down by country or surface") — a hold from Nov 5,
+when the MAU turn was built. He pushed back: if he writes "MAU by
+country", shouldn't the tool look at the context and translate it to
+data by country? And then: can't the tool just run the query and show
+the result, so he can judge right or wrong?
+
+The answer to both is yes — but the missing piece was the capability,
+not the parsing. The system already understood the question (that is
+why the clarification names country specifically); there was no turn
+that could answer it. An LLM layer would have hit the same wall: it
+can only route a question to a capability that exists, and the
+MAU-by-country turn did not exist. Silently translating "MAU by
+country" into the creators-by-country breakdown — which does exist —
+would have shown US 9,286 as if it were US MAU, the
+right-number-wrong-reason trap the benchmark exists to catch. The
+fix is the turn itself, built on the run-and-show principle he
+proposed: the turn runs the query, the working panel shows the exact
+SQL + result table, and he validates live. The LLM layer (chunk B)
+still needs its own go-ahead; it would make the phrasing flexible,
+not make the turn exist.
+
+MAU by country is well-defined, and MAU by surface is not — that is
+the whole distinction. Distinct users per country, March 2026,
+app-scoped: each user has exactly one country in `dim_users`, so the
+rows add up to the MAU total. Per-surface distinct users would
+double-count (one user can appear on several surfaces) and exceed
+the MAU total, so MAU by surface stays a clarification.
+
+## The turn (`src/socialpulse_nlq/planner.py`, `src/socialpulse_nlq/chat.py`)
+
+The planner carries the query, the chat carries the turn — the same
+split as the MAU turn:
+
+1. **Planner: a `mau_by_country` template.** `build_sql` gains a
+   branch (after `mau_march`): `SELECT u.country, COUNT(DISTINCT
+   s.user_id) AS n FROM fact_sessions s JOIN dim_users u ON
+   u.user_id = s.user_id WHERE ... March 2026 ... AND s.app =
+   '{app}' GROUP BY u.country ORDER BY n DESC`. The app filter is
+   on `fact_sessions.app` — the same session-app definition as
+   `mau_march`, so the rows add up to the MAU total. (The growth
+   breakdown filters on `u.primary_app` instead; on this data the
+   two formulations agree exactly for all three apps, verified
+   during the build — but the turn uses `s.app` because that is the
+   MAU definition.) Without an app the query is the all-apps MAU
+   split by country, the same no-app convention as the scalar.
+   `plan()` switches `mau_march` → `mau_by_country` when the
+   question has a country breakdown (`_breakdown(q) == "country"`),
+   before the variant checks. `mau_by_country` is recorded in
+   `METRIC_DEFINITIONS` (display only) so the working panel and
+   trace can show its definition; it is **not** added to
+   `catalog/measures.yaml`, which stays at 20 metrics
+   (`test_planner_metrics_are_in_catalog` asserts the count) — the
+   same template-only status as the routed metrics.
+2. **Planner: MAU by surface refuses.** `build_sql("mau_march",
+   ..., breakdown="surface")` now raises `ValueError` ("MAU cannot
+   be broken down by surface ... Ask for MAU by country instead"),
+   which `plan()` turns into a clarification. The single-shot path
+   now agrees with the chat path instead of silently returning the
+   scalar for a breakdown question. No benchmark case asks MAU +
+   surface (checked across all singles and conversations), so no
+   case regresses.
+3. **Chat: `_mau_by_country_turn(app)`.** It plans `f"MAU for {app}
+   by country"` (same pattern as `_mau_turn`), runs it, and replies
+   type `"mau_by_country"` with the per-country rows (label/count/
+   share), the total, and a payload `mau_by_country={"app", "rows",
+   "total"}` for the harness. The reply text states the definition
+   plainly (distinct users with at least one session, per country;
+   the rows add up to the MAU total; each user has exactly one
+   country, so nothing is double-counted) and the working panel
+   carries the exact SQL, a bar chart, the result table, and a
+   diagram that shows the join and the grouping (the SQL genuinely
+   does both, unlike the MAU scalar). The stage stays `"mau"` and
+   the turn re-sets the sticky MAU context (`self.mau_context`,
+   same app + March 2026), so a further bare "by country" repeats
+   the cut and a "what about X?" follow-up still swaps the MAU app.
+   Like the MAU turn it needs no weather report first.
+4. **Chat routing: two places.** In the MAU intent block, `" by
+   surface"` now gets the surface-only clarification (stating the
+   double-counting reason, not the old "only defined per app" line)
+   and `" by country"` routes to the turn, with the app from the
+   question, the sticky MAU context, or the session app — else it
+   clarifies which app. Before the generic breakdown routing, a bare
+   `"by country"` with no topic named and `self.stage == "mau"`
+   routes to the turn using the sticky context (the follow-up form);
+   a named topic ("creators by country") or "by country" after a
+   breakdown (stage `"breakdown"`, topic set) still takes the
+   breakdown turn — the stage gate is what distinguishes them.
+   "by surface" after MAU stays the creators breakdown: MAU by
+   surface is undefined, so there is no MAU cut for it to mean.
+5. **Variant boundary (documented, not reworked):**
+   catalog-assisted and validated abstain on `mau_by_country`
+   (the metric is not in the 20-metric catalog, same as the routed
+   metrics — the scope check fails closed). Only the baseline
+   variant answers it, and the benchmark runs the baseline. Making
+   the variants catalog-aware of it is a planner-fix-stage decision,
+   not part of this build.
+
+Unchanged, verified by probe: plain "What's the MAU for Instagram?"
+still returns the scalar (210,809); "MAU by surface" and "MAU by
+surface for Instagram" still clarify (now with the double-counting
+reason); fresh-session "MAU by country" (no app) clarifies which app;
+"Instagram by device" still clarifies (out of scope); weather /
+diagnosis / recommendation / brief gates untouched; the
+creators-by-country breakdown is untouched — after a MAU-by-country
+turn, "creators by country" still returns the creators breakdown
+(US 9,286, total 31,297), and after MAU → "by country" → "by surface"
+the surface breakdown still returns the p04 values.
+
+## The cases (p06, p07)
+
+- **p06 (single, metric_scoping, dev):** "What's the MAU for
+  Instagram by country?" Expected type `mau_by_country` (the reply's
+  own type — the harness's `_reply_type` returns it unchanged, so
+  the case pins the turn, not the generic `breakdown` category),
+  expected metric `mau_by_country`, 7 rows, US 63,372, IN 52,686,
+  BR 31,623, ID 21,081, MX 16,946, DE 12,611, GB 12,490, total
+  210,809. Oracle kind `breakdown`, exact tolerance (counts): the
+  direct GROUP BY form (the shape the planner runs) agrees exactly
+  with the independent DISTINCT-pairs CTE formulation, and the rows
+  sum to the mau_march scalar. No aggregate table carries MAU by
+  country (`agg_user_daily` has daily DAU only), so the cross-check
+  is two independent raw formulations plus the totals check, not
+  agg-vs-raw — stated in the oracle note. The oracle entry also
+  carries structural checks (`app = 'instagram'` present, `GROUP BY
+  u.country` present, `country = '` absent). The metric check is
+  what stops a silent substitution: the creators-by-country
+  breakdown would give the right shape with the wrong population.
+- **p07 (conversation, multi_turn_context, dev):** turn 1 is the MAU
+  question (expected type `mau`, app instagram); turn 2 is the bare
+  "by country" (expected type `mau_by_country`, app instagram). The
+  2-turn shape is the session as asked: the probe names no app in
+  turn 2, so the case tests the turn plus the sticky MAU context.
+  The case carries `checks["mau_by_country_values"]` (per-country
+  MAU counts) and the seven scalar values the oracle checks. Oracle
+  kind `conversation_values`, exact tolerance (counts): independent
+  per-country scalar queries (DISTINCT-pairs CTE formulation) that
+  agree exactly with the direct GROUP BY form, and the rows sum to
+  the MAU total. The oracle entry also carries a structural check
+  (`app = 'instagram'` present in the follow-up SQL).
+
+## Harness extension
+
+- **`check_values` mau-by-country branch**
+  (`scripts/run_conversation_benchmark.py`, shared by the harness
+  via `_load_conv_runner`): for a reply with a `mau_by_country`
+  payload, it reads the turn's rows (label/count) and compares the
+  per-country MAU counts exactly against the case's
+  `checks["mau_by_country_values"]`. A missing `mau_by_country`
+  reply is itself a failure (otherwise the values check would
+  silently pass on nothing). Old cases are unaffected (no
+  `mau_by_country_values` check → no-op).
+
+## v6 counts by family and split
+
+| Family | v5 | + probes | v6 total | v6 dev | v6 held-out |
+|---|---|---|---|---|---|
+| metric_scoping | 47 | 1 (p06) | 48 | 36 | 12 |
+| aggregation_grain | 31 | 0 | 31 | 28 | 3 |
+| complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
+| ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
+| multi_turn_context | 13 | 1 (p07) | 14 | 11 | 3 |
+| incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
+| guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
+| sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
+| **Total** | **155** | **2** | **157** | **127** | **30** |
+
+Held-out is unchanged (30 cases, same ids as v5). **Honest
+limitation:** the probes were run during the build (that is how the
+turn was verified), so v6 held-out means "held out from fixes", not
+pristine — the same caveat as v1–v5.
+
+## v6 results
+
+**Dev run (2026-11-10): 119/127 task success** — the 117 v5 dev
+passes plus p06 and p07. Per family:
+
+| Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
+|---|---|---|---|---|---|---|---|
+| metric_scoping | 36 | 29/36 | 28/28 | 28/28 | 28/28 | 26/26 | 29/36 |
+| aggregation_grain | 28 | 28/28 | 28/28 | 28/28 | 28/28 | 28/28 | 28/28 |
+| complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
+| ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
+| multi_turn_context | 11 | 11/11 | 10/10 | 10/10 | 11/11 | 5/5 | 11/11 |
+| incorrect_assumption | 9 | 8/9 | — | — | 1/1 | — | 8/9 |
+| guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
+| sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
+
+**Oracle agreement: v6 157/157, no inexact entries** (dev run trace;
+the held-out run also verified the oracle, 157/157).
+
+**Held-out run (2026-11-10): 27/30 task success**, the same 3
+failures as v5 (h02, h08, h18 — reported only, drove no fix). Per
+family: metric_scoping 10/12, aggregation_grain 3/3,
+complex_joins_breakdowns 5/5, ambiguous_metric 2/2,
+multi_turn_context 3/3, incorrect_assumption 1/2,
+guardrail_adversarial 2/2, sql_safety_syntax 1/1.
+
+**Dev failures (8 total — the same expected findings as v5):** h01,
+h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
+new failures: **p06 passes all five rubric items** (`result_equiv`
+is scored by the new `mau_by_country` branch in
+`_result_equiv_single` — 7 rows, per-country counts exact: US
+63,372, IN 52,686, BR 31,623, ID 21,081, MX 16,946, DE 12,611,
+GB 12,490; all three structural checks pass), and **p07 passes all
+five rubric items** (`result_equiv` is scored by the new
+`check_values` mau-by-country branch — the turn-2 reply's rows
+exact). No "right answer, wrong SQL" warnings in either run.
+
+**v5 regression with the new code (same day, same data): dev 117/125,
+held-out 27/30, oracle 155/155 agree in both runs** (traces
+`evals/runs/benchmark_v5_baseline_dev_maucountry.json` and
+`evals/runs/benchmark_v5_baseline_heldout_maucountry.json`). The
+MAU-by-country turn, the planner surface guard, and the harness
+extension changed no v5 outcome: the failures are exactly the 8
+known dev findings and the 3 known held-out findings, and p01–p05
+still pass. The only behavior that changed for v5 questions is the
+MAU-by-surface clarification text (now states the double-counting
+reason) — no v5 case asks MAU + surface, so nothing scores
+differently.
+
+**Test suite (2026-11-10): 161 pass / 1 known fail / 5 skipped**
+(plain runner; the fail is the pre-existing
+`test_docked_chat_only::test_rounded_corners` on an untouched file;
+the 5 skips are the `test_questions` `tmp_path` fixture tests). 8
+new tests: 3 planner (grouped SQL shape + WhatsApp scoping, no-app
+all-apps split, surface clarifies in the planner), 4 chat
+(single-shot Instagram with gold rows + bar chart + diagram stages,
+WhatsApp + bare-"by country" follow-up + repeat + app-switch +
+named-topic still the breakdown, no-app clarifies, surface/device
+still clarify), and 1 harness (the `mau_by_country` rubric type
+scores a fabricated passing outcome, and the creators-breakdown
+substitution fails result equivalence — the silent-substitution
+guard, pinned at the harness level). One test-fix worth recording:
+the single-shot test first expected the MAU scalar's diagram stages
+(sources/filters/aggregation/output) and failed — the MAU-by-country
+diagram genuinely has `joins` and `grouping` stages (the SQL joins
+`dim_users` and groups by country), so the test was corrected to the
+real stages, not the code.
+
+**Live verification (local server probe, workspace ChatSession on
+the 500K data):** "What's the MAU for Instagram by country?"
+returns the mau_by_country turn — "Monthly active users (MAU) for
+instagram in March 2026, by country:" with rows US 63,372 (30.1%),
+IN 52,686 (25.0%), BR 31,623 (15.0%), ID 21,081 (10.0%), MX 16,946
+(8.0%), DE 12,611 (6.0%), GB 12,490 (5.9%), total 210,809; the SQL
+carries `GROUP BY u.country` and `s.app = 'instagram'`, no country
+filter, March window; bar chart + table + diagram in the working
+panel. "MAU by country for WhatsApp" returns US 42,129, IN 35,121,
+BR 20,996, ID 14,114, MX 11,170, GB 8,425, DE 8,423, total 140,378.
+MAU → "by country" returns the same Instagram rows (sticky
+context); repeating it works; "what about whatsapp?" then "by
+country" follows the app switch (140,378); "creators by country"
+afterwards still returns the creators breakdown (US 9,286).
+Fresh-session "MAU by country" clarifies which app. MAU → "MAU by
+surface" and "MAU by surface for Instagram" clarify with the
+double-counting reason. "Instagram by device" still clarifies.
+
+## Running v6
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v6.py --split dev      # default
+PYTHONPATH=src python scripts/run_benchmark_v6.py --split heldout  # report only
+PYTHONPATH=src python scripts/run_benchmark_v6.py --split all
+PYTHONPATH=src python scripts/run_benchmark_v6.py --skip-oracle     # benchmark only
+```

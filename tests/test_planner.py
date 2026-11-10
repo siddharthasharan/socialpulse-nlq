@@ -323,3 +323,42 @@ def test_stickiness_no_app_unchanged():
     p = plan("What is DAU/MAU stickiness?")
     assert p["metric"] == "dau_mau_stickiness"
     assert "app = " not in p["sql"]
+
+
+def test_mau_by_country_grouped_sql():
+    # 2026-11-10: "MAU for Instagram by country" is a grouped query,
+    # not the mau_march scalar. The rows add up to the MAU total
+    # (each user has exactly one country), so the app filter is on
+    # fact_sessions.app -- the same session-app definition as
+    # mau_march -- and there is no country filter in the SQL.
+    p = plan("What is the MAU for Instagram by country?")
+    assert p["type"] == "query" and p["metric"] == "mau_by_country"
+    assert "GROUP BY u.country" in p["sql"]
+    assert "COUNT(DISTINCT s.user_id)" in p["sql"]
+    assert "s.app = 'instagram'" in p["sql"]
+    assert "2026-03-01" in p["sql"] and "2026-03-31" in p["sql"]
+    assert "country = '" not in p["sql"]
+    # The plain MAU question is still the scalar, and the other apps
+    # scope the same way.
+    assert plan("What is the MAU for Instagram?")["metric"] == "mau_march"
+    p_wa = plan("MAU by country for WhatsApp")
+    assert p_wa["metric"] == "mau_by_country" and "s.app = 'whatsapp'" in p_wa["sql"]
+
+
+def test_mau_by_country_no_app_all_apps():
+    # Without an app the grouped query is the all-apps MAU split by
+    # country -- the same no-app convention as the mau_march scalar.
+    p = plan("MAU by country")
+    assert p["metric"] == "mau_by_country"
+    assert "app = " not in p["sql"]
+
+
+def test_mau_by_surface_clarifies_in_planner():
+    # MAU by surface is not a query: one user can appear on several
+    # surfaces, so per-surface distinct-user counts would add up to
+    # more than the MAU total. The planner refuses instead of
+    # silently returning the scalar for a breakdown question; the
+    # chat layer clarifies with the same reason.
+    p = plan("MAU by surface for Instagram")
+    assert p["type"] == "clarification" and p["metric"] == "mau_march"
+    assert "surface" in p["clarification"] and "country" in p["clarification"]

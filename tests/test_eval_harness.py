@@ -407,3 +407,43 @@ def test_v3_families():
     assert held["sql_safety_syntax"] == 1
     assert held["multi_turn_context"] == 3
     assert held["metric_scoping"] == 12
+
+
+def test_rubric_mau_by_country_type():
+    # 2026-11-10 (p06): the mau_by_country expected_type scores
+    # through the same SQL branch as a breakdown (grouped per-label
+    # result: row count + per-label values), but pins the turn, not
+    # the generic breakdown category. A fabricated passing outcome:
+    # all five rubric items pass and task succeeds.
+    case = {"id": "p06", "expected_type": "mau_by_country",
+            "expected_metric": "mau_by_country", "expected_rows": 7,
+            "expected_values": {"US": 63372, "IN": 52686, "BR": 31623,
+                                "ID": 21081, "MX": 16946, "DE": 12611,
+                                "GB": 12490},
+            "family": "metric_scoping",
+            "question": "What's the MAU for Instagram by country?"}
+    plan = {"type": "query", "metric": "mau_by_country",
+            "sql": ("SELECT u.country, COUNT(DISTINCT s.user_id) AS n "
+                    "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
+                    "WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' "
+                    "AND DATE '2026-03-31' AND s.app = 'instagram' "
+                    "GROUP BY u.country ORDER BY n DESC"),
+            "tables": ["fact_sessions", "dim_users"],
+            "grain": "user x month, grouped by country"}
+    rows = [["US", 63372.0], ["IN", 52686.0], ["BR", 31623.0], ["ID", 21081.0],
+            ["MX", 16946.0], ["DE", 12611.0], ["GB", 12490.0]]
+    r = score_single(case, _outcome(plan=plan, rows=rows, columns=["country", "n"]))
+    assert all(v["pass"] is True for v in r["items"].values()), r["items"]
+    assert r["sql_semantic"] is True and r["task_success"] is True
+    # The silent-substitution guard: the creators-by-country
+    # breakdown returns the right shape with a different population
+    # (US 9,286 instead of 63,372). Result equivalence fails on the
+    # values, so the final answer fails even though the SQL is valid.
+    wrong_rows = [["US", 9286.0], ["IN", 7843.0], ["BR", 4785.0], ["ID", 3149.0],
+                  ["MX", 2488.0], ["GB", 1897.0], ["DE", 1849.0]]
+    wrong_plan = dict(plan, metric="creators_by_country")
+    r2 = score_single(case, _outcome(plan=wrong_plan, rows=wrong_rows,
+                                     columns=["country", "creators"]))
+    assert r2["items"]["result_equiv"]["pass"] is False
+    assert r2["items"]["final_answer"]["pass"] is False
+    assert r2["task_success"] is False

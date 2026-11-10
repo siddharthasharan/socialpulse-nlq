@@ -487,6 +487,67 @@ class ChatSession:
                 "in the working panel.")
         return self._reply("mau", text, mau={"app": app, "value": value})
 
+    def _mau_by_country_turn(self, app):
+        """MAU split by country (2026-11-10): distinct users per
+        country for one app, March 2026. The Nov 5 hold ("MAU is only
+        defined per app") is reversed: the cut is well-defined --
+        each user has exactly one country in dim_users, so the rows
+        add up to the MAU total. That is the whole difference from
+        MAU by surface, which stays a clarification: one user can
+        appear on several surfaces, so per-surface counts would
+        double-count. The SQL comes from the planner's mau_by_country
+        template (same session-app definition as mau_march), so the
+        working panel shows the exact query that produced the
+        numbers -- run-and-show, the user judges right/wrong live.
+        Like the MAU turn it needs no weather report first, and it
+        re-sets the sticky MAU context (same app, March 2026).
+        The stage stays "mau", so a further bare "by country" repeats
+        this cut and a "what about X?" follow-up still swaps the MAU
+        app.
+        """
+        from .planner import metric_definition, plan, run_plan
+        self.app = app
+        self.stage = "mau"
+        self.topic = None
+        self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
+        p = plan(f"MAU for {app} by country", variant=self.variant)
+        if p["type"] != "query" or not p.get("sql"):
+            return self._clarify("I could not build the MAU-by-country query for "
+                                 f"{app}. Try \"What's the MAU for Instagram by country?\"")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        total = sum(r[1] for r in rows)
+        definition = metric_definition("mau_by_country")
+        share_rows = []
+        for country, n in rows:
+            share_rows.append({"label": country, "count": n, "extra": None,
+                               "share": n / total if total else 0.0})
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": ["label", "count", "share"],
+            "result_rows": [[r["label"], r["count"], r["share"]] for r in share_rows],
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        self._set_options([
+            {"label": f"MAU by country for {others[0]}",
+             "send": f"What's the MAU for {others[0]} by country?"},
+            {"label": f"MAU by country for {others[1]}",
+             "send": f"What's the MAU for {others[1]} by country?"},
+            {"label": f"MAU for {app}",
+             "send": f"What's the MAU for {app}?"},
+        ])
+        lines = [f"- {r['label']}: {r['count']:,} ({r['share'] * 100:.1f}% of the total)"
+                 for r in share_rows]
+        text = (f"Monthly active users (MAU) for {app} in March 2026, by country:\n" +
+                "\n".join(lines) +
+                f"\n\nThese are distinct users with at least one session on {app} in March 2026, "
+                "split by the user's country. The rows add up to the MAU total of "
+                f"{total:,} — each user has exactly one country, so nothing is double-counted. "
+                "The exact SQL is in the working panel.")
+        return self._reply("mau_by_country", text,
+                           mau_by_country={"app": app, "rows": share_rows, "total": total})
+
     def _series_question(self, app):
         """Question that re-asks the stored daily series for an app.
 
@@ -1358,12 +1419,32 @@ class ChatSession:
         # before breakdown/ranking/why/weather so a MAU question is
         # never swallowed by them. Stickiness questions ("dau/mau")
         # are not MAU questions and fall through to clarification,
-        # as before; MAU has no country/surface breakdown.
+        # as before. MAU by country is its own turn (2026-11-10);
+        # MAU by surface still clarifies.
         if ("mau" in q or "monthly active" in q) and "stickiness" not in q \
                 and "dau/mau" not in q and "dau / mau" not in q:
-            if " by country" in q or " by surface" in q:
-                return self._clarify("MAU is only defined per app, not broken down by country or surface — "
-                                     "ask \"What's the MAU for Instagram?\"")
+            # MAU by surface stays a clarification (2026-11-10): one
+            # user can appear on several surfaces, so per-surface
+            # distinct-user counts would add up to more than the MAU
+            # total. MAU by country (hold reversed 2026-11-10) is a
+            # real turn: each user has exactly one country, so the
+            # rows add up to the MAU total.
+            if " by surface" in q:
+                return self._clarify("MAU can't be broken down by surface — one user can appear on "
+                                     "several surfaces, so per-surface distinct-user counts would add "
+                                     "up to more than the MAU total. Ask \"What's the MAU for "
+                                     "Instagram?\" or \"MAU for Instagram by country\".")
+            if " by country" in q:
+                app = (app_found or (self.mau_context["app"] if self.mau_context else None)
+                       or self.app)
+                if app:
+                    return self._mau_by_country_turn(app)
+                self._set_options([
+                    {"label": a, "send": f"What's the MAU for {a} by country?", "topic": None} for a in APPS
+                ])
+                return self._reply("clarification",
+                                   "Which app's MAU by country? Reply instagram, whatsapp, or "
+                                   "facebook — for example, \"What's the MAU for Instagram by country?\"")
             app = app_found or self.app
             if app:
                 return self._mau_turn(app)
@@ -1402,6 +1483,25 @@ class ChatSession:
         # first (2026-10-29), ahead of creator cohorts. The trigger
         # has no leading-space requirement so a bare "by surface"
         # (no topic named) also lands here and defaults to creators.
+        # After a MAU turn, a bare "by country" (no topic named)
+        # cuts the MAU number just shown: distinct users per country,
+        # using the sticky MAU context. A named topic ("creators by
+        # country") still takes the breakdown turn, as does "by
+        # country" after a breakdown (a dimension switch on the same
+        # topic) -- the stage gate is what distinguishes them. "by
+        # surface" after MAU stays the creators breakdown: MAU by
+        # surface is undefined (double-counting), so there is no MAU
+        # cut for it to mean.
+        if "by country" in q and not topic_found and self.stage == "mau":
+            app = (self.mau_context["app"] if self.mau_context else None) or self.app
+            if app:
+                return self._mau_by_country_turn(app)
+            self._set_options([
+                {"label": a, "send": f"What's the MAU for {a} by country?", "topic": None} for a in APPS
+            ])
+            return self._reply("clarification",
+                               "Which app's MAU by country? Reply instagram, whatsapp, or "
+                               "facebook — for example, \"What's the MAU for Instagram by country?\"")
         if "by country" in q or "by surface" in q:
             dimension = "country" if "by country" in q else "surface"
             topic = topic_found or self.topic or "creators"

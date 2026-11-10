@@ -101,6 +101,14 @@ VERSIONS = {
            "singles": "benchmark_v5.json",
            "convs": "conversation_v5.json",
            "oracle": "oracle_v5.json"},
+    # v6 (MAU-by-country turn, 2026-11-10): v5's 155 cases plus the
+    # user probe p06 ("What's the MAU for Instagram by country?",
+    # single) and p07 (the bare "by country" follow-up after a MAU
+    # turn, conversation). Both in dev; held-out stays 30.
+    "v6": {"manifest": "benchmark_v6_manifest.json",
+           "singles": "benchmark_v6.json",
+           "convs": "conversation_v6.json",
+           "oracle": "oracle_v6.json"},
 }
 
 
@@ -280,7 +288,13 @@ def _result_equiv_single(case, rows, cols):
         if len(rows) < case.get("min_rows", 0) or len(dims) != case.get("expected_dim_count"):
             return False, f"rows={len(rows)} dims={len(dims)}"
         return True, ""
-    if etype == "breakdown":
+    if etype in ("breakdown", "mau_by_country"):
+        # mau_by_country (2026-11-10, p06) compares exactly like a
+        # breakdown: same grouped per-label result shape (row count
+        # + per-label last-column values). Its expected_type pins the
+        # turn, not the generic breakdown category -- the metric
+        # check in score_single (mau_by_country) is what stops a
+        # silent substitution of the creators breakdown.
         if len(rows) != case.get("expected_rows"):
             return False, f"rows={len(rows)} != {case.get('expected_rows')}"
         if "expected_values" in case:
@@ -328,7 +342,7 @@ def score_single(case, outcome, structural_specs=None):
         catalog = {"metric": p["metric"], "definition": definition, "grain": grain}
 
     items = {}
-    if etype in ("scalar", "series", "series_by_dim", "breakdown"):
+    if etype in ("scalar", "series", "series_by_dim", "breakdown", "mau_by_country"):
         items["sql_syntax"] = (_item(True, "") if outcome["syntax_ok"]
                                else _item(False, outcome.get("syntax_error", "")))
         items["sql_safety"] = (_item(True, outcome["guard"][1]) if outcome["guard"][0]
@@ -753,7 +767,8 @@ def _run_single(case, con, data_dir, structural_specs, variant="baseline"):
                "syntax_error": "", "exec_ok": True, "exec_error": "",
                "columns": [], "rows": [], "runtime_ms": 0, "weather": None,
                "trace": None}
-    if case["expected_type"] in ("scalar", "series", "series_by_dim", "breakdown"):
+    if case["expected_type"] in ("scalar", "series", "series_by_dim", "breakdown",
+                                "mau_by_country"):
         if p.get("sql"):
             try:
                 con.execute("EXPLAIN " + p["sql"])

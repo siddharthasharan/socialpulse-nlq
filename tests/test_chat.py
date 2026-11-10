@@ -535,6 +535,116 @@ def test_mau_breakdown_chained_repeat_and_clearing():
     assert "March 2026" in r["text"]
 
 
+def test_mau_by_country_single_shot():
+    # 2026-11-10 (p06): the Nov 5 hold is reversed -- "MAU for
+    # Instagram by country" runs the query and shows the result.
+    # Distinct users per country, March 2026, app-scoped; the rows
+    # add up to the MAU total of 210,809. 500K seed-42 golds,
+    # verified two ways in the oracle (direct GROUP BY == DISTINCT
+    # pairs CTE, sum == mau_march scalar): US 63,372, IN 52,686,
+    # BR 31,623, ID 21,081, MX 16,946, DE 12,611, GB 12,490.
+    # Contrast the creators-by-country breakdown (US 9,286, total
+    # 31,297): a different population, never substituted silently.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What's the MAU for Instagram by country?")
+    assert r["type"] == "mau_by_country" and r["app"] == "instagram"
+    assert "210,809" in r["text"] and "double-counted" in r["text"]
+    rows = {row["label"]: row for row in r["mau_by_country"]["rows"]}
+    assert rows["US"]["count"] == 63372 and rows["IN"]["count"] == 52686
+    assert rows["BR"]["count"] == 31623 and rows["ID"]["count"] == 21081
+    assert rows["MX"]["count"] == 16946 and rows["DE"]["count"] == 12611
+    assert rows["GB"]["count"] == 12490
+    assert r["mau_by_country"]["total"] == 210809
+    assert abs(sum(row["share"] for row in rows.values()) - 1.0) < 0.01
+    w = r["working"]
+    assert "GROUP BY u.country" in w["sql"] and "s.app = 'instagram'" in w["sql"]
+    assert "2026-03-01" in w["sql"] and "2026-03-31" in w["sql"]
+    assert "country = '" not in w["sql"]
+    viz = w["visualization"]
+    assert viz["available"] is True and viz["chart"] is not None
+    assert viz["chart"]["kind"] == "bar"
+    assert [pt["x"] for pt in viz["chart"]["points"]] == ["US", "IN", "BR", "ID", "MX", "DE", "GB"]
+    # The diagram shows the join (dim_users for the country) and
+    # the grouping -- the SQL genuinely does both, unlike the MAU
+    # scalar, whose diagram has neither stage.
+    assert [st["stage"] for st in viz["diagram"]["stages"]] == [
+        "sources", "joins", "filters", "grouping", "aggregation", "output"]
+
+
+def test_mau_by_country_whatsapp_and_followup():
+    # WhatsApp by country (500K seed-42 golds, same two-way oracle):
+    # US 42,129, IN 35,121, BR 20,996, ID 14,114, MX 11,170,
+    # GB 8,425, DE 8,423; total 140,378. And the bare "by country"
+    # follow-up after a MAU turn cuts the MAU number just shown --
+    # it does not fall through to the creators breakdown.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("MAU by country for WhatsApp")
+    assert r["type"] == "mau_by_country" and r["app"] == "whatsapp"
+    assert "140,378" in r["text"]
+    rows = {row["label"]: row for row in r["mau_by_country"]["rows"]}
+    assert rows["US"]["count"] == 42129 and rows["IN"]["count"] == 35121
+    assert rows["BR"]["count"] == 20996 and rows["ID"]["count"] == 14114
+    assert rows["MX"]["count"] == 11170 and rows["GB"]["count"] == 8425
+    assert rows["DE"]["count"] == 8423
+    assert r["mau_by_country"]["total"] == 140378
+    # Bare "by country" after a MAU turn: same app, same rows.
+    s2 = _real_session()
+    if s2 is None:
+        return
+    s2.respond("What is the current MAU for Instagram?")
+    r = s2.respond("by country")
+    assert r["type"] == "mau_by_country" and r["app"] == "instagram"
+    assert r["mau_by_country"]["total"] == 210809
+    assert {row["label"]: row["count"] for row in r["mau_by_country"]["rows"]}["US"] == 63372
+    # Repeating it works (stage stays "mau"), and "what about X?"
+    # still swaps the MAU app, after which "by country" follows.
+    r = s2.respond("by country")
+    assert r["type"] == "mau_by_country" and r["app"] == "instagram"
+    s2.respond("what about whatsapp?")
+    r = s2.respond("by country")
+    assert r["type"] == "mau_by_country" and r["app"] == "whatsapp"
+    assert r["mau_by_country"]["total"] == 140378
+    # A named topic still takes the creators breakdown, even after
+    # a MAU-by-country turn.
+    r = s2.respond("creators by country")
+    assert r["type"] == "breakdown" and r["breakdown"]["topic"] == "creators"
+
+
+def test_mau_by_country_no_app_clarifies():
+    # No app named and no app in context: clarify which app, never
+    # silently answer the all-apps split.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("MAU by country")
+    assert r["type"] == "clarification"
+    assert "instagram" in r["text"] and "whatsapp" in r["text"]
+
+
+def test_mau_by_surface_still_clarifies():
+    # MAU by surface stays a clarification (2026-11-10): one user
+    # can appear on several surfaces, so per-surface distinct-user
+    # counts would double-count and exceed the MAU total. Both the
+    # bare form after a MAU turn and the named form clarify; the
+    # reason is stated, not the old "only defined per app" line.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What is the current MAU for Instagram?")
+    r = s.respond("MAU by surface")
+    assert r["type"] == "clarification" and "surface" in r["text"]
+    assert "double" in r["text"] or "add up to more" in r["text"]
+    r = s.respond("MAU by surface for Instagram")
+    assert r["type"] == "clarification" and "surface" in r["text"]
+    # "Instagram by device" still clarifies (out of scope).
+    r = s.respond("Instagram by device")
+    assert r["type"] == "clarification"
+
+
 def test_daily_series_turn_standalone_no_weather():
     # 2026-11-06 (p02): the daily-series turn answers as a later turn
     # in a chat with no weather report -- here the MAU turn first sets

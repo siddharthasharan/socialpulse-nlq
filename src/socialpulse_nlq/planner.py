@@ -241,6 +241,13 @@ METRIC_DEFINITIONS = {
     "dau_mean_daily": ("Mean distinct users with at least one session per day.", "user x day", "distinct users"),
     "wau_mean_weekly": ("Mean distinct users with at least one session per ISO week.", "user x week", "distinct users"),
     "mau_march": ("Distinct users with at least one session in March 2026.", "user x month", "distinct users"),
+    # mau_by_country (2026-11-10) is a template-only metric, like the
+    # routed metrics: it is NOT in catalog/measures.yaml, which stays
+    # at 20 metrics (test_planner_metrics_are_in_catalog asserts the
+    # count). The definition is recorded here so the working panel
+    # and trace can display it, the same way the SQL templates mirror
+    # the YAML without the YAML being read at runtime.
+    "mau_by_country": ("Distinct users with at least one session in March 2026, split by the user's country. Each user has exactly one country, so the rows add up to the MAU total.", "user x month, grouped by country", "distinct users"),
     "dau_mau_stickiness": ("Mean March DAU divided by March MAU.", "month", "MAU"),
     "new_users_in_window": ("Users whose signup_date falls in 2026-01-01 to 2026-03-31.", "user", "registered users"),
     "d7_exact_retention": ("For cohorts signing up 2026-01-01 to 2026-02-21, share active on exactly signup_date + 7 days.", "cohort user", "eligible cohort users"),
@@ -635,9 +642,34 @@ def build_sql(metric: str, f: dict, breakdown, q: str):
         # filter is fact_sessions.app directly, the same column the
         # aggregate-routing branch filters on. Without an app the
         # query is unchanged and answers all-apps MAU.
+        # Surface is not a breakdown for this scalar (2026-11-10):
+        # one user can appear on several surfaces, so per-surface
+        # distinct-user counts would add up to more than the MAU
+        # total. The chat layer clarifies the same way; the planner
+        # refuses here too instead of silently returning the scalar
+        # for a breakdown question.
+        if breakdown == "surface":
+            raise ValueError("MAU cannot be broken down by surface: one user can appear on "
+                             "several surfaces, so per-surface distinct-user counts would add up "
+                             "to more than the MAU total. Ask for MAU by country instead.")
         app_where = f" AND app = '{f['app']}'" if "app" in f else ""
         return ("SELECT COUNT(DISTINCT user_id) AS value FROM fact_sessions "
                 f"WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'{app_where}"), tables, grain
+
+    if metric == "mau_by_country":
+        # MAU split by country (2026-11-10): distinct users per
+        # country, March 2026, app-scoped on fact_sessions.app --
+        # the same session-app definition as mau_march, so the rows
+        # add up to the MAU total. Country comes from dim_users;
+        # each user has exactly one country. Without an app the
+        # query is the all-apps MAU split by country.
+        tables = ["fact_sessions", "dim_users"]
+        grain = "user x month, grouped by country"
+        app_where = f" AND s.app = '{f['app']}'" if "app" in f else ""
+        return ("SELECT u.country, COUNT(DISTINCT s.user_id) AS n "
+                "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
+                "WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+                f"{app_where} GROUP BY u.country ORDER BY n DESC"), tables, grain
 
     if metric == "dau_mau_stickiness":
         tables = ["fact_sessions"]
@@ -992,6 +1024,17 @@ def plan(question: str, variant: str = "baseline"):
     # "by acquisition" is the metric itself for retention, not a separate breakdown.
     if metric == "d7_retention_by_acquisition":
         breakdown = None
+    # MAU by country (2026-11-10): "MAU for Instagram by country" is
+    # a grouped query, not the mau_march scalar -- the per-country
+    # distinct-user counts add up to the MAU total. The switch happens
+    # here, before the variant checks, so the metric recorded in the
+    # plan and trace is the one that ran. Note the variant boundary:
+    # catalog-assisted and validated abstain on mau_by_country (it is
+    # not in the 20-metric catalog, same as the routed metrics), so
+    # only the baseline variant answers it; the benchmark runs the
+    # baseline.
+    if metric == "mau_march" and breakdown == "country":
+        metric = "mau_by_country"
     if variant == "catalog-assisted":
         requested = _requested_filters(q, metric)
         ok, reason = _catalog_scope_check(metric, requested)

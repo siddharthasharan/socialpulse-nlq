@@ -109,6 +109,27 @@ def check_values(conv, replies, failures):
                 failures.append(f"daily series rows: got {len(got)}, expected {len(want)}")
             elif any(g != w for g, w in zip(got, want)):
                 failures.append("daily series values differ from expected")
+    # MAU by country (2026-11-10, p07): the "by country" follow-up
+    # after a MAU turn cuts the MAU number just shown (distinct users
+    # per country), not the creators breakdown. Rows carry the country
+    # in "label" and the MAU count in "count". A missing
+    # mau_by_country reply is itself a failure: without it the values
+    # check would silently pass on nothing.
+    if "mau_by_country_values" in checks:
+        mbc = next((r.get("mau_by_country") for r in replies if r.get("mau_by_country")), None)
+        if mbc is None:
+            failures.append("mau by country: no mau_by_country reply")
+        else:
+            got = {row["label"]: row["count"] for row in mbc.get("rows") or []}
+            want = checks["mau_by_country_values"]
+            if set(got) != set(want):
+                failures.append(f"mau by country segments: got {sorted(got)}, "
+                                f"expected {sorted(want)}")
+            else:
+                for label, val in want.items():
+                    if got[label] != val:
+                        failures.append(f"mau by country {label}: expected {val}, "
+                                        f"got {got[label]}")
     # Chained breakdown (2026-11-09, p05): the second breakdown in
     # the same session (creators by country after creators by
     # surface, both off the sticky MAU context) is checked against
