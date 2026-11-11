@@ -255,6 +255,16 @@ METRIC_DEFINITIONS = {
     # >=1 session in March 2026 (the MAU) -- not the weather report's
     # daily creator penetration (daily creators / DAU).
     "creator_share": ("Distinct creators with at least one content item published in March 2026, divided by distinct users with at least one session in March 2026 (the MAU), for one app. A monthly share, not the weather report's daily creator penetration (daily creators / DAU).", "creators / MAU, March 2026", "MAU"),
+    # mau_creators_by_country (2026-11-11) is a template-only metric,
+    # like mau_by_country and creator_share: it is NOT in
+    # catalog/measures.yaml, which stays at 20 metrics. One breakdown
+    # with two populations side by side per country -- distinct users
+    # with >=1 session in March 2026 (the MAU) and distinct creators
+    # with >=1 content item published in March 2026, plus the share
+    # of MAU who are creators. Each user has exactly one country, so
+    # both columns add up to their totals. A monthly cut, not the
+    # weather report's daily creator penetration.
+    "mau_creators_by_country": ("Distinct users with at least one session in March 2026 (MAU) and distinct creators with at least one content item published in March 2026, split by the user's country, with the share of MAU who are creators per country. Each user has exactly one country, so both columns add up to their totals.", "user x month, grouped by country", "distinct users and creators"),
     "dau_mau_stickiness": ("Mean March DAU divided by March MAU.", "month", "MAU"),
     "new_users_in_window": ("Users whose signup_date falls in 2026-01-01 to 2026-03-31.", "user", "registered users"),
     "d7_exact_retention": ("For cohorts signing up 2026-01-01 to 2026-02-21, share active on exactly signup_date + 7 days.", "cohort user", "eligible cohort users"),
@@ -712,6 +722,43 @@ def build_sql(metric: str, f: dict, breakdown, q: str):
                 "SELECT creators.n AS creators, mau.n AS mau, "
                 "creators.n * 100.0 / NULLIF(mau.n, 0) AS share_pct FROM creators, mau"), tables, grain
 
+    if metric == "mau_creators_by_country":
+        # MAU and creators by country (2026-11-11): one combined
+        # query, two grouped CTEs joined on country -- monthly
+        # distinct users per country (fact_sessions joined to
+        # dim_users, the same session-app definition as mau_march /
+        # mau_by_country) and monthly distinct creators per country
+        # (fact_content_creation joined to dim_content for the app
+        # and to dim_users on creator_id for the country -- the EXACT
+        # creators-by-country definition the p05 oracle uses, so the
+        # creators column sums to the creator_share creators count
+        # and the MAU column sums to the mau_march scalar). FULL
+        # OUTER JOIN so a country with creators but no sessions (or
+        # vice versa) still appears; on this data both sides carry
+        # the same 7 countries for all three apps. Ordered by MAU
+        # descending, like mau_by_country. The breakdown is "country"
+        # -- the metric's own dimension, not a breakdown of the
+        # scalar share (creator_share by country stays refused in
+        # plan(), pinned by the v7 test).
+        tables = ["fact_sessions", "dim_users", "fact_content_creation", "dim_content"]
+        grain = "user x month, grouped by country"
+        app_where_s = f" AND s.app = '{f['app']}'" if "app" in f else ""
+        app_where_c = f" AND c.app = '{f['app']}'" if "app" in f else ""
+        return ("WITH mau_by_country AS (SELECT u.country, COUNT(DISTINCT s.user_id) AS mau "
+                "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
+                "WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+                f"{app_where_s} GROUP BY u.country), "
+                "creators_by_country AS (SELECT u.country, COUNT(DISTINCT f.creator_id) AS creators "
+                "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                "JOIN dim_users u ON u.user_id = f.creator_id "
+                "WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+                f"{app_where_c} GROUP BY u.country) "
+                "SELECT COALESCE(m.country, c.country) AS country, COALESCE(m.mau, 0) AS mau, "
+                "COALESCE(c.creators, 0) AS creators, "
+                "COALESCE(c.creators, 0) * 100.0 / NULLIF(COALESCE(m.mau, 0), 0) AS share_pct "
+                "FROM mau_by_country m FULL OUTER JOIN creators_by_country c ON c.country = m.country "
+                "ORDER BY mau DESC"), tables, grain
+
     if metric == "dau_mau_stickiness":
         tables = ["fact_sessions"]
         grain = "month"
@@ -1065,6 +1112,26 @@ def plan(question: str, variant: str = "baseline"):
         # in the 20-metric catalog, so catalog-assisted and validated
         # abstain on it; only the baseline answers it.
         metric = "creator_share"
+    elif "creator" in q and ("mau" in q or "monthly active" in q) and " by country" in q:
+        # MAU and creators by country (2026-11-11): the Nov 11 live
+        # probe -- "I need the Monthly active users and creators by
+        # country" answered with MAU by country only, dropping the
+        # creators half. One breakdown with both populations side by
+        # side per country, plus the share. Placed AFTER the
+        # creator_share branch on purpose: a question with share
+        # language ("% of creators of MAU ... by country") still
+        # takes creator_share and is refused as a breakdown of the
+        # scalar share (pinned by the v7 test); this branch is for
+        # questions naming the two populations + by country WITHOUT
+        # share language. The chat routing is more permissive -- it
+        # sends the %-by-country form to the combined turn too, since
+        # the turn answers the per-country shares; the single-shot
+        # planner path keeps the refusal, and unifying the two is a
+        # planner-fix-stage decision. Variant boundary (same as
+        # mau_by_country / creator_share): the metric is not in the
+        # 20-metric catalog, so catalog-assisted and validated
+        # abstain on it; only the baseline answers it.
+        metric = "mau_creators_by_country"
     elif "mau" in q or "monthly active" in q:
         metric = "mau_march"
     elif "new users" in q:

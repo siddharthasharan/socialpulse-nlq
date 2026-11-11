@@ -424,3 +424,69 @@ def test_creator_share_variants_abstain():
         p = plan(q, variant=variant)
         assert p["type"] == "clarification" and p["sql"] is None, variant
         assert "no catalog definition" in p["clarification"], variant
+
+
+def test_mau_creators_by_country_sql():
+    # 2026-11-11 (p11): "Monthly active users and creators by
+    # country" is one breakdown with both populations side by side
+    # per country, plus the share -- not MAU by country alone (the
+    # Nov 11 live failure: the creators half was dropped). One
+    # combined CTE query: monthly distinct users per country
+    # (fact_sessions joined to dim_users, the mau_by_country
+    # definition) and monthly distinct creators per country
+    # (fact_content_creation joined to dim_content for the app and
+    # to dim_users on creator_id -- the EXACT p05 definition).
+    # 500K seed-42 golds, verified two ways in the oracle (grouped
+    # COUNT(DISTINCT) CTE == DISTINCT-pairs CTE on both counts per
+    # country; columns tie to p06 and p05 exactly).
+    p = plan("What are the monthly active users and creators by country for Instagram?")
+    assert p["type"] == "query" and p["metric"] == "mau_creators_by_country"
+    assert p["sql"].startswith("WITH mau_by_country AS (")
+    assert "COUNT(DISTINCT s.user_id)" in p["sql"]
+    assert "COUNT(DISTINCT f.creator_id)" in p["sql"]
+    assert "s.app = 'instagram'" in p["sql"] and "c.app = 'instagram'" in p["sql"]
+    assert "GROUP BY u.country" in p["sql"] and "ORDER BY mau DESC" in p["sql"]
+    assert "2026-03-01" in p["sql"] and "2026-03-31" in p["sql"]
+    assert "share_pct" in p["sql"] and "country = '" not in p["sql"]
+    assert p["tables"] == ["fact_sessions", "dim_users", "fact_content_creation", "dim_content"]
+    # The live probe phrasing maps the same way, and so do the
+    # other apps.
+    assert plan("I need the Monthly active users and creators by country")["metric"] == "mau_creators_by_country"
+    p_wa = plan("What are the monthly active users and creators by country for WhatsApp?")
+    assert p_wa["metric"] == "mau_creators_by_country" and "s.app = 'whatsapp'" in p_wa["sql"]
+    # No app: the all-apps combined cut, the same no-app convention
+    # as mau_march / mau_by_country.
+    p_all = plan("What are the monthly active users and creators by country?")
+    assert p_all["metric"] == "mau_creators_by_country" and "app = '" not in p_all["sql"]
+
+
+def test_mau_creators_by_country_does_not_hijack():
+    # The new branch must not swallow the neighbours: the plain MAU
+    # question stays the scalar, MAU by country stays the grouped
+    # query, "creators by country" is a breakdown question (no MAU
+    # named), and "% of creators of MAU" stays the scalar share.
+    assert plan("What's the MAU for Instagram?")["metric"] == "mau_march"
+    assert plan("What is the MAU for Instagram by country?")["metric"] == "mau_by_country"
+    assert plan("creators by country for Instagram")["metric"] != "mau_creators_by_country"
+    assert plan("What is the % of creators of MAU in Instagram")["metric"] == "creator_share"
+    # Share language keeps the pinned v7 behaviour: "% of creators
+    # of MAU ... by country" is a breakdown of the scalar share and
+    # is refused at the planner level (the chat layer sends it to
+    # the combined turn instead -- see the branch comment).
+    p = plan("What is the % of creators of MAU in Instagram by country?")
+    assert p["type"] == "clarification" and p["metric"] == "creator_share"
+
+
+def test_mau_creators_by_country_variants_abstain():
+    # Variant boundary (same as mau_by_country / creator_share):
+    # the metric is not in the 20-metric catalog, so
+    # catalog-assisted and validated abstain on it; only the
+    # baseline answers it. The benchmark runs the baseline; if the
+    # metric is ever added to the catalog, this test is the one that
+    # has to change.
+    q = "What are the monthly active users and creators by country for Instagram?"
+    assert plan(q, variant="baseline")["metric"] == "mau_creators_by_country"
+    for variant in ("catalog-assisted", "validated"):
+        p = plan(q, variant=variant)
+        assert p["type"] == "clarification" and p["sql"] is None, variant
+        assert "no catalog definition" in p["clarification"], variant

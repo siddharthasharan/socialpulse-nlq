@@ -614,6 +614,89 @@ class ChatSession:
                            creator_share={"app": app, "creators": creators,
                                           "mau": mau, "pct": pct})
 
+    def _mau_creators_by_country_turn(self, app):
+        """MAU and creators by country (2026-11-11): one breakdown
+        with both populations side by side per country -- distinct
+        users with >=1 session in March 2026 (the MAU) and distinct
+        creators with >=1 content item published in March 2026, plus
+        the share of MAU who are creators. The Nov 11 live failure:
+        "I need the Monthly active users and creators by country"
+        answered with MAU by country only, dropping the creators half
+        -- the question names two populations and the turn must answer
+        both, never one alone. The creators column is the EXACT
+        creators-by-country definition the p05 oracle uses (so it sums
+        to the creator_share creators count) and the MAU column is the
+        mau_by_country definition (so it sums to the MAU total); each
+        user has exactly one country, so both columns add up to their
+        totals. This is a monthly cut -- NOT the weather report's
+        daily creator penetration (daily creators / DAU). Like the
+        MAU turn it needs no weather report first, and it re-sets the
+        sticky MAU context (same app, March 2026) and keeps stage
+        "mau", so a later bare "by country" still gives MAU by
+        country and "creators by country" still gives the breakdown.
+        The working panel shows the exact combined CTE query that ran
+        plus the full table (country, MAU, creators, share); the chart
+        is a bar of MAU by country (first two columns, per the sqlviz
+        rule -- further columns stay in the table only), and the SQL
+        diagram is honestly unavailable (WITH/CTE shape, per the
+        sqlviz rules -- never a guessed diagram).
+        """
+        from .planner import metric_definition, plan, run_plan
+        self.app = app
+        self.stage = "mau"
+        self.topic = None
+        self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
+        p = plan(f"MAU and creators for {app} by country", variant=self.variant)
+        if p["type"] != "query" or p.get("metric") != "mau_creators_by_country" or not p.get("sql"):
+            return self._clarify("I could not build the MAU-and-creators-by-country query for "
+                                 f"{app}. Try \"What are the monthly active users and creators "
+                                 f"by country for {app}?\"")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        if not rows:
+            return self._clarify(f"No MAU-and-creators-by-country result came back for {app}.")
+        total_mau = sum(r[1] for r in rows)
+        total_creators = sum(r[2] for r in rows)
+        definition = metric_definition("mau_creators_by_country")
+        combined_rows = []
+        for country, mau, creators, share_pct in rows:
+            combined_rows.append({"label": country, "mau": mau, "creators": creators,
+                                  "share": share_pct / 100.0})
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": ["label", "mau", "creators", "share"],
+            "result_rows": [[r["label"], r["mau"], r["creators"], r["share"]]
+                            for r in combined_rows],
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        self._set_options([
+            {"label": f"MAU by country for {app}",
+             "send": f"What's the MAU for {app} by country?"},
+            {"label": f"Creator share for {app}",
+             "send": f"What is the % of creators of MAU in {app}?"},
+            {"label": f"MAU and creators by country for {others[0]}",
+             "send": f"What are the monthly active users and creators by country for {others[0]}?"},
+        ])
+        lines = [f"- {r['label']}: {r['mau']:,} users, {r['creators']:,} creators "
+                 f"({r['share'] * 100:.2f}% of MAU)"
+                 for r in combined_rows]
+        total_share = (total_creators * 100.0 / total_mau) if total_mau else 0.0
+        text = (f"Monthly active users (MAU) and creators for {app} in March 2026, by country:\n" +
+                "\n".join(lines) +
+                f"\n\nTotal: {total_mau:,} users, {total_creators:,} creators "
+                f"({total_share:.2f}% of MAU).\n\n"
+                "MAU is distinct users with at least one session on "
+                f"{app} in March 2026; creators are distinct users with at least one content item "
+                f"published on {app} in March 2026. Each user has exactly one country, so both "
+                "columns add up to their totals. This is a monthly cut -- not the daily creator "
+                "penetration on the weather report (daily creators divided by DAU). "
+                "The exact SQL is in the working panel.")
+        return self._reply("mau_creators_by_country", text,
+                           mau_creators_by_country={"app": app, "rows": combined_rows,
+                                                    "total_mau": total_mau,
+                                                    "total_creators": total_creators})
+
     def _series_question(self, app):
         """Question that re-asks the stored daily series for an app.
 
@@ -1508,6 +1591,33 @@ class ChatSession:
             return self._reply("clarification",
                                "Which app's creator share of MAU? Reply instagram, whatsapp, or "
                                "facebook — for example, \"What is the % of creators of MAU in Instagram?\"")
+        # MAU and creators by country (2026-11-11): "I need the
+        # Monthly active users and creators by country" is one
+        # question -- a breakdown with both populations side by side
+        # -- not MAU by country alone (the Nov 11 live failure: the
+        # creators half was dropped). Placed after the creator_share
+        # block (which excludes " by country", so it never fires
+        # here) and before the MAU block (which would otherwise take
+        # "monthly active" + " by country" to mau_by_country). The
+        # %-by-country form ("What is the % of creators of MAU ...
+        # by country?") also lands here in chat -- the combined turn
+        # answers the per-country shares -- while the single-shot
+        # planner keeps the creator_share refusal for it (pinned v7
+        # test; see the planner branch comment). App from the
+        # question, else the sticky MAU context, else the session
+        # app, else clarify which app.
+        if "creator" in q and ("mau" in q or "monthly active" in q) and " by country" in q:
+            app = (app_found or (self.mau_context["app"] if self.mau_context else None)
+                   or self.app)
+            if app:
+                return self._mau_creators_by_country_turn(app)
+            self._set_options([
+                {"label": a, "send": f"What are the monthly active users and creators by country for {a}?", "topic": None} for a in APPS
+            ])
+            return self._reply("clarification",
+                               "Which app's MAU and creators by country? Reply instagram, whatsapp, or "
+                               "facebook — for example, \"What are the monthly active users and creators "
+                               "by country for Instagram?\"")
         # MAU intent (2026-11-04): a standalone metric turn. The
         # keyword is "mau", so the probe's typo ("teh") does not
         # matter, and no weather report is required first. Placed

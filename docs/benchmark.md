@@ -1685,3 +1685,309 @@ PYTHONPATH=src python scripts/run_benchmark_v7.py --split heldout  # report only
 PYTHONPATH=src python scripts/run_benchmark_v7.py --split all
 PYTHONPATH=src python scripts/run_benchmark_v7.py --skip-oracle     # benchmark only
 ```
+
+# Benchmark v8 — MAU and creators by country + two user probes (2026-11-11)
+
+## The probe (live shell, 2026-11-11)
+
+The creator-share turn worked live (v7, landed as `b49059a`), but
+the next question failed in the same session:
+
+**"I need the Monthly active users and creators by country"**
+answered with MAU by country only — US 63,372, IN 52,686, BR
+31,623, ID 21,081, MX 16,946, DE 12,611, GB 12,490, total 210,809.
+That is a wrong answer, not a clarification. The question names two
+populations (MAU and creators) and asks for both, split by country;
+the system dropped the "creators" half and answered a different
+question. The right answer, verified from the data — both columns
+side by side per country for Instagram, March 2026:
+
+| Country | MAU | Creators | Share of MAU |
+|---|---|---|---|
+| US | 63,372 | 9,286 | 14.65% |
+| IN | 52,686 | 7,843 | 14.89% |
+| BR | 31,623 | 4,785 | 15.13% |
+| ID | 21,081 | 3,149 | 14.94% |
+| MX | 16,946 | 2,488 | 14.68% |
+| DE | 12,611 | 1,849 | 14.66% |
+| GB | 12,490 | 1,897 | 15.19% |
+| **Total** | **210,809** | **31,297** | **14.85%** |
+
+The missing piece is a combined turn: one breakdown with both
+populations side by side per country, with the SQL in the working
+panel so he can check it — the same run-and-show principle as the
+MAU-by-country and creator-share turns. Both columns come from
+definitions the system already has: the MAU column is the
+`mau_by_country` definition (p06) and the creators column is the
+EXACT creators-by-country definition the p05 oracle uses, so the
+columns sum to the `mau_march` scalar (210,809) and the
+`creator_share` creators count (31,297) respectively. Each user has
+exactly one country, so both columns add up to their totals — the
+same property that made MAU by country well-defined, and the reason
+MAU by surface stays a clarification. This is a monthly cut — **not**
+the weather report's daily creator penetration (daily creators /
+DAU, ~10.4% for Instagram). The turn states which one it is.
+
+## The turn (`src/socialpulse_nlq/planner.py`, `src/socialpulse_nlq/chat.py`)
+
+The planner carries the query, the chat carries the turn — the same
+split as the MAU-by-country and creator-share turns:
+
+1. **Planner (`mau_creators_by_country` template in `build_sql`):**
+   one combined query, two grouped CTEs joined on country — monthly
+   distinct users per country (`fact_sessions` joined to `dim_users`,
+   the same session-app definition as `mau_march` /
+   `mau_by_country`) and monthly distinct creators per country
+   (`fact_content_creation` joined to `dim_content` for the app and
+   to `dim_users` on `creator_id` for the country — the EXACT p05
+   definition). The join is a `FULL OUTER JOIN` so a country with
+   creators but no sessions (or vice versa) still appears; on this
+   data both sides carry the same 7 countries for all three apps.
+   The result is one row per country with four columns: `country`,
+   `mau`, `creators`, `share_pct`, ordered by MAU descending, like
+   `mau_by_country`. Without an app the query is the all-apps
+   combined cut, the same no-app convention as the `mau_march`
+   scalar. `mau_creators_by_country` is recorded in
+   `METRIC_DEFINITIONS` (display only) — **not** in
+   `catalog/measures.yaml`, which stays at 20 metrics.
+2. **Planner (`plan()` metric detection):** a
+   `mau_creators_by_country` branch after the `creator_share`
+   branch and before the `"mau"` branch. It matches a question
+   naming creators + MAU/monthly active + "by country", with no
+   share language. The ordering is deliberate: a question with
+   share language ("% of creators of MAU ... by country") still
+   takes `creator_share` and is refused as a breakdown of the scalar
+   share (pinned by the v7 test — `creator_share` has no country
+   breakdown in the planner). The chat routing is more permissive
+   (see 4): it sends the %-by-country form to the combined turn
+   too, since the turn answers the per-country shares; unifying the
+   two layers is a planner-fix-stage decision, not part of this
+   build.
+3. **Chat (`_mau_creators_by_country_turn`, type
+   `mau_creators_by_country`):** reply text lists each country with
+   both numbers and the share ("- US: 63,372 users, 9,286 creators
+   (14.65% of MAU)"), then the totals, then the definitions (MAU is
+   distinct users with >=1 session in March 2026; creators are
+   distinct users with >=1 content item published in March 2026)
+   and the monthly-cut-not-daily-penetration distinction. The
+   working panel shows the exact combined CTE query that ran plus
+   the full four-column table; the chart is a bar of MAU by country
+   (first two columns, per the sqlviz rule — further columns stay in
+   the table only), and the SQL diagram is honestly unavailable
+   (WITH/CTE shape, per the sqlviz rules — never a guessed diagram).
+   The turn sets stage `"mau"` and re-sets the sticky `mau_context`
+   (same app, March 2026), so a later bare "by country" still gives
+   MAU by country and "creators by country" still gives the
+   breakdown.
+4. **Chat (routing, after the creator_share block, before the MAU
+   block):** the same predicate as the planner branch (creators +
+   MAU/monthly active + " by country"). The placement is what makes
+   it fire: the creator_share block excludes " by country", so it
+   never takes these questions, and the MAU block would otherwise
+   take "monthly active" + " by country" to `mau_by_country` (the
+   Nov 11 live failure). Because the creator_share block excludes
+   by-country, the %-by-country form also lands here in chat — the
+   combined turn answers the per-country shares. App resolution:
+   from the question, else the sticky MAU context, else the session
+   app, else clarify which app. The bare follow-up form after a
+   MAU-by-country turn ("I need the Monthly active users and
+   creators by country", no app named) inherits the app from the
+   sticky context.
+5. **Variant boundary (documented, not reworked):**
+   catalog-assisted and validated abstain on
+   `mau_creators_by_country` (the metric is not in the 20-metric
+   catalog, same as `mau_by_country` and `creator_share` — the scope
+   check fails closed). Only the baseline variant answers it, and
+   the benchmark runs the baseline. Making the variants
+   catalog-aware of it is a planner-fix-stage decision, not part of
+   this build.
+
+Unchanged, verified by probe: plain "What's the MAU for Instagram?"
+still returns the scalar (210,809); "MAU by country" still returns
+the grouped query; "creators by country" after a MAU turn still
+returns the creators breakdown (US 9,286, total 31,297); "What is
+the % of creators of MAU in Instagram" still returns the scalar
+share (14.85%); a weather turn still works; "what's driving the
+creator drop?" still reaches the diagnosis turn. Fresh-session "I
+need the Monthly active users and creators by country" (no app)
+clarifies which app.
+
+## The cases (p11, p12)
+
+- **p11 (single, metric_scoping, dev):** "What are the monthly
+  active users and creators by country for Instagram?". Expected
+  type `mau_creators_by_country`, expected metric
+  `mau_creators_by_country`, 7 rows, per-country MAU / creators /
+  share_pct as in the table above. Oracle kind `breakdown`, counts
+  exact, share within the harness tolerance: the DISTINCT-pairs CTE
+  formulation (the entry SQL, genuinely different in shape from the
+  planner's grouped-`COUNT(DISTINCT)` CTE query) agrees exactly
+  with the planner form on both counts per country. No aggregate
+  table carries MAU or creators by country (`agg_user_daily` has
+  daily DAU only), so the cross-check is two independent raw
+  formulations plus the definition ties (per-country MAU equals the
+  p06 values exactly, per-country creators equals the p05 values
+  exactly, and the totals tie to the `mau_march` scalar and the
+  `creator_share` creators count), not agg-vs-raw — stated in the
+  oracle note. The oracle entry also carries structural checks
+  (`s.app = 'instagram'` and `c.app = 'instagram'` present,
+  `GROUP BY u.country` present, `country = '` absent). The metric
+  check and the 7-row-x-4-col shape check are what stop a silent
+  substitution: the MAU-by-country reply (7 rows x 2 cols) fails
+  the shape check before any value is read, so the MAU-only answer
+  can never stand in for the combined one — the Nov 11 live failure
+  was exactly that substitution.
+- **p12 (conversation, multi_turn_context, dev):** turn 1 is "What
+  is the MAU for Instagram by country?" (expected type
+  `mau_by_country`, app instagram); turn 2 is the live probe itself
+  — "I need the Monthly active users and creators by country" (no
+  app named, expected type `mau_creators_by_country`, app
+  instagram). The 2-turn shape is the session as asked: the probe
+  names no app in turn 2, so the case tests the turn plus the sticky
+  MAU context. The case carries
+  `checks["mau_creators_by_country_values"]` (per-country mau /
+  creators / share as a fraction) and the fourteen scalar values
+  the oracle checks. Oracle kind `conversation_values`, counts
+  exact: independent per-country scalar queries (DISTINCT-pairs
+  formulation for MAU, p05 formulation for creators) that agree
+  exactly with the grouped forms, and the rows sum to the MAU total
+  of 210,809 and the creators total of 31,297. The oracle entry
+  also carries a structural check (`app = 'instagram'` present in
+  both turns' SQL).
+
+## Harness extension
+
+- **`_result_equiv_single` mau_creators_by_country branch**
+  (`src/socialpulse_nlq/eval_harness.py`): for expected type
+  `mau_creators_by_country`, it checks the 7-row-x-4-col shape
+  first (country, mau, creators, share_pct), then the two counts
+  exactly per country and the share with the harness tolerance.
+  `score_single` and `_run_single` dispatch on the new type
+  through the existing query branch, the same way `creator_share`
+  was wired in v7. Old cases are unaffected (no
+  `mau_creators_by_country` expected type → no-op).
+- **`check_values` combined branch**
+  (`scripts/run_conversation_benchmark.py`, shared by the harness
+  via `_load_conv_runner`): for a reply with a
+  `mau_creators_by_country` payload, it reads the turn's per-country
+  mau/creators/share (fraction) and compares them against the
+  case's `checks["mau_creators_by_country_values"]` (counts exact,
+  share within 0.001, i.e. 0.1pp). A missing
+  `mau_creators_by_country` reply is itself a failure (otherwise
+  the values check would silently pass on nothing). Old cases are
+  unaffected (no `mau_creators_by_country_values` check → no-op).
+
+## v8 counts by family and split
+
+| Family | v7 | + probes | v8 total | v8 dev | v8 held-out |
+|---|---|---|---|---|---|
+| metric_scoping | 50 | 1 (p11) | 51 | 39 | 12 |
+| aggregation_grain | 31 | 0 | 31 | 28 | 3 |
+| complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
+| ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
+| multi_turn_context | 15 | 1 (p12) | 16 | 13 | 3 |
+| incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
+| guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
+| sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
+| **Total** | **160** | **2** | **162** | **132** | **30** |
+
+Held-out is unchanged (30 cases, same ids as v7). **Honest
+limitation:** the probes were run during the build (that is how the
+turn was verified), so v8 held-out means "held out from fixes", not
+pristine — the same caveat as v1–v7.
+
+## v8 results
+
+**Dev run (2026-11-11): 124/132 task success** — the 122 v7 dev
+passes plus p11 and p12. Per family:
+
+| Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
+|---|---|---|---|---|---|---|---|
+| metric_scoping | 39 | 32/39 | 31/31 | 31/31 | 31/31 | 29/29 | 32/39 |
+| aggregation_grain | 28 | 28/28 | 28/28 | 28/28 | 28/28 | 28/28 | 28/28 |
+| complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
+| ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
+| multi_turn_context | 13 | 13/13 | 12/12 | 12/12 | 13/13 | 7/7 | 13/13 |
+| incorrect_assumption | 9 | 8/9 | — | — | 1/1 | — | 8/9 |
+| guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
+| sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
+
+**Oracle agreement: v8 162/162, no inexact entries** (dev run trace;
+the held-out run also verified the oracle, 162/162).
+
+**Held-out run (2026-11-11): 27/30 task success**, the same 3
+failures as v7 (h02, h08, h18 — reported only, drove no fix). Per
+family: metric_scoping 10/12, aggregation_grain 3/3,
+complex_joins_breakdowns 5/5, ambiguous_metric 2/2,
+multi_turn_context 3/3, incorrect_assumption 1/2,
+guardrail_adversarial 2/2, sql_safety_syntax 1/1.
+
+**Dev failures (8 total — the same expected findings as v7):** h01,
+h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
+new failures: **p11 and p12 pass all five rubric items**
+(`result_equiv` for p11 is scored by the new
+`mau_creators_by_country` branch in `_result_equiv_single` — 7 rows
+x 4 cols, both counts exact per country, share within tolerance; all
+four structural checks pass; `result_equiv` for p12 is scored by the
+new `check_values` combined branch — the turn-2 reply's payload
+exact). No "right answer, wrong SQL" warnings in either run.
+
+**v7 regression with the new code (same day, same data): dev 122/130,
+held-out 27/30, oracle 160/160 agree in both runs** (traces
+`evals/runs/benchmark_v7_baseline_dev_mau_creators.json` and
+`evals/runs/benchmark_v7_baseline_heldout_mau_creators.json`). The
+combined turn, the planner branch, and the harness extensions
+changed no v7 outcome: the failures are exactly the 8 known dev
+findings and the 3 known held-out findings, and p01–p10 still pass.
+
+**Test suite (2026-11-11): 179 pass / 1 known fail / 5 skipped**
+(plain runner; the fail is the pre-existing
+`test_docked_chat_only::test_rounded_corners` on an untouched file;
+the 5 skips are the `test_questions` `tmp_path` fixture tests). 9
+new tests: 3 planner (combined CTE SQL shape + both probe phrasings
++ WhatsApp scoping + no-app all-apps cut; non-hijack of MAU /
+MAU-by-country / breakdown / creator_share + the share-by-country
+form keeps the pinned v7 planner refusal; variant abstention),
+5 chat (single-shot with gold values + bar chart + honestly-
+unavailable diagram, WhatsApp + Facebook golds, p12 follow-up +
+sticky context + named-topic still the breakdown, no-app clarifies,
+non-hijack of MAU / MAU-by-country / breakdown / creator_share /
+weather + the %-by-country form lands on the combined turn in
+chat), and 1 harness (the `mau_creators_by_country` rubric type
+scores a fabricated passing outcome, and the MAU-by-country and
+scalar-share substitutions both fail result equivalence — the
+silent-substitution guard, pinned at the harness level). One
+wiring-script mistake worth recording: the first run asserted 143
+singles, but v7 has 141 singles, so v8 has 142 (141 + p11) — 142
+singles + 20 conversations = 162 cases; fixed to 142 before
+anything was written (the oracle verification had already passed
+for all three apps).
+
+**Live verification (local server probe, workspace ChatSession on
+the 500K data):** "What are the monthly active users and creators
+by country for Instagram?" returns the combined turn — "Monthly
+active users (MAU) and creators for instagram in March 2026, by
+country: - US: 63,372 users, 9,286 creators (14.65% of MAU) ... Total:
+210,809 users, 31,297 creators (14.85% of MAU)", with the monthly
+definitions and the daily-penetration distinction in the text; the
+working panel shows the CTE SQL, the four-column table, and a bar
+chart of MAU by country, and the diagram is honestly unavailable
+(WITH/CTE). WhatsApp returns totals 140,378 / 20,718 (14.76%);
+Facebook 117,550 / 17,429 (14.83%). MAU by country → "I need the
+Monthly active users and creators by country" returns the combined
+turn for Instagram (sticky context); a later bare "by country" still
+gives MAU by country (total 210,809); "creators by country"
+afterwards still returns the creators breakdown (US 9,286). Plain
+"What's the MAU for Instagram" still returns the 210,809 scalar;
+"MAU by country" still returns the grouped query; "What is the % of
+creators of MAU in Instagram" still returns the scalar share
+(14.85%); a weather turn still works.
+
+## Running v8
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v8.py --split dev      # default
+PYTHONPATH=src python scripts/run_benchmark_v8.py --split heldout  # report only
+PYTHONPATH=src python scripts/run_benchmark_v8.py --split all
+PYTHONPATH=src python scripts/run_benchmark_v8.py --skip-oracle     # benchmark only
+```

@@ -495,3 +495,70 @@ def test_rubric_creator_share_type():
                                      columns=["country", "creators"]))
     assert r3["items"]["result_equiv"]["pass"] is False
     assert r3["task_success"] is False
+
+
+def test_rubric_mau_creators_by_country_type():
+    # 2026-11-11 (p11): the mau_creators_by_country expected_type
+    # scores a 7-row, four-column result (country, mau, creators,
+    # share_pct). Both counts are exact; the share uses the harness
+    # tolerance. A fabricated passing outcome: all five rubric items
+    # pass and task succeeds.
+    case = {"id": "p11", "expected_type": "mau_creators_by_country",
+            "expected_metric": "mau_creators_by_country",
+            "expected_rows": 7,
+            "expected_values": {
+                "US": {"mau": 63372, "creators": 9286, "share_pct": 14.65},
+                "IN": {"mau": 52686, "creators": 7843, "share_pct": 14.89},
+                "BR": {"mau": 31623, "creators": 4785, "share_pct": 15.13},
+                "ID": {"mau": 21081, "creators": 3149, "share_pct": 14.94},
+                "MX": {"mau": 16946, "creators": 2488, "share_pct": 14.68},
+                "DE": {"mau": 12611, "creators": 1849, "share_pct": 14.66},
+                "GB": {"mau": 12490, "creators": 1897, "share_pct": 15.19}},
+            "family": "metric_scoping",
+            "question": "What are the monthly active users and creators by country for Instagram?"}
+    plan = {"type": "query", "metric": "mau_creators_by_country",
+            "sql": ("WITH mau_by_country AS (SELECT u.country, COUNT(DISTINCT s.user_id) AS mau "
+                    "FROM fact_sessions s JOIN dim_users u ON u.user_id = s.user_id "
+                    "WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' "
+                    "AND DATE '2026-03-31' AND s.app = 'instagram' GROUP BY u.country), "
+                    "creators_by_country AS (SELECT u.country, COUNT(DISTINCT f.creator_id) AS creators "
+                    "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                    "JOIN dim_users u ON u.user_id = f.creator_id "
+                    "WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-01' "
+                    "AND DATE '2026-03-31' AND c.app = 'instagram' GROUP BY u.country) "
+                    "SELECT COALESCE(m.country, c.country) AS country, COALESCE(m.mau, 0) AS mau, "
+                    "COALESCE(c.creators, 0) AS creators, "
+                    "COALESCE(c.creators, 0) * 100.0 / NULLIF(COALESCE(m.mau, 0), 0) AS share_pct "
+                    "FROM mau_by_country m FULL OUTER JOIN creators_by_country c ON c.country = m.country "
+                    "ORDER BY mau DESC"),
+            "tables": ["fact_sessions", "dim_users", "fact_content_creation", "dim_content"],
+            "grain": "user x month, grouped by country"}
+    rows = [["US", 63372.0, 9286.0, 14.6531591239033],
+            ["IN", 52686.0, 7843.0, 14.886307557985043],
+            ["BR", 31623.0, 4785.0, 15.13139170856655],
+            ["ID", 21081.0, 3149.0, 14.9376215549547],
+            ["MX", 16946.0, 2488.0, 14.68193083913608],
+            ["DE", 12611.0, 1849.0, 14.661803187693284],
+            ["GB", 12490.0, 1897.0, 15.188150520416333]]
+    r = score_single(case, _outcome(plan=plan, rows=rows,
+                                    columns=["country", "mau", "creators", "share_pct"]))
+    assert all(v["pass"] is True for v in r["items"].values()), r["items"]
+    assert r["sql_semantic"] is True and r["task_success"] is True
+    # The silent-substitution guards: the MAU-by-country reply
+    # (7 rows x 2 cols, the Nov 11 live failure -- the creators
+    # half dropped) fails the shape check before any value is read,
+    # and so does the scalar creator_share reply (1 row x 3 cols),
+    # so neither can stand in for the combined breakdown.
+    mau_plan = dict(plan, metric="mau_by_country")
+    mau_rows = [["US", 63372.0], ["IN", 52686.0], ["BR", 31623.0], ["ID", 21081.0],
+                ["MX", 16946.0], ["DE", 12611.0], ["GB", 12490.0]]
+    r2 = score_single(case, _outcome(plan=mau_plan, rows=mau_rows,
+                                     columns=["country", "mau"]))
+    assert r2["items"]["result_equiv"]["pass"] is False
+    assert r2["items"]["final_answer"]["pass"] is False
+    assert r2["task_success"] is False
+    share_plan = dict(plan, metric="creator_share")
+    r3 = score_single(case, _outcome(plan=share_plan, rows=[[31297.0, 210809.0, 14.846153846153847]],
+                                     columns=["creators", "mau", "share_pct"]))
+    assert r3["items"]["result_equiv"]["pass"] is False
+    assert r3["task_success"] is False

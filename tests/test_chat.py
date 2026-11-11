@@ -770,6 +770,150 @@ def test_creator_share_does_not_hijack():
     assert r["type"] == "breakdown" and r["breakdown"]["topic"] == "creators"
 
 
+def test_mau_creators_by_country_single_shot():
+    # 2026-11-11 (p11): the Nov 11 live failure -- "I need the
+    # Monthly active users and creators by country" answered with
+    # MAU by country only, dropping the creators half. The combined
+    # turn answers both populations side by side per country, plus
+    # the share: US 63,372 / 9,286 (14.65%), IN 52,686 / 7,843
+    # (14.89%), BR 31,623 / 4,785 (15.13%), ID 21,081 / 3,149
+    # (14.94%), MX 16,946 / 2,488 (14.68%), DE 12,611 / 1,849
+    # (14.66%), GB 12,490 / 1,897 (15.19%); totals 210,809 /
+    # 31,297 (14.85%). 500K seed-42 golds, verified two ways in the
+    # oracle (grouped COUNT(DISTINCT) CTE == DISTINCT-pairs CTE on
+    # both counts per country; columns tie to p06 and p05 exactly).
+    # The reply names the monthly definitions and says it is not the
+    # weather report's daily penetration.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What are the monthly active users and creators by country for Instagram?")
+    assert r["type"] == "mau_creators_by_country" and r["app"] == "instagram"
+    assert "63,372" in r["text"] and "9,286" in r["text"] and "14.65%" in r["text"]
+    assert "210,809" in r["text"] and "31,297" in r["text"] and "14.85%" in r["text"]
+    assert "monthly cut" in r["text"] and "daily creator penetration" in r["text"]
+    mc = r["mau_creators_by_country"]
+    assert mc["total_mau"] == 210809 and mc["total_creators"] == 31297
+    rows = {row["label"]: row for row in mc["rows"]}
+    assert rows["US"]["mau"] == 63372 and rows["US"]["creators"] == 9286
+    assert abs(rows["US"]["share"] - 0.1465) < 0.001
+    assert rows["GB"]["mau"] == 12490 and rows["GB"]["creators"] == 1897
+    assert abs(rows["GB"]["share"] - 0.1519) < 0.001
+    assert len(mc["rows"]) == 7
+    w = r["working"]
+    assert w["sql"].startswith("WITH mau_by_country AS (") and "share_pct" in w["sql"]
+    assert "s.app = 'instagram'" in w["sql"] and "c.app = 'instagram'" in w["sql"]
+    assert "GROUP BY u.country" in w["sql"] and "ORDER BY mau DESC" in w["sql"]
+    viz = w["visualization"]
+    assert viz["available"] is True
+    # The table carries all four columns; the chart is a bar of MAU
+    # by country (first two columns, per the sqlviz rule -- further
+    # columns stay in the table only).
+    assert viz["columns"] == ["label", "mau", "creators", "share"]
+    assert viz["rows"][0][:3] == ["US", 63372, 9286]
+    assert abs(viz["rows"][0][3] - 0.1465) < 0.001
+    assert viz["chart"] is not None and viz["chart"]["kind"] == "bar"
+    assert [pt["x"] for pt in viz["chart"]["points"]] == ["US", "IN", "BR", "ID", "MX", "DE", "GB"]
+    assert [pt["y"] for pt in viz["chart"]["points"]] == [63372, 52686, 31623, 21081, 16946, 12611, 12490]
+    # The diagram is honestly unavailable: the SQL is a WITH/CTE
+    # query, which the diagram does not model -- never a guessed one.
+    assert viz["diagram"] is None
+    assert "WITH/CTE" in (viz["diagram_unavailable_reason"] or "")
+
+
+def test_mau_creators_by_country_whatsapp_and_facebook():
+    # WhatsApp (500K seed-42 golds, same two-way oracle): US
+    # 42,129 / 6,223, totals 140,378 / 20,718 (14.76%). Facebook:
+    # US 35,449 / 5,221, totals 117,550 / 17,429 (14.83%).
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What are the monthly active users and creators by country for WhatsApp?")
+    assert r["type"] == "mau_creators_by_country" and r["app"] == "whatsapp"
+    mc = r["mau_creators_by_country"]
+    assert mc["total_mau"] == 140378 and mc["total_creators"] == 20718
+    rows = {row["label"]: row for row in mc["rows"]}
+    assert rows["US"]["mau"] == 42129 and rows["US"]["creators"] == 6223
+    assert "14.76%" in r["text"]
+    r = s.respond("What are the monthly active users and creators by country for Facebook?")
+    assert r["type"] == "mau_creators_by_country" and r["app"] == "facebook"
+    mc = r["mau_creators_by_country"]
+    assert mc["total_mau"] == 117550 and mc["total_creators"] == 17429
+    rows = {row["label"]: row for row in mc["rows"]}
+    assert rows["US"]["mau"] == 35449 and rows["US"]["creators"] == 5221
+    assert "14.83%" in r["text"]
+
+
+def test_mau_creators_by_country_followup_after_mau_by_country():
+    # 2026-11-11 (p12): the live session itself -- MAU by country,
+    # then the bare "I need the Monthly active users and creators
+    # by country" (no app named). The follow-up inherits the app
+    # from the sticky MAU context and answers the combined breakdown
+    # -- it does not repeat the MAU column alone. The sticky context
+    # survives the turn: a later bare "by country" still gives MAU
+    # by country, and "creators by country" still gives the creators
+    # breakdown (US 9,286).
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What is the MAU for Instagram by country?")
+    assert r["type"] == "mau_by_country" and r["app"] == "instagram"
+    r = s.respond("I need the Monthly active users and creators by country")
+    assert r["type"] == "mau_creators_by_country" and r["app"] == "instagram"
+    mc = r["mau_creators_by_country"]
+    assert mc["total_mau"] == 210809 and mc["total_creators"] == 31297
+    rows = {row["label"]: row for row in mc["rows"]}
+    assert rows["US"]["mau"] == 63372 and rows["US"]["creators"] == 9286
+    r = s.respond("by country")
+    assert r["type"] == "mau_by_country" and r["app"] == "instagram"
+    assert r["mau_by_country"]["total"] == 210809
+    r = s.respond("creators by country")
+    assert r["type"] == "breakdown" and r["breakdown"]["topic"] == "creators"
+    assert {row["label"]: row["count"] for row in r["breakdown"]["rows"]}["US"] == 9286
+
+
+def test_mau_creators_by_country_no_app_clarifies():
+    # No app named and no app in context: clarify which app, never
+    # silently answer one app's combined cut.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("I need the Monthly active users and creators by country")
+    assert r["type"] == "clarification"
+    assert "instagram" in r["text"] and "whatsapp" in r["text"]
+
+
+def test_mau_creators_by_country_does_not_hijack():
+    # The neighbours keep their turns: plain MAU stays the scalar,
+    # MAU by country stays the grouped query, "creators by country"
+    # stays the breakdown, "% of creators of MAU" stays the scalar
+    # share, and a weather turn still works.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What's the MAU for Instagram")
+    assert r["type"] == "mau" and r["mau"]["value"] == 210809
+    r = s.respond("What is the MAU for Instagram by country?")
+    assert r["type"] == "mau_by_country" and r["mau_by_country"]["total"] == 210809
+    r = s.respond("creators by country")
+    assert r["type"] == "breakdown" and r["breakdown"]["topic"] == "creators"
+    assert {row["label"]: row["count"] for row in r["breakdown"]["rows"]}["US"] == 9286
+    r = s.respond("What is the % of creators of MAU in Instagram")
+    assert r["type"] == "creator_share" and r["app"] == "instagram"
+    assert abs(r["creator_share"]["pct"] - 14.85) < 0.01
+    r = s.respond("What's happening with Instagram?")
+    assert r["type"] == "weather" and r["app"] == "instagram"
+    # The %-by-country form lands on the combined turn in chat --
+    # it answers the per-country shares -- while the single-shot
+    # planner keeps the creator_share refusal for it (pinned v7
+    # test); the layer difference is documented in the planner
+    # branch comment, not hidden.
+    r = s.respond("What is the % of creators of MAU in Instagram by country?")
+    assert r["type"] == "mau_creators_by_country" and r["app"] == "instagram"
+    rows = {row["label"]: row for row in r["mau_creators_by_country"]["rows"]}
+    assert rows["US"]["mau"] == 63372 and rows["US"]["creators"] == 9286
+
+
 def test_daily_series_turn_standalone_no_weather():
     # 2026-11-06 (p02): the daily-series turn answers as a later turn
     # in a chat with no weather report -- here the MAU turn first sets

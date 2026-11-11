@@ -119,6 +119,15 @@ VERSIONS = {
            "singles": "benchmark_v7.json",
            "convs": "conversation_v7.json",
            "oracle": "oracle_v7.json"},
+    # v8 (MAU-and-creators-by-country turn, 2026-11-11): v7's 160
+    # cases plus the user probes p11 ("What are the monthly active
+    # users and creators by country for Instagram?", single) and p12
+    # (the same question as a follow-up after a MAU-by-country turn,
+    # conversation). Both in dev; held-out stays 30.
+    "v8": {"manifest": "benchmark_v8_manifest.json",
+           "singles": "benchmark_v8.json",
+           "convs": "conversation_v8.json",
+           "oracle": "oracle_v8.json"},
 }
 
 
@@ -331,6 +340,33 @@ def _result_equiv_single(case, rows, cols):
         if "expected_pct" in case and not close(pct, case["expected_pct"]):
             return False, f"share_pct {pct} != {case['expected_pct']}"
         return True, ""
+    if etype == "mau_creators_by_country":
+        # 2026-11-11 (p11): one row per country, four columns --
+        # country, mau, creators, share_pct -- from the combined CTE
+        # query. Both counts are exact (they are counts, not rates);
+        # the share uses the harness 2% tolerance, like
+        # creator_share's pct. The expected_type pins the turn: a
+        # mau_by_country reply (7 rows x 2 cols) fails the shape
+        # check before any value is read, so the MAU-only answer can
+        # never be silently substituted for the combined one -- the
+        # Nov 11 live failure was exactly that substitution.
+        if len(rows) != case.get("expected_rows"):
+            return False, f"rows={len(rows)} != {case.get('expected_rows')}"
+        if len(cols) != 4:
+            return False, f"expected 4 cols, got {len(cols)}"
+        if "expected_values" in case:
+            got = {str(r[0]): (float(r[1]), float(r[2]), float(r[3])) for r in rows}
+            for k, v in case["expected_values"].items():
+                if k not in got:
+                    return False, f"{k}: missing from result"
+                gm, gc, gp = got[k]
+                if gm != v["mau"]:
+                    return False, f"{k} mau {gm} != {v['mau']}"
+                if gc != v["creators"]:
+                    return False, f"{k} creators {gc} != {v['creators']}"
+                if not close(gp, v["share_pct"]):
+                    return False, f"{k} share_pct {gp} != {v['share_pct']}"
+        return True, ""
     return False, f"no result comparison defined for type {etype!r}"
 
 
@@ -371,7 +407,7 @@ def score_single(case, outcome, structural_specs=None):
 
     items = {}
     if etype in ("scalar", "series", "series_by_dim", "breakdown", "mau_by_country",
-                 "creator_share"):
+                 "creator_share", "mau_creators_by_country"):
         items["sql_syntax"] = (_item(True, "") if outcome["syntax_ok"]
                                else _item(False, outcome.get("syntax_error", "")))
         items["sql_safety"] = (_item(True, outcome["guard"][1]) if outcome["guard"][0]
@@ -797,7 +833,8 @@ def _run_single(case, con, data_dir, structural_specs, variant="baseline"):
                "columns": [], "rows": [], "runtime_ms": 0, "weather": None,
                "trace": None}
     if case["expected_type"] in ("scalar", "series", "series_by_dim", "breakdown",
-                                "mau_by_country", "creator_share"):
+                                "mau_by_country", "creator_share",
+                                "mau_creators_by_country"):
         if p.get("sql"):
             try:
                 con.execute("EXPLAIN " + p["sql"])

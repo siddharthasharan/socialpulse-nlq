@@ -152,6 +152,37 @@ def check_values(conv, replies, failures):
             if abs(float(cs.get("pct", 0)) - want["pct"]) > 0.01:
                 failures.append(f"creator share pct: expected {want['pct']}, "
                                 f"got {cs.get('pct')}")
+    # MAU and creators by country (2026-11-11, p12): the "Monthly
+    # active users and creators by country" follow-up after a
+    # MAU-by-country turn answers both populations per country, not
+    # the MAU column alone. The reply carries a
+    # mau_creators_by_country payload (app, rows with label/mau/
+    # creators/share as a fraction, totals). Counts exact; the share
+    # within 0.001 (0.1pp) of the stored 4-decimal fraction. A
+    # missing reply is itself a failure: without it the values check
+    # would silently pass on nothing.
+    if "mau_creators_by_country_values" in checks:
+        mc = next((r.get("mau_creators_by_country") for r in replies
+                   if r.get("mau_creators_by_country")), None)
+        if mc is None:
+            failures.append("mau and creators by country: no mau_creators_by_country reply")
+        else:
+            got = {row["label"]: row for row in mc.get("rows") or []}
+            want = checks["mau_creators_by_country_values"]
+            if set(got) != set(want):
+                failures.append(f"mau and creators by country segments: got {sorted(got)}, "
+                                f"expected {sorted(want)}")
+            else:
+                for label, vals in want.items():
+                    if got[label]["mau"] != vals["mau"]:
+                        failures.append(f"mau and creators by country {label} mau: expected "
+                                        f"{vals['mau']}, got {got[label]['mau']}")
+                    if got[label]["creators"] != vals["creators"]:
+                        failures.append(f"mau and creators by country {label} creators: expected "
+                                        f"{vals['creators']}, got {got[label]['creators']}")
+                    if abs(float(got[label]["share"]) - vals["share"]) > 0.001:
+                        failures.append(f"mau and creators by country {label} share: expected "
+                                        f"{vals['share']}, got {got[label]['share']}")
     # Chained breakdown (2026-11-09, p05): the second breakdown in
     # the same session (creators by country after creators by
     # surface, both off the sticky MAU context) is checked against
