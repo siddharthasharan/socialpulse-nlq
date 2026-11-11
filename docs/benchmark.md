@@ -1991,3 +1991,33 @@ PYTHONPATH=src python scripts/run_benchmark_v8.py --split heldout  # report only
 PYTHONPATH=src python scripts/run_benchmark_v8.py --split all
 PYTHONPATH=src python scripts/run_benchmark_v8.py --skip-oracle     # benchmark only
 ```
+
+## v8 with the LLM planner (chunk B, slice 1)
+
+The frozen v8 set (162 cases, same ids, oracle, and manifest) also
+runs with `variant="llm"` — the LLM planner under the common contract
+(see `docs/llm-planner.md` for the design, prompt contract, key
+handling, cost method, and pacing). No benchmark, oracle, or manifest
+file changes for the LLM variant: the same frozen cases, the same
+five-item rubric, the same oracle.
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v8.py --variant llm --split dev
+PYTHONPATH=src python scripts/run_benchmark_v8.py --variant llm --split dev --limit 20
+PYTHONPATH=src python scripts/run_benchmark_v8.py --variant llm --split dev --limit 20 --offset 20
+PYTHONPATH=src python scripts/compare_llm.py <baseline-trace.json> <llm-trace.json>
+PYTHONPATH=src python scripts/smoke_llm.py   # 5 live cases: p11, p08, b01, h20, h30
+```
+
+Live verification is PENDING (2026-11-11): the Gemini key is
+connected and valid (list-models returns 200), and the HTTP 403
+PERMISSION_DENIED that blocked generation is GONE after the user's
+fix (14:25 PST) — but the three test calls since timed out at 60s,
+returned HTTP 503 "model experiencing high demand", and timed out
+again. Requests reach the model; it is overloaded/slow right now.
+The smoke script reports a 403 plainly as a blocked key (exit 3),
+a timeout/503 fallback as BLOCKED (exit 3), and never counts a
+fallback pass as a live pass; the comparison script refuses a trace
+containing any fallback unless `--allow-fallbacks` is passed. The
+mocked-transport tests (`tests/test_llm_planner.py`, 20 tests) are the
+verification actually completed in this slice.

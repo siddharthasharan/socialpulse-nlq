@@ -609,8 +609,16 @@ def _series_or_scalar(q: str):
     return "scalar"
 
 
-def build_sql(metric: str, f: dict, breakdown, q: str):
-    """Return (sql, tables, grain). Raises ValueError for unsupported combos."""
+def build_sql(metric: str, f: dict, breakdown, q: str, series=None):
+    """Return (sql, tables, grain). Raises ValueError for unsupported combos.
+
+    series (chunk B, slice 1): an optional override for the
+    dau_mean_daily scalar-vs-series decision. True forces the daily
+    series, False forces the averaged scalar, None (default) keeps the
+    existing _series_or_scalar(q) behavior exactly — so the
+    deterministic planner's default routing is unchanged and the LLM
+    planner can honor the grain it chose instead of re-deriving it
+    from the question text."""
     ds, de = f["date_start"], f["date_end"]
     tables = []
     grain = ""
@@ -630,7 +638,7 @@ def build_sql(metric: str, f: dict, breakdown, q: str):
                     f"COUNT(DISTINCT s.user_id) AS dau FROM fact_sessions s "
                     f"JOIN dim_users u ON u.user_id = s.user_id WHERE {where} "
                     f"GROUP BY {dim}, date ORDER BY {dim}, date"), tables, grain
-        if _series_or_scalar(q) == "series":
+        if (series if series is not None else _series_or_scalar(q) == "series"):
             # Bug fixed 2026-10-27: this branch used to ignore the user
             # filters entirely (fact_sessions only, no dim_users join),
             # so "DAU trend for Whatsapp" returned all-app DAU (~9,500/day

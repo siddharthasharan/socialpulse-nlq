@@ -483,6 +483,11 @@ def score_single(case, outcome, structural_specs=None):
             "row_count": len(outcome["rows"]),
             "columns": outcome["columns"],
             "trace": outcome.get("trace"),
+            # Chunk B, slice 1: the LLM routing receipt (model, prompt
+            # version + hash, real tokens, cost, latency, fallback) when
+            # the case ran under variant="llm"; None for deterministic
+            # variants, so the comparison script can tell them apart.
+            "llm": p.get("llm"),
             "items": items, "sql_semantic": bool(sql_semantic),
             "structural": structural,
             "task_success": bool(items["final_answer"]["pass"])}
@@ -517,20 +522,32 @@ def _turn_topic(reply):
     return None
 
 
-def score_conversation(conv, data_dir, structural_specs=None, variant="baseline"):
+def score_conversation(conv, data_dir, structural_specs=None, variant="baseline",
+                       llm=None, llm_pace_s=1.0):
     """Drive a ChatSession through one conversation and score it.
-    Returns a result dict with per-turn traces and the five items."""
+    Returns a result dict with per-turn traces and the five items.
+    variant="llm" (chunk B, slice 1) threads the transport/key/tier
+    in `llm` through to ChatSession; llm_pace_s sleeps that long
+    between turns, so a free-tier run paces itself instead of
+    tripping the per-minute limit. Each turn trace carries the turn's
+    llm receipt from the reply's working payload."""
     from socialpulse_nlq.chat import ChatSession
 
     check_turn, check_values = _load_conv_runner()
-    session = ChatSession(data_dir, variant=variant)
+    llm_kwargs = dict(llm or {})
+    session = ChatSession(data_dir, variant=variant,
+                          llm_transport=llm_kwargs.get("transport"),
+                          llm_api_key=llm_kwargs.get("api_key"),
+                          llm_tier=llm_kwargs.get("tier", "free"))
     replies, turn_traces, failures = [], [], []
     con = None
     syntax_ok, safety_ok, exec_ok = True, True, True
     syntax_reason, safety_reason, exec_reason = "", "", ""
     try:
         con = open_connection(data_dir)
-        for turn in conv["turns"]:
+        for turn_i, turn in enumerate(conv["turns"]):
+            if variant == "llm" and turn_i > 0 and llm_pace_s:
+                time.sleep(llm_pace_s)
             t0 = time.time()
             try:
                 reply = session.respond(turn["user"])
@@ -559,7 +576,8 @@ def score_conversation(conv, data_dir, structural_specs=None, variant="baseline"
                 "text": (reply.get("text") or "")[:300],
                 "sql": sql, "tables": working.get("tables"),
                 "row_count": working.get("row_count"),
-                "runtime_ms": ms, "turn_failures": turn_failures})
+                "runtime_ms": ms, "turn_failures": turn_failures,
+                "llm": working.get("llm")})
     finally:
         if con is not None:
             con.close()
@@ -826,8 +844,19 @@ def run_oracle(con, data_dir, singles, convs, oracle_by_id):
 # Full run + summary
 # --------------------------------------------------------------------------
 
-def _run_single(case, con, data_dir, structural_specs, variant="baseline"):
-    p = plan(case["question"], variant=variant)
+def _run_single(case, con, data_dir, structural_specs, variant="baseline",
+                llm=None):
+    """Run one single-shot case. variant="llm" (chunk B, slice 1) plans
+    through the LLM planner — same plan-dict shape, same execution and
+    scoring — with the transport/key/tier in `llm` (a dict of
+    plan_with_llm kwargs). The llm receipt is appended to the trace as
+    a step, so the trace keeps its shape (a list of steps) plus the llm
+    fields."""
+    if variant == "llm":
+        from socialpulse_nlq.llm_planner import plan_with_llm
+        p = plan_with_llm(case["question"], **(llm or {}))
+    else:
+        p = plan(case["question"], variant=variant)
     outcome = {"plan": p, "guard": (True, "no SQL"), "syntax_ok": True,
                "syntax_error": "", "exec_ok": True, "exec_error": "",
                "columns": [], "rows": [], "runtime_ms": 0, "weather": None,
@@ -846,8 +875,20 @@ def _run_single(case, con, data_dir, structural_specs, variant="baseline"):
                 try:
                     cols, rows, ms = run_plan(p, data_dir)
                     outcome.update({"columns": cols, "rows": rows, "runtime_ms": ms})
-                    outcome["trace"] = build_trace(p, len(rows), ms,
-                                                   rows[0] if rows else None)
+                    trace = build_trace(p, len(rows), ms,
+                                        rows[0] if rows else None)
+                    if p.get("llm"):
+                        # Same trace shape (a list of steps) plus the
+                        # llm fields, as one step — never a second
+                        # trace format.
+                        trace.append(
+                            {"step": 6, "title": "LLM routing (grounded agent)",
+                             "text": ("The LLM chose this analysis; the SQL above "
+                                      "is the deterministic template for it, and "
+                                      "every number came from executing that SQL. "
+                                      "No number was computed by the model."),
+                             "llm": p["llm"]})
+                    outcome["trace"] = trace
                 except Exception as e:  # noqa: BLE001 - execution failure is data
                     outcome["exec_ok"] = False
                     outcome["exec_error"] = str(e)
@@ -899,10 +940,22 @@ def cases_for_split(manifest, split):
 
 
 def run_benchmark(root=ROOT, data_dir=None, split="dev", with_oracle=True,
-                  version=MANIFEST_VERSION, variant="baseline"):
+                  version=MANIFEST_VERSION, variant="baseline",
+                  llm_transport=None, llm_api_key=None, llm_tier="free",
+                  llm_pace_s=1.0, limit=None, offset=0):
     """Run the frozen benchmark for one split. Returns the full report dict.
     variant selects a slice-3 planner variant (see docs/ablations.md);
-    default "baseline" is the current planner exactly as-is."""
+    default "baseline" is the current planner exactly as-is.
+    variant="llm" (chunk B, slice 1) plans through the LLM planner
+    instead: llm_transport / llm_api_key / llm_tier are threaded to
+    plan_with_llm (None = the adapter default: urllib transport,
+    GEMINI_API_KEY from the environment, free tier). llm_pace_s sleeps
+    that long between LLM calls, so a free-tier run paces itself.
+    limit/offset run only a slice of the ordered case list (singles in
+    file order, then conversations) — the free tier's daily request cap
+    makes a full 162-case run a multi-day job, so partial runs are a
+    first-class, labeled outcome: the report records limit, offset,
+    and partial=true. Partial runs are never compared as if complete."""
     data_dir = Path(data_dir or (Path(root) / "data/phase1"))
     manifest = load_manifest(root, version=version)
     singles, convs, oracle_by_id = load_cases(root, version=version)
@@ -924,23 +977,45 @@ def run_benchmark(root=ROOT, data_dir=None, split="dev", with_oracle=True,
     for cid, entry in oracle_by_id.items():
         if entry.get("structural"):
             structural[cid] = entry["structural"]
+    llm_kwargs = {"transport": llm_transport, "api_key": llm_api_key,
+                  "tier": llm_tier}
+    ordered = [c for c in singles if c["id"] in wanted] + \
+              [c for c in convs if c["id"] in wanted]
+    if offset or limit is not None:
+        ordered = ordered[offset:(offset + limit) if limit is not None else None]
+    ordered_ids = {c["id"] for c in ordered}
     results = []
     con = open_connection(data_dir)
+    ran = 0
     try:
         for case in singles:
-            if case["id"] in wanted:
+            if case["id"] in wanted and case["id"] in ordered_ids:
+                if variant == "llm" and ran > 0 and llm_pace_s:
+                    time.sleep(llm_pace_s)
                 results.append(_run_single(case, con, data_dir,
-                                           structural.get(case["id"]), variant))
+                                           structural.get(case["id"]), variant,
+                                           llm_kwargs if variant == "llm" else None))
+                ran += 1
     finally:
         con.close()
     for conv in convs:
-        if conv["id"] in wanted:
+        if conv["id"] in wanted and conv["id"] in ordered_ids:
             results.append(score_conversation(conv, data_dir,
-                                              structural.get(conv["id"]), variant))
+                                              structural.get(conv["id"]), variant,
+                                              llm_kwargs if variant == "llm" else None,
+                                              llm_pace_s))
     report = {"benchmark": manifest["benchmark"], "version": manifest["version"],
               "variant": variant,
               "split": split, "data": manifest["data"],
               "oracle": oracle_results,
               "results": results,
               "summary": _summarize(results)}
+    if variant == "llm":
+        # Pacing record: a reader must be able to tell a partial or
+        # paced run from a complete one without re-running it.
+        report["llm"] = {"tier": llm_tier, "pace_s": llm_pace_s,
+                         "limit": limit, "offset": offset,
+                         "partial": bool(limit is not None or offset),
+                         "cases_run": len(results),
+                         "cases_in_split": len(wanted)}
     return report

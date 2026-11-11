@@ -52,6 +52,26 @@ from .weather import compute_weather
 
 APPS = ["instagram", "whatsapp", "facebook"]
 
+
+def _plan_with_variant(question, variant, context=None, llm_transport=None,
+                       llm_api_key=None, llm_tier="free"):
+    """One dispatch point for every plan() call inside a ChatSession.
+
+    variant "llm" (chunk B, slice 1) routes the question to the LLM
+    planner, which chooses the analysis and executes it through the
+    same deterministic build_sql/guard path; every other variant goes
+    to the deterministic plan() unchanged. The turn routing itself
+    stays deterministic — the LLM only replaces the metric choice
+    inside a turn that has already been entered.
+    """
+    if variant == "llm":
+        from .llm_planner import plan_with_llm
+        return plan_with_llm(question, context=context,
+                             transport=llm_transport, api_key=llm_api_key,
+                             tier=llm_tier)
+    from .planner import plan
+    return plan(question, variant=variant)
+
 TOPIC_LABELS = {
     "creators": "Creators — supply, orphan rate, concentration",
     "retention": "Retention — D7 and growth",
@@ -238,9 +258,17 @@ def _find_repo_root(data_dir):
 class ChatSession:
     """One multi-turn conversation. Create one per UI session id."""
 
-    def __init__(self, data_dir, variant="baseline"):
+    def __init__(self, data_dir, variant="baseline", llm_transport=None,
+                 llm_api_key=None, llm_tier="free"):
         self.data_dir = Path(data_dir)
         self.variant = variant
+        # Chunk B, slice 1: the LLM variant's transport / key / tier,
+        # threaded to _plan(). None means the adapter default (urllib
+        # transport, GEMINI_API_KEY from the environment, free tier).
+        self.llm_transport = llm_transport
+        self.llm_api_key = llm_api_key
+        self.llm_tier = llm_tier
+        self.last_llm = None
         self.repo_root = _find_repo_root(data_dir)
         # Flow questions come from chat/questions.json when it exists
         # (the Questions editor writes it); otherwise the hardcoded
@@ -283,6 +311,22 @@ class ChatSession:
         # here and honestly get no single-SQL panel, rather than an
         # invented one.
         self.last_working = None
+
+    def _plan(self, question):
+        """Plan one question through the session's variant, with the
+        session's context (app, stage, sticky MAU context, series
+        window) for the LLM variant. Records the plan's llm fields on
+        self.last_llm so _reply can attach them to the working payload
+        for the trace; deterministic variants set nothing here."""
+        context = {"app": self.app, "stage": self.stage,
+                   "mau_context": self.mau_context,
+                   "series_window": self.series_window}
+        p = _plan_with_variant(question, self.variant, context=context,
+                               llm_transport=self.llm_transport,
+                               llm_api_key=self.llm_api_key,
+                               llm_tier=self.llm_tier)
+        self.last_llm = p.get("llm")
+        return p
 
     # -- DuckDB helpers (same tables as weather.py, read-only views) ----
     def _connect(self):
@@ -447,7 +491,7 @@ class ChatSession:
         sources -> filters -> aggregation -> output, with no joins
         or grouping stages invented for a query that has none.
         """
-        from .planner import metric_definition, plan, run_plan
+        from .planner import metric_definition, run_plan
         self.app = app
         self.stage = "mau"
         self.topic = None
@@ -456,7 +500,7 @@ class ChatSession:
         # resolving to this app and period until a weather or
         # daily-series turn clears it.
         self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
-        p = plan(f"MAU for {app}", variant=self.variant)
+        p = self._plan(f"MAU for {app}")
         if p["type"] != "query" or not p.get("sql"):
             return self._clarify("I could not build the MAU query for "
                                  f"{app}. Try \"What's the MAU for Instagram?\"")
@@ -505,12 +549,12 @@ class ChatSession:
         this cut and a "what about X?" follow-up still swaps the MAU
         app.
         """
-        from .planner import metric_definition, plan, run_plan
+        from .planner import metric_definition, run_plan
         self.app = app
         self.stage = "mau"
         self.topic = None
         self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
-        p = plan(f"MAU for {app} by country", variant=self.variant)
+        p = self._plan(f"MAU for {app} by country")
         if p["type"] != "query" or not p.get("sql"):
             return self._clarify("I could not build the MAU-by-country query for "
                                  f"{app}. Try \"What's the MAU for Instagram by country?\"")
@@ -571,12 +615,12 @@ class ChatSession:
         sqlviz rules -- never a guessed diagram). The payload's pct
         is a percent (14.85), matching the SQL's share_pct column.
         """
-        from .planner import metric_definition, plan, run_plan
+        from .planner import metric_definition, run_plan
         self.app = app
         self.stage = "mau"
         self.topic = None
         self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
-        p = plan(f"creator share of MAU for {app}", variant=self.variant)
+        p = self._plan(f"creator share of MAU for {app}")
         if p["type"] != "query" or p.get("metric") != "creator_share" or not p.get("sql"):
             return self._clarify("I could not build the creator-share query for "
                                  f"{app}. Try \"What is the % of creators of MAU in {app}?\"")
@@ -641,12 +685,12 @@ class ChatSession:
         diagram is honestly unavailable (WITH/CTE shape, per the
         sqlviz rules -- never a guessed diagram).
         """
-        from .planner import metric_definition, plan, run_plan
+        from .planner import metric_definition, run_plan
         self.app = app
         self.stage = "mau"
         self.topic = None
         self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
-        p = plan(f"MAU and creators for {app} by country", variant=self.variant)
+        p = self._plan(f"MAU and creators for {app} by country")
         if p["type"] != "query" or p.get("metric") != "mau_creators_by_country" or not p.get("sql"):
             return self._clarify("I could not build the MAU-and-creators-by-country query for "
                                  f"{app}. Try \"What are the monthly active users and creators "
@@ -722,7 +766,7 @@ class ChatSession:
         (creators, messaging) has no daily series in the planner and
         clarifies instead of inventing one.
         """
-        from .planner import metric_definition, plan, run_plan
+        from .planner import metric_definition, run_plan
         self.app = app
         self.stage = "daily_series"
         self.topic = None
@@ -737,7 +781,7 @@ class ChatSession:
             # the all-apps series while the reply claims one app. The
             # window and any other slot still come from the question.
             q = f"{q} for {app}"
-        p = plan(q, variant=self.variant)
+        p = self._plan(q)
         if (p["type"] != "query" or p.get("metric") != "dau_mean_daily"
                 or p.get("grain") != "user x day" or not p.get("sql")
                 or p.get("filters", {}).get("app") != app):
@@ -1486,6 +1530,12 @@ class ChatSession:
         out.update(extra)
         if getattr(self, "last_working", None):
             working = dict(self.last_working)
+            # Chunk B, slice 1: the LLM routing receipt for this turn's
+            # plan, when the session runs the llm variant. Deterministic
+            # turns set nothing here. Cleared with the working payload.
+            if getattr(self, "last_llm", None):
+                working["llm"] = self.last_llm
+                self.last_llm = None
             # Attach the visualization for this single executed SQL:
             # chart + table from its result rows, diagram from its
             # text. Turns with no single SQL set nothing here, so

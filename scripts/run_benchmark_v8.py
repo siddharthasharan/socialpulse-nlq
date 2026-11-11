@@ -27,6 +27,7 @@ success AND the oracle agrees on every case.
 """
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -75,22 +76,94 @@ def _print_summary(report):
             print(f"  WARN {r['id']} [{r['family']}] metric={r.get('metric')}")
 
 
+def _print_llm_accounting(report):
+    """LLM-variant accounting from the traces: how many cases the model
+    actually ran vs fell back, real tokens, paid-rate cost vs billed
+    cost, and latency. A run with fallbacks is labeled as such — it is
+    not a pure LLM comparison."""
+    llm_fields = []
+    for r in report["results"]:
+        if r.get("llm"):
+            llm_fields.append(r["llm"])
+        for t in r.get("turns") or []:
+            if t.get("llm"):
+                llm_fields.append(t["llm"])
+    ran = [f for f in llm_fields if not f.get("fallback") and not f.get("not_consulted")]
+    fell_back = [f for f in llm_fields if f.get("fallback")]
+    not_consulted = [f for f in llm_fields if f.get("not_consulted")]
+    prompt_tokens = sum(f.get("prompt_tokens") or 0 for f in ran)
+    completion_tokens = sum(f.get("completion_tokens") or 0 for f in ran)
+    paid_rate = sum(f.get("cost_usd_paid_rate") or 0.0 for f in ran)
+    billed = sum(f.get("billed_usd") or 0.0 for f in ran)
+    latencies = sorted(f.get("latency_ms") for f in ran if f.get("latency_ms") is not None)
+    tier = (report.get("llm") or {}).get("tier", "free")
+    print("\nLLM accounting (tier: "
+          f"{tier}; paid-rate cost is at $0.75 input / $3.75 output per 1M; "
+          f"billed is $0 on the free tier):")
+    print(f"  model calls made: {len(ran)}; fallbacks: {len(fell_back)}; "
+          f"pre-checks (model not consulted): {len(not_consulted)}")
+    for f in fell_back:
+        print(f"  FALLBACK {f.get('fallback')}: {f.get('fallback_reason')}")
+    print(f"  real tokens: {prompt_tokens} prompt + {completion_tokens} completion")
+    print(f"  cost at paid rates: ${paid_rate:.4f}; billed: ${billed:.4f}")
+    if latencies:
+        p50 = latencies[len(latencies) // 2]
+        p95 = latencies[min(len(latencies) - 1, int(len(latencies) * 0.95))]
+        print(f"  model-call latency ms: P50 {p50}, P95 {p95} "
+              f"(n={len(latencies)}; SQL execution time is separate, in runtime_ms)")
+    if fell_back:
+        print("  WARNING: this run contains fallbacks — it is NOT a pure "
+              "LLM comparison. See scripts/compare_llm.py, which refuses "
+              "to compare a fallback run as if the model ran it.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, default=ROOT / "data/phase1")
     ap.add_argument("--split", choices=["dev", "heldout", "all"], default="dev")
-    ap.add_argument("--variant", choices=["baseline", "catalog-assisted", "validated"],
+    ap.add_argument("--variant", choices=["baseline", "catalog-assisted", "validated", "llm"],
                     default="baseline",
                     help="slice-3 planner variant (see docs/ablations.md); "
-                         "default baseline is the current planner exactly as-is")
+                         "default baseline is the current planner exactly as-is; "
+                         "'llm' plans through the Gemini LLM planner "
+                         "(see docs/llm-planner.md)")
+    ap.add_argument("--limit", type=int, default=None,
+                    help="LLM variant only: run only the first N cases of the "
+                         "ordered split (singles in file order, then "
+                         "conversations). The free tier's daily request cap "
+                         "makes a full 162-case run a multi-day job; partial "
+                         "runs are labeled as such in the trace.")
+    ap.add_argument("--offset", type=int, default=0,
+                    help="LLM variant only: skip the first N cases of the "
+                         "ordered split (resume a paced run the next day).")
+    ap.add_argument("--tier", choices=["free", "paid"], default="free",
+                    help="LLM variant only: the AI Studio project's tier. "
+                         "Free bills $0; paid bills the paid-rate cost. "
+                         "The code cannot detect this — declare it honestly.")
+    ap.add_argument("--pace", type=float, default=1.0,
+                    help="LLM variant only: seconds to sleep between LLM "
+                         "calls (default 1.0). The free tier is rate-limited "
+                         "per minute as well as per day.")
     ap.add_argument("--skip-oracle", action="store_true")
     ap.add_argument("--trace-out", type=Path, default=None)
     ap.add_argument("--no-trace", action="store_true")
     args = ap.parse_args()
+    if args.variant == "llm" and not os.environ.get("GEMINI_API_KEY"):
+        print("WARNING: variant=llm with no GEMINI_API_KEY set. Every case "
+              "will fall back to the deterministic baseline plan, labeled "
+              "fallback=no_key in the trace. Those numbers are baseline "
+              "numbers, NOT LLM numbers — do not compare them as if the "
+              "model ran.")
+    if args.variant == "llm" and (args.limit is not None or args.offset):
+        print(f"NOTE: partial LLM run — limit={args.limit} offset={args.offset}. "
+              "The trace records this; a partial run is never a complete "
+              "comparison.")
     try:
         report = run_benchmark(root=ROOT, data_dir=args.data, split=args.split,
                                with_oracle=not args.skip_oracle, version=VERSION,
-                               variant=args.variant)
+                               variant=args.variant, llm_tier=args.tier,
+                               llm_pace_s=args.pace, limit=args.limit,
+                               offset=args.offset)
     except ManifestError as e:
         print(f"REFUSED TO RUN: {e}")
         return 2
@@ -106,6 +179,8 @@ def main():
         marks = " ".join(f"{n}={_item_str(r['items'][n])}" for n in RUBRIC)
         print(f"{'PASS' if r['task_success'] else 'FAIL'} {r['id']} [{r['family']}] {marks}")
     _print_summary(report)
+    if report.get("variant") == "llm":
+        _print_llm_accounting(report)
     if not args.no_trace:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
         out = args.trace_out or (ROOT / "evals/runs" /
