@@ -109,6 +109,16 @@ VERSIONS = {
            "singles": "benchmark_v6.json",
            "convs": "conversation_v6.json",
            "oracle": "oracle_v6.json"},
+    # v7 (creator-share-of-MAU turn, 2026-11-10): v6's 157 cases
+    # plus the user probes p08 ("% of creators of MAU in Instagram",
+    # single), p09 ("number of creators and all users in Instagram
+    # for March 2026", single) and p10 (the bare "% of creators of
+    # MAU" follow-up after a MAU turn, conversation). All in dev;
+    # held-out stays 30.
+    "v7": {"manifest": "benchmark_v7_manifest.json",
+           "singles": "benchmark_v7.json",
+           "convs": "conversation_v7.json",
+           "oracle": "oracle_v7.json"},
 }
 
 
@@ -303,6 +313,24 @@ def _result_equiv_single(case, rows, cols):
                 if k not in got or not close(got[k], v):
                     return False, f"{k}: {got.get(k)} != {v}"
         return True, ""
+    if etype == "creator_share":
+        # 2026-11-10 (p08/p09): one row, three columns -- creators,
+        # mau, share_pct -- from the combined CTE query. Counts are
+        # exact (they are counts, not rates); the ratio uses the
+        # harness 2% tolerance. The expected_type pins the turn: a
+        # plain MAU scalar (1 row x 1 col) or a creators breakdown
+        # (7 rows) fails the shape check before any value is read, so
+        # neither can be silently substituted for the share.
+        if len(rows) != 1 or len(cols) != 3:
+            return False, f"expected 1 row x 3 cols, got {len(rows)} rows x {len(cols)} cols"
+        creators, mau, pct = float(rows[0][0]), float(rows[0][1]), float(rows[0][2])
+        if "expected_creators" in case and creators != case["expected_creators"]:
+            return False, f"creators {creators} != {case['expected_creators']}"
+        if "expected_mau" in case and mau != case["expected_mau"]:
+            return False, f"mau {mau} != {case['expected_mau']}"
+        if "expected_pct" in case and not close(pct, case["expected_pct"]):
+            return False, f"share_pct {pct} != {case['expected_pct']}"
+        return True, ""
     return False, f"no result comparison defined for type {etype!r}"
 
 
@@ -342,7 +370,8 @@ def score_single(case, outcome, structural_specs=None):
         catalog = {"metric": p["metric"], "definition": definition, "grain": grain}
 
     items = {}
-    if etype in ("scalar", "series", "series_by_dim", "breakdown", "mau_by_country"):
+    if etype in ("scalar", "series", "series_by_dim", "breakdown", "mau_by_country",
+                 "creator_share"):
         items["sql_syntax"] = (_item(True, "") if outcome["syntax_ok"]
                                else _item(False, outcome.get("syntax_error", "")))
         items["sql_safety"] = (_item(True, outcome["guard"][1]) if outcome["guard"][0]
@@ -768,7 +797,7 @@ def _run_single(case, con, data_dir, structural_specs, variant="baseline"):
                "columns": [], "rows": [], "runtime_ms": 0, "weather": None,
                "trace": None}
     if case["expected_type"] in ("scalar", "series", "series_by_dim", "breakdown",
-                                "mau_by_country"):
+                                "mau_by_country", "creator_share"):
         if p.get("sql"):
             try:
                 con.execute("EXPLAIN " + p["sql"])

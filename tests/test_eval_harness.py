@@ -447,3 +447,51 @@ def test_rubric_mau_by_country_type():
     assert r2["items"]["result_equiv"]["pass"] is False
     assert r2["items"]["final_answer"]["pass"] is False
     assert r2["task_success"] is False
+
+
+def test_rubric_creator_share_type():
+    # 2026-11-10 (p08/p09): the creator_share expected_type scores
+    # a one-row, three-column result (creators, mau, share_pct).
+    # Counts are exact; the ratio uses the harness tolerance. A
+    # fabricated passing outcome: all five rubric items pass and
+    # task succeeds.
+    case = {"id": "p08", "expected_type": "creator_share",
+            "expected_metric": "creator_share",
+            "expected_creators": 31297, "expected_mau": 210809,
+            "expected_pct": 14.85, "expected_rows": 1,
+            "family": "metric_scoping",
+            "question": "What is the % of creators of MAU in Instagram"}
+    plan = {"type": "query", "metric": "creator_share",
+            "sql": ("WITH creators AS (SELECT COUNT(DISTINCT f.creator_id) AS n "
+                    "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                    "WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-01' "
+                    "AND DATE '2026-03-31' AND c.app = 'instagram'), "
+                    "mau AS (SELECT COUNT(DISTINCT user_id) AS n FROM fact_sessions "
+                    "WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' "
+                    "AND DATE '2026-03-31' AND app = 'instagram') "
+                    "SELECT creators.n AS creators, mau.n AS mau, "
+                    "creators.n * 100.0 / NULLIF(mau.n, 0) AS share_pct FROM creators, mau"),
+            "tables": ["fact_content_creation", "dim_content", "fact_sessions"],
+            "grain": "creators / MAU, March 2026"}
+    rows = [[31297.0, 210809.0, 14.846153846153847]]
+    r = score_single(case, _outcome(plan=plan, rows=rows,
+                                    columns=["creators", "mau", "share_pct"]))
+    assert all(v["pass"] is True for v in r["items"].values()), r["items"]
+    assert r["sql_semantic"] is True and r["task_success"] is True
+    # The silent-substitution guards: the plain MAU scalar (1 row x
+    # 1 col) and the creators-by-country breakdown (7 rows) both
+    # fail the shape check before any value is read, so neither can
+    # stand in for the share.
+    scalar_plan = dict(plan, metric="mau_march")
+    r2 = score_single(case, _outcome(plan=scalar_plan, rows=[[210809.0]],
+                                     columns=["value"]))
+    assert r2["items"]["result_equiv"]["pass"] is False
+    assert r2["items"]["final_answer"]["pass"] is False
+    assert r2["task_success"] is False
+    breakdown_plan = dict(plan, metric="creators_by_country")
+    breakdown_rows = [["US", 9286.0], ["IN", 7843.0], ["BR", 4785.0], ["ID", 3149.0],
+                      ["MX", 2488.0], ["GB", 1897.0], ["DE", 1849.0]]
+    r3 = score_single(case, _outcome(plan=breakdown_plan, rows=breakdown_rows,
+                                     columns=["country", "creators"]))
+    assert r3["items"]["result_equiv"]["pass"] is False
+    assert r3["task_success"] is False

@@ -362,3 +362,65 @@ def test_mau_by_surface_clarifies_in_planner():
     p = plan("MAU by surface for Instagram")
     assert p["type"] == "clarification" and p["metric"] == "mau_march"
     assert "surface" in p["clarification"] and "country" in p["clarification"]
+
+
+def test_creator_share_sql():
+    # 2026-11-10 (p08/p09): "% of creators of MAU" and "number of
+    # creators and all users" are one question -- the monthly creator
+    # share, not the MAU scalar. One combined CTE query: monthly
+    # distinct creators (fact_content_creation joined to dim_content
+    # for the app) over monthly distinct users (fact_sessions, the
+    # same session-app definition as mau_march). 500K seed-42 golds,
+    # verified three ways in the oracle: creators 31,297, MAU
+    # 210,809, share 14.85%.
+    p = plan("What is the % of creators of MAU in Instagram")
+    assert p["type"] == "query" and p["metric"] == "creator_share"
+    assert p["sql"].startswith("WITH creators AS (")
+    assert "COUNT(DISTINCT f.creator_id)" in p["sql"]
+    assert "COUNT(DISTINCT user_id)" in p["sql"]
+    assert "c.app = 'instagram'" in p["sql"] and "app = 'instagram'" in p["sql"]
+    assert "2026-03-01" in p["sql"] and "2026-03-31" in p["sql"]
+    assert "share_pct" in p["sql"] and "country = '" not in p["sql"]
+    assert p["tables"] == ["fact_content_creation", "dim_content", "fact_sessions"]
+    # The rephrased probe maps the same way, and so does the
+    # bare "what share of users are creators" form.
+    assert plan("what is the number of creators and all users in Instagram for March 2026")["metric"] == "creator_share"
+    assert plan("what share of users are creators in Instagram")["metric"] == "creator_share"
+    # The other apps scope the same way.
+    p_wa = plan("What is the % of creators of MAU in WhatsApp")
+    assert p_wa["metric"] == "creator_share" and "c.app = 'whatsapp'" in p_wa["sql"]
+    # No app: the all-apps share, the same no-app convention as mau_march.
+    p_all = plan("What is the % of creators of MAU")
+    assert p_all["metric"] == "creator_share" and "app = '" not in p_all["sql"]
+
+
+def test_creator_share_does_not_hijack():
+    # The creator_share branch must not swallow the neighbours: the
+    # plain MAU question stays the scalar, MAU by country stays the
+    # grouped query, "creators by country" is a breakdown question
+    # (no share asked for), and the weather's daily penetration is a
+    # different metric entirely.
+    assert plan("What's the MAU for Instagram?")["metric"] == "mau_march"
+    assert plan("What is the MAU for Instagram by country?")["metric"] == "mau_by_country"
+    assert plan("creators by country for Instagram")["metric"] != "creator_share"
+    assert plan("what's driving the creator drop for Instagram")["metric"] != "creator_share"
+    assert plan("What is the creator penetration for Instagram?")["metric"] == "creator_penetration"
+    assert plan("how many creators are there per day on Instagram")["metric"] == "daily_creators_mean"
+    # A breakdown of the share itself is refused, not silently
+    # answered as the plain share.
+    p = plan("What is the % of creators of MAU in Instagram by country?")
+    assert p["type"] == "clarification" and p["metric"] == "creator_share"
+
+
+def test_creator_share_variants_abstain():
+    # Variant boundary (same as mau_by_country): creator_share is
+    # not in the 20-metric catalog, so catalog-assisted and
+    # validated abstain on it; only the baseline answers it. The
+    # benchmark runs the baseline; if the metric is ever added to
+    # the catalog, this test is the one that has to change.
+    q = "What is the % of creators of MAU in Instagram"
+    assert plan(q, variant="baseline")["metric"] == "creator_share"
+    for variant in ("catalog-assisted", "validated"):
+        p = plan(q, variant=variant)
+        assert p["type"] == "clarification" and p["sql"] is None, variant
+        assert "no catalog definition" in p["clarification"], variant

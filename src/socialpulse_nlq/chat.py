@@ -548,6 +548,72 @@ class ChatSession:
         return self._reply("mau_by_country", text,
                            mau_by_country={"app": app, "rows": share_rows, "total": total})
 
+    def _creator_share_turn(self, app):
+        """Creator share of MAU (2026-11-10): distinct creators with
+        >=1 content item published in March 2026 for the app, over
+        distinct users with >=1 session in March 2026 for the app
+        (the MAU). The Nov 10 live failure: "% of creators of MAU"
+        answered the MAU scalar (210,809) -- the question names two
+        populations and the turn must answer both numbers plus the
+        ratio, never the scalar alone. The creators definition is the
+        same one the creators-by-country breakdown uses (p05 sums to
+        the same 31,297 for Instagram), so the share is a monthly
+        share -- NOT the weather report's daily creator penetration
+        (daily creators / DAU, ~10.4% for Instagram); the reply says
+        which one it is. Like the MAU turn it needs no weather report
+        first, and it re-sets the sticky MAU context (same app, March
+        2026) and keeps stage "mau", so a later "by country" still
+        gives MAU by country and "creators by country" still gives
+        the breakdown. The working panel shows the exact CTE query
+        that ran plus a two-row table (creators vs all users, with
+        the share); the chart is a bar of the two counts, and the SQL
+        diagram is honestly unavailable (WITH/CTE shape, per the
+        sqlviz rules -- never a guessed diagram). The payload's pct
+        is a percent (14.85), matching the SQL's share_pct column.
+        """
+        from .planner import metric_definition, plan, run_plan
+        self.app = app
+        self.stage = "mau"
+        self.topic = None
+        self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
+        p = plan(f"creator share of MAU for {app}", variant=self.variant)
+        if p["type"] != "query" or p.get("metric") != "creator_share" or not p.get("sql"):
+            return self._clarify("I could not build the creator-share query for "
+                                 f"{app}. Try \"What is the % of creators of MAU in {app}?\"")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        if not rows:
+            return self._clarify(f"No creator-share result came back for {app}.")
+        creators, mau, share_pct = rows[0]
+        pct = float(share_pct)
+        definition = metric_definition("creator_share")
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": ["population", "count", "share_of_mau"],
+            "result_rows": [["creators", creators, pct / 100.0],
+                            ["all users (MAU)", mau, 1.0]],
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        self._set_options([
+            {"label": f"MAU by country for {app}",
+             "send": f"What's the MAU for {app} by country?"},
+            {"label": f"MAU for {others[0]}",
+             "send": f"What's the MAU for {others[0]}?"},
+            {"label": f"Creator share for {others[0]}",
+             "send": f"What is the % of creators of MAU in {others[0]}?"},
+        ])
+        text = (f"Creators are {pct:.2f}% of MAU for {app} in March 2026: "
+                f"{creators:,} creators out of {mau:,} monthly active users.\n\n"
+                "That is distinct creators with at least one content item published on "
+                f"{app} in March 2026, over distinct users with at least one session on "
+                f"{app} in March 2026. This is a monthly share -- not the daily creator "
+                "penetration on the weather report (daily creators divided by DAU). "
+                "The exact SQL is in the working panel.")
+        return self._reply("creator_share", text,
+                           creator_share={"app": app, "creators": creators,
+                                          "mau": mau, "pct": pct})
+
     def _series_question(self, app):
         """Question that re-asks the stored daily series for an app.
 
@@ -1413,6 +1479,35 @@ class ChatSession:
                 return self._drilldown_turn(stripped_clean)
             return self._clarify("Ask for a weather report first — for example, "
                                  "\"What's happening with Instagram?\" — then pick a topic.")
+        # Creator share of MAU (2026-11-10): "% of creators of MAU"
+        # and "number of creators and all users" are one question --
+        # the monthly creator share -- not the MAU scalar and not a
+        # breakdown. Placed before the MAU block so a question naming
+        # creators + MAU/users never falls through to the MAU scalar
+        # (the Nov 10 live failure: "% of creators of MAU" answered
+        # 210,809). Must not hijack: "creators by country/surface"
+        # (breakdown), "what's driving the creator drop" (diagnosis),
+        # plain MAU, "MAU by country". The bare follow-up form after
+        # a MAU turn ("what is the % of creators of MAU", no app
+        # named) inherits the app from the sticky MAU context or the
+        # session app.
+        if "creator" in q and (
+                (("mau" in q or "monthly active" in q or "all users" in q)
+                 and ("share" in q or "%" in q or "percent" in q or "of mau" in q
+                      or "and all users" in q or "creators of" in q))
+                or ("share" in q and "users" in q)) \
+                and " by country" not in q and " by surface" not in q \
+                and "drop" not in q and "driving" not in q:
+            app = (app_found or (self.mau_context["app"] if self.mau_context else None)
+                   or self.app)
+            if app:
+                return self._creator_share_turn(app)
+            self._set_options([
+                {"label": a, "send": f"What is the % of creators of MAU in {a}?", "topic": None} for a in APPS
+            ])
+            return self._reply("clarification",
+                               "Which app's creator share of MAU? Reply instagram, whatsapp, or "
+                               "facebook — for example, \"What is the % of creators of MAU in Instagram?\"")
         # MAU intent (2026-11-04): a standalone metric turn. The
         # keyword is "mau", so the probe's typo ("teh") does not
         # matter, and no weather report is required first. Placed

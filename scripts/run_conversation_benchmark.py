@@ -130,6 +130,28 @@ def check_values(conv, replies, failures):
                     if got[label] != val:
                         failures.append(f"mau by country {label}: expected {val}, "
                                         f"got {got[label]}")
+    # Creator share of MAU (2026-11-10, p10): the "% of creators of
+    # MAU" follow-up after a MAU turn answers the ratio plus both
+    # numbers, not the MAU scalar. The reply carries a creator_share
+    # payload (app, creators, mau, pct as a percent). Counts exact;
+    # the percent within 0.01 of the stored value. A missing
+    # creator_share reply is itself a failure: without it the values
+    # check would silently pass on nothing.
+    if "creator_share_values" in checks:
+        cs = next((r.get("creator_share") for r in replies if r.get("creator_share")), None)
+        if cs is None:
+            failures.append("creator share: no creator_share reply")
+        else:
+            want = checks["creator_share_values"]
+            if cs.get("creators") != want["creators"]:
+                failures.append(f"creator share creators: expected {want['creators']}, "
+                                f"got {cs.get('creators')}")
+            if cs.get("mau") != want["mau"]:
+                failures.append(f"creator share mau: expected {want['mau']}, "
+                                f"got {cs.get('mau')}")
+            if abs(float(cs.get("pct", 0)) - want["pct"]) > 0.01:
+                failures.append(f"creator share pct: expected {want['pct']}, "
+                                f"got {cs.get('pct')}")
     # Chained breakdown (2026-11-09, p05): the second breakdown in
     # the same session (creators by country after creators by
     # surface, both off the sticky MAU context) is checked against

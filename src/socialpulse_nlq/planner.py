@@ -248,6 +248,13 @@ METRIC_DEFINITIONS = {
     # and trace can display it, the same way the SQL templates mirror
     # the YAML without the YAML being read at runtime.
     "mau_by_country": ("Distinct users with at least one session in March 2026, split by the user's country. Each user has exactly one country, so the rows add up to the MAU total.", "user x month, grouped by country", "distinct users"),
+    # creator_share (2026-11-10) is a template-only metric, like
+    # mau_by_country: it is NOT in catalog/measures.yaml, which stays
+    # at 20 metrics. A monthly share -- distinct creators with >=1
+    # content item published in March 2026 over distinct users with
+    # >=1 session in March 2026 (the MAU) -- not the weather report's
+    # daily creator penetration (daily creators / DAU).
+    "creator_share": ("Distinct creators with at least one content item published in March 2026, divided by distinct users with at least one session in March 2026 (the MAU), for one app. A monthly share, not the weather report's daily creator penetration (daily creators / DAU).", "creators / MAU, March 2026", "MAU"),
     "dau_mau_stickiness": ("Mean March DAU divided by March MAU.", "month", "MAU"),
     "new_users_in_window": ("Users whose signup_date falls in 2026-01-01 to 2026-03-31.", "user", "registered users"),
     "d7_exact_retention": ("For cohorts signing up 2026-01-01 to 2026-02-21, share active on exactly signup_date + 7 days.", "cohort user", "eligible cohort users"),
@@ -671,6 +678,40 @@ def build_sql(metric: str, f: dict, breakdown, q: str):
                 "WHERE CAST(s.start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
                 f"{app_where} GROUP BY u.country ORDER BY n DESC"), tables, grain
 
+    if metric == "creator_share":
+        # Creator share of MAU (2026-11-10): one combined query, two
+        # CTEs -- monthly distinct creators (fact_content_creation
+        # joined to dim_content for the app, published March 2026)
+        # over monthly distinct users (fact_sessions, the same
+        # session-app definition as mau_march). The creators
+        # definition is the same one the creators-by-country
+        # breakdown uses (p05 sums to the same 31,297 for Instagram),
+        # so the share is the monthly creators over the monthly MAU
+        # -- not the weather report's daily penetration (daily
+        # creators / DAU, ~10.4% for Instagram). Without an app the
+        # query is the all-apps share, the same no-app convention as
+        # the mau_march scalar. Any breakdown is refused: the share
+        # is not defined per country/surface, and answering the plain
+        # share for a breakdown question would be a wrong-scope
+        # answer wearing the right label.
+        if breakdown:
+            raise ValueError(f"Creator share of MAU is not defined per {breakdown}: "
+                             "ask for the share for one app, or for MAU / creators by "
+                             f"{breakdown} instead.")
+        tables = ["fact_content_creation", "dim_content", "fact_sessions"]
+        grain = "creators / MAU, March 2026"
+        app_where_c = f" AND c.app = '{f['app']}'" if "app" in f else ""
+        app_where_s = f" AND app = '{f['app']}'" if "app" in f else ""
+        return ("WITH creators AS (SELECT COUNT(DISTINCT f.creator_id) AS n "
+                "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+                "WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+                f"{app_where_c}), "
+                "mau AS (SELECT COUNT(DISTINCT user_id) AS n FROM fact_sessions "
+                "WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-03-01' AND DATE '2026-03-31'"
+                f"{app_where_s}) "
+                "SELECT creators.n AS creators, mau.n AS mau, "
+                "creators.n * 100.0 / NULLIF(mau.n, 0) AS share_pct FROM creators, mau"), tables, grain
+
     if metric == "dau_mau_stickiness":
         tables = ["fact_sessions"]
         grain = "month"
@@ -1005,6 +1046,25 @@ def plan(question: str, variant: str = "baseline"):
         metric = "dau_mau_stickiness"
     elif "wau" in q or "weekly active" in q:
         metric = "wau_mean_weekly"
+    elif "creator" in q and (
+            (("mau" in q or "monthly active" in q or "all users" in q)
+             and ("share" in q or "%" in q or "percent" in q or "of mau" in q
+                  or "and all users" in q or "creators of" in q))
+            or ("share" in q and "users" in q)):
+        # Creator share of MAU (2026-11-10): "% of creators of MAU"
+        # and "number of creators and all users" are one question --
+        # the monthly creator share, not the MAU scalar. Placed
+        # before the "mau" branch so a question naming creators +
+        # MAU/users never falls through to mau_march (the Nov 10
+        # live failure: "% of creators of MAU" answered 210,809).
+        # Does not hijack: "creators by country/surface" names no
+        # MAU/users/share, "what's driving the creator drop" names
+        # none either, and "daily creators"/"how many creators" are
+        # caught by their earlier, more specific branch. Variant
+        # boundary (same as mau_by_country): creator_share is not
+        # in the 20-metric catalog, so catalog-assisted and validated
+        # abstain on it; only the baseline answers it.
+        metric = "creator_share"
     elif "mau" in q or "monthly active" in q:
         metric = "mau_march"
     elif "new users" in q:

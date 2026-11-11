@@ -645,6 +645,131 @@ def test_mau_by_surface_still_clarifies():
     assert r["type"] == "clarification"
 
 
+def test_creator_share_single_shot_both_phrasings():
+    # 2026-11-10 (p08/p09): the Nov 10 live failure -- "% of creators
+    # of MAU" answered the MAU scalar (210,809), and the rephrased
+    # "number of creators and all users" got "could not map". Both
+    # phrasings now answer the share: creators 31,297, MAU 210,809,
+    # 14.85%. 500K seed-42 golds, verified three ways in the oracle
+    # (CTE form == DISTINCT-pairs CTE == scalar subqueries on the
+    # counts; p05 creators by country sums to the same 31,297).
+    # The reply names the monthly definition and says it is not the
+    # weather report's daily penetration (~10.4% for Instagram).
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What is the % of creators of MAU in Instagram")
+    assert r["type"] == "creator_share" and r["app"] == "instagram"
+    assert "14.85%" in r["text"] and "31,297" in r["text"] and "210,809" in r["text"]
+    assert "monthly share" in r["text"] and "daily creator penetration" in r["text"]
+    cs = r["creator_share"]
+    assert cs["creators"] == 31297 and cs["mau"] == 210809
+    assert abs(cs["pct"] - 14.85) < 0.01
+    w = r["working"]
+    assert w["sql"].startswith("WITH creators AS (") and "share_pct" in w["sql"]
+    assert "c.app = 'instagram'" in w["sql"] and "app = 'instagram'" in w["sql"]
+    assert "2026-03-01" in w["sql"] and "2026-03-31" in w["sql"]
+    viz = w["visualization"]
+    assert viz["available"] is True
+    # The table is the two populations side by side; the chart is a
+    # bar of the two counts (creators vs all users).
+    assert [row[:2] for row in viz["rows"]] == [["creators", 31297],
+                                                ["all users (MAU)", 210809]]
+    assert abs(viz["rows"][0][2] - 0.1485) < 0.001
+    assert viz["rows"][1][2] == 1.0
+    assert viz["chart"] is not None and viz["chart"]["kind"] == "bar"
+    assert [pt["x"] for pt in viz["chart"]["points"]] == ["creators", "all users (MAU)"]
+    assert [pt["y"] for pt in viz["chart"]["points"]] == [31297, 210809]
+    # The diagram is honestly unavailable: the SQL is a WITH/CTE
+    # query, which the diagram does not model -- never a guessed one.
+    assert viz["diagram"] is None
+    assert "WITH/CTE" in (viz["diagram_unavailable_reason"] or "")
+    # The rephrased probe gives the same answer.
+    s2 = _real_session()
+    if s2 is None:
+        return
+    r2 = s2.respond("what is the number of creators and all users in Instagram for March 2026")
+    assert r2["type"] == "creator_share" and r2["app"] == "instagram"
+    assert r2["creator_share"] == cs
+
+
+def test_creator_share_whatsapp_and_facebook():
+    # WhatsApp (500K seed-42 golds, same three-way oracle):
+    # creators 20,718, MAU 140,378, share 14.76%. Facebook:
+    # creators 17,429, MAU 117,550, share 14.83%.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What is the % of creators of MAU in WhatsApp")
+    assert r["type"] == "creator_share" and r["app"] == "whatsapp"
+    cs = r["creator_share"]
+    assert cs["creators"] == 20718 and cs["mau"] == 140378
+    assert abs(cs["pct"] - 14.76) < 0.01
+    assert "14.76%" in r["text"]
+    r = s.respond("What is the % of creators of MAU in Facebook")
+    assert r["type"] == "creator_share" and r["app"] == "facebook"
+    cs = r["creator_share"]
+    assert cs["creators"] == 17429 and cs["mau"] == 117550
+    assert abs(cs["pct"] - 14.83) < 0.01
+    assert "14.83%" in r["text"]
+
+
+def test_creator_share_followup_after_mau():
+    # 2026-11-10 (p10): the bare "% of creators of MAU" follow-up
+    # after a MAU turn inherits the app from the sticky MAU context
+    # and answers the share -- it does not repeat the MAU scalar.
+    # The sticky context survives the turn: a later "by country"
+    # still gives MAU by country, and "creators by country" still
+    # gives the creators breakdown (US 9,286).
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What is the current MAU for Instagram?")
+    r = s.respond("what is the % of creators of MAU")
+    assert r["type"] == "creator_share" and r["app"] == "instagram"
+    assert r["creator_share"]["creators"] == 31297
+    assert r["creator_share"]["mau"] == 210809
+    assert abs(r["creator_share"]["pct"] - 14.85) < 0.01
+    r = s.respond("by country")
+    assert r["type"] == "mau_by_country" and r["app"] == "instagram"
+    assert r["mau_by_country"]["total"] == 210809
+    r = s.respond("creators by country")
+    assert r["type"] == "breakdown" and r["breakdown"]["topic"] == "creators"
+    assert {row["label"]: row["count"] for row in r["breakdown"]["rows"]}["US"] == 9286
+
+
+def test_creator_share_no_app_clarifies():
+    # No app named and no app in context: clarify which app, never
+    # silently answer one app's share.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("what is the % of creators of MAU")
+    assert r["type"] == "clarification"
+    assert "instagram" in r["text"] and "whatsapp" in r["text"]
+
+
+def test_creator_share_does_not_hijack():
+    # The neighbours keep their turns: plain MAU stays the scalar,
+    # MAU by country stays the grouped query, and a weather turn
+    # still works -- the creator_share trigger names creators +
+    # MAU/users/share, and none of these do.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What's the MAU for Instagram")
+    assert r["type"] == "mau" and r["mau"]["value"] == 210809
+    r = s.respond("What is the MAU for Instagram by country?")
+    assert r["type"] == "mau_by_country" and r["mau_by_country"]["total"] == 210809
+    r = s.respond("What's happening with Instagram?")
+    assert r["type"] == "weather" and r["app"] == "instagram"
+    # "What's driving the creator drop?" is answered as a breakdown
+    # (why-evidence: a decomposition, never a cause) -- the existing
+    # behaviour, untouched by the creator-share trigger.
+    r = s.respond("what's driving the creator drop?")
+    assert r["type"] == "breakdown" and r["breakdown"]["topic"] == "creators"
+
+
 def test_daily_series_turn_standalone_no_weather():
     # 2026-11-06 (p02): the daily-series turn answers as a later turn
     # in a chat with no weather report -- here the MAU turn first sets

@@ -1,0 +1,601 @@
+[
+ {
+  "checks": {
+   "brief_eng_points_min": 3,
+   "brief_pm_points_min": 3,
+   "drilldown_daily_creators": 4680.464285714285,
+   "drilldown_orphan": 0.25013107745669405,
+   "recommendation_label": "HYPOTHESIS \u2014 not a forecast",
+   "recommendation_must_not_contain": "will increase",
+   "weather_dau": 45249.0,
+   "weather_dau_tolerance": 10.0
+  },
+  "description": "Instagram full flow: weather -> creators drill-down -> diagnosis -> hypothesis recommendation -> PM/Eng brief. The demo flow from Phase 3 planning.",
+  "family": "multi_turn_context",
+  "id": "c1",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "weather",
+    "user": "What's happening with Instagram?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "drilldown",
+    "user": "creators"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "diagnosis",
+    "user": "what's the diagnosis?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "recommendation",
+    "user": "what experiment would you recommend?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "brief",
+    "user": "give me the PM/Eng brief"
+   }
+  ]
+ },
+ {
+  "checks": {
+   "diagnosis_text_must_not_contain": "creator-specific problem hiding inside healthy growth",
+   "weather_d7": 0.1948900772430184,
+   "weather_d7_tolerance": 0.01
+  },
+  "description": "Whatsapp: growth up, retention down, creators down. Diagnosis priority is creators first (documented), retention second \u2014 the diagnosis text must not claim creator-only when retention also fired.",
+  "family": "multi_turn_context",
+  "id": "c2",
+  "turns": [
+   {
+    "expect_app": "whatsapp",
+    "expect_type": "weather",
+    "user": "How is Whatsapp doing?"
+   },
+   {
+    "expect_topic": "retention",
+    "expect_type": "drilldown",
+    "user": "retention"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "diagnosis",
+    "user": "what's the diagnosis?"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "Negative case: evaluating a past experiment without assignment tables must clarify, not invent a lift \u2014 even mid-conversation.",
+  "family": "incorrect_assumption",
+  "id": "c3",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "weather",
+    "user": "What's happening with Instagram?"
+   },
+   {
+    "expect_type": "clarification",
+    "user": "did the new creator experiment improve retention?"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "Letter choice: after Instagram weather, 'a' picks the first offered drill-down (creators).",
+  "family": "multi_turn_context",
+  "id": "c4",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "weather",
+    "user": "What's happening with Instagram?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "drilldown",
+    "user": "a"
+   }
+  ]
+ },
+ {
+  "checks": {
+   "weather_dau": 45249.0,
+   "weather_dau_tolerance": 10.0
+  },
+  "description": "Turn-by-turn Step 1: 'current state' phrasing maps to weather, 'what about WhatsApp?' inherits the weather intent with a new app, 'creators by country' is a breakdown, and a why question is a decomposition, not a cause.",
+  "family": "multi_turn_context",
+  "id": "c5",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "weather",
+    "user": "What is the current state of Instagram"
+   },
+   {
+    "expect_app": "whatsapp",
+    "expect_type": "weather",
+    "user": "What about WhatsApp?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "creators by country"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "what's driving the creator drop?"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "Turn-by-turn Step 1: same drill-down, different app ('same for whatsapp' after a creators drill-down), then creators by surface.",
+  "family": "multi_turn_context",
+  "id": "c6",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "weather",
+    "user": "What's happening with Instagram?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "drilldown",
+    "user": "creators"
+   },
+   {
+    "expect_app": "whatsapp",
+    "expect_topic": "creators",
+    "expect_type": "drilldown",
+    "user": "same for whatsapp"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "creators by surface"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "Turn-by-turn Step 1: segment follow-up 'creators in India' filters the drill-down, and the past-experiment refusal still holds after new turns.",
+  "family": "multi_turn_context",
+  "id": "c7",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "weather",
+    "user": "What's happening with Instagram?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "drilldown",
+    "user": "creators in India"
+   },
+   {
+    "expect_type": "clarification",
+    "user": "did the new creator experiment improve retention?"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "Turn-by-turn ranking (2026-10-29 22:55 PDT screenshot): after WhatsApp creators by country, 'which country had the most drop in the last 2 weeks' must rank by change, not clarify \u2014 DE is the largest drop on both absolute (-24) and percent (-2.6%) in Mar 18-31 vs Mar 4-17.",
+  "family": "multi_turn_context",
+  "id": "c8",
+  "turns": [
+   {
+    "expect_app": "whatsapp",
+    "expect_type": "weather",
+    "user": "What's happening with WhatsApp?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "creators by country"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "ranking",
+    "user": "Which country had the most drop in the last 2 weeks"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "MAU standalone turn (2026-11-04 shell probe): 'What's the MAU for Instagram?' as the first turn in a new chat must answer app-scoped March 2026 MAU (210,809), with no weather turn required.",
+  "family": "metric_scoping",
+  "id": "c9",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "mau",
+    "user": "What's the MAU for Instagram?"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "MAU typo probe, literal user wording (2026-11-04): 'What's teh MAU for Instagram?' must map on the 'mau' keyword to the same app-scoped answer (210,809). No general spell-correction is built; only the keyword mapping matters.",
+  "family": "metric_scoping",
+  "id": "c10",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "mau",
+    "user": "What's teh MAU for Instagram?"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "App switch mid-flow, verified by probing ChatSession on 2026-11-05: Instagram weather -> creators by country (Instagram) -> \"What about WhatsApp?\" (switches to WhatsApp weather) -> creators by country (WhatsApp) -> ranking \"Which country had the most drop in the last 2 weeks\" (WhatsApp creators, DE largest drop -24, -2.6%, same ground truth as c8).",
+  "family": "multi_turn_context",
+  "id": "h28",
+  "turns": [
+   {
+    "user": "How is Instagram doing?",
+    "expect_app": "instagram",
+    "expect_type": "weather"
+   },
+   {
+    "user": "creators by country",
+    "expect_topic": "creators",
+    "expect_type": "breakdown"
+   },
+   {
+    "user": "What about WhatsApp?",
+    "expect_app": "whatsapp",
+    "expect_type": "weather"
+   },
+   {
+    "user": "creators by country",
+    "expect_topic": "creators",
+    "expect_type": "breakdown"
+   },
+   {
+    "user": "Which country had the most drop in the last 2 weeks",
+    "expect_topic": "creators",
+    "expect_type": "ranking"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "Diagnosis, then an app switch, then a diagnosis for the new app: WhatsApp weather -> diagnosis -> 'What about Facebook?' -> Facebook weather -> diagnosis. Probed 2026-11-05: the second diagnosis is Facebook's own (creators, 2,593 creators, 25.0% orphan), not a WhatsApp repeat.",
+  "family": "multi_turn_context",
+  "id": "h29",
+  "turns": [
+   {
+    "expect_app": "whatsapp",
+    "expect_type": "weather",
+    "user": "What's happening with WhatsApp?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "diagnosis",
+    "user": "what's the diagnosis?"
+   },
+   {
+    "expect_app": "facebook",
+    "expect_type": "weather",
+    "user": "What about Facebook?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "diagnosis",
+    "user": "what's the diagnosis?"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "Ranking, then a grain correction: WhatsApp weather -> creators by country -> ranking over the last 2 weeks -> 'actually the last 7 days'. REWORDED per review Decision C (probed 2026-11-05): the correction turn covers the drill-down series only, so the chat clarifies that it cannot change the ranking window -- it must not silently repeat the 2-week ranking.",
+  "family": "multi_turn_context",
+  "id": "h30",
+  "turns": [
+   {
+    "expect_app": "whatsapp",
+    "expect_type": "weather",
+    "user": "What's happening with WhatsApp?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "creators by country"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "ranking",
+    "user": "Which country had the most drop in the last 2 weeks"
+   },
+   {
+    "expect_type": "clarification",
+    "user": "actually the last 7 days"
+   }
+  ]
+ },
+ {
+  "checks": {},
+  "description": "Breakdown, then the same breakdown for another app: Instagram weather -> creators by country (Instagram) -> 'same for WhatsApp' -> creators by country (WhatsApp). REWORDED per review Decision D (probed 2026-11-05): the drafted phrasing 'show me the same for WhatsApp' clarifies and stays on Instagram; bare 'same for WhatsApp' switches the drill-down to WhatsApp (US 6,089 creators, 30.1%). The reply type for a same-analysis-other-app turn is drilldown, not breakdown.",
+  "family": "multi_turn_context",
+  "id": "h31",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "weather",
+    "user": "How is Instagram doing?"
+   },
+   {
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "creators by country"
+   },
+   {
+    "expect_app": "whatsapp",
+    "expect_topic": "creators",
+    "expect_type": "drilldown",
+    "user": "same for WhatsApp"
+   }
+  ]
+ },
+ {
+  "checks": {
+   "daily_series_chart_kind": "line"
+  },
+  "description": "User probe pair, live shell 2026-11-06: turn 1 is the MAU-trend probe (sets the session app to Instagram); turn 2 is 'show me the DAU for month of Mar 2026 by individual day in a line chart'. The probe names no app, so as a first turn it would correctly clarify which app -- the 2-turn shape is the session as asked, with the app inherited. Turn 2 expects the daily-series turn: the 31-day March Instagram series with a line chart. Values verified two ways (agg_user_daily and raw fact_sessions JOIN dim_users), agreeing exactly.",
+  "expected_type": "series",
+  "expected_values": [
+   50601,
+   45199,
+   44173,
+   44262,
+   44201,
+   43942,
+   49112,
+   50394,
+   45075,
+   43896,
+   43814,
+   43742,
+   43626,
+   49013,
+   49355,
+   44538,
+   43639,
+   43523,
+   43059,
+   42781,
+   48728,
+   49588,
+   44567,
+   43280,
+   42914,
+   42902,
+   43051,
+   48385,
+   48997,
+   43768,
+   42820
+  ],
+  "min_rows": 31,
+  "family": "aggregation_grain",
+  "id": "p02",
+  "origin": "user probe 2026-11-06",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "mau",
+    "user": "Give me Instagram MAU trend for the last 2 weeks"
+   },
+   {
+    "expect_app": "instagram",
+    "expect_type": "daily_series",
+    "user": "show me the DAU for month of Mar 2026 by individual day in a line chart"
+   }
+  ]
+ },
+ {
+  "checks": {
+   "breakdown_values": {
+    "reels": {
+     "posts": 75450,
+     "creators": 24388
+    },
+    "feed": {
+     "posts": 58096,
+     "creators": 22096
+    },
+    "stories": {
+     "posts": 33509,
+     "creators": 17145
+    }
+   },
+   "breakdown_reels_posts": 75450,
+   "breakdown_reels_creators": 24388,
+   "breakdown_feed_posts": 58096,
+   "breakdown_feed_creators": 22096,
+   "breakdown_stories_posts": 33509,
+   "breakdown_stories_creators": 17145
+  },
+  "description": "User probe, live shell 2026-11-09: turn 1 is 'What is the current MAU for Instagram?' (MAU turn, 210,809, sets the session app to Instagram); turn 2 is 'do you have this data by surface'. Before the wiring, turn 2 deflected to 'ask for a weather report first': _breakdown_turn gates on self.weather, which the MAU turn never sets. The v5 wiring lets the breakdown gate accept MAU context (March 2026, the MAU period, app set), with the topic defaulting to creators. Turn 2 expects the breakdown turn: creators by surface, Instagram, March 2026. The probe names no app and no topic, so the 2-turn shape is the session as asked, with app and topic inherited. Values verified two independent ways (direct GROUP BY vs IN-subquery / DISTINCT-pairs CTE), agreeing exactly; per-surface posts sum to the 167,055 total.",
+  "family": "multi_turn_context",
+  "id": "p04",
+  "origin": "user probe 2026-11-09",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "mau",
+    "user": "What is the current MAU for Instagram?"
+   },
+   {
+    "expect_app": "instagram",
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "do you have this data by surface"
+   }
+  ]
+ },
+ {
+  "checks": {
+   "breakdown_values": {
+    "reels": {
+     "posts": 75450,
+     "creators": 24388
+    },
+    "feed": {
+     "posts": 58096,
+     "creators": 22096
+    },
+    "stories": {
+     "posts": 33509,
+     "creators": 17145
+    }
+   },
+   "breakdown_reels_posts": 75450,
+   "breakdown_reels_creators": 24388,
+   "breakdown_feed_posts": 58096,
+   "breakdown_feed_creators": 22096,
+   "breakdown_stories_posts": 33509,
+   "breakdown_stories_creators": 17145,
+   "breakdown_country_values": {
+    "US": {
+     "creators": 9286,
+     "posts": 49531
+    },
+    "IN": {
+     "creators": 7843,
+     "posts": 42372
+    },
+    "BR": {
+     "creators": 4785,
+     "posts": 25720
+    },
+    "ID": {
+     "creators": 3149,
+     "posts": 16537
+    },
+    "MX": {
+     "creators": 2488,
+     "posts": 13344
+    },
+    "GB": {
+     "creators": 1897,
+     "posts": 9884
+    },
+    "DE": {
+     "creators": 1849,
+     "posts": 9667
+    }
+   },
+   "breakdown_country_US_posts": 49531,
+   "breakdown_country_US_creators": 9286,
+   "breakdown_country_IN_posts": 42372,
+   "breakdown_country_IN_creators": 7843,
+   "breakdown_country_BR_posts": 25720,
+   "breakdown_country_BR_creators": 4785,
+   "breakdown_country_ID_posts": 16537,
+   "breakdown_country_ID_creators": 3149,
+   "breakdown_country_MX_posts": 13344,
+   "breakdown_country_MX_creators": 2488,
+   "breakdown_country_GB_posts": 9884,
+   "breakdown_country_GB_creators": 1897,
+   "breakdown_country_DE_posts": 9667,
+   "breakdown_country_DE_creators": 1849
+  },
+  "description": "User probe, live shell 2026-11-09, chained one turn further (sticky MAU context): turn 1 is 'What is the current MAU for Instagram?' (MAU turn, 210,809, sets the session app to Instagram); turn 2 is 'do you have this data by surface' (breakdown, creators by surface, Instagram, March 2026 -- the p04 turn); turn 3 is 'creators by country'. Before the sticky flag, turn 3 deflected to 'ask for a weather report first': the breakdown turn moves the stage off 'mau', so MAU context (the current stage) was gone after the first breakdown. The sticky flag (self.mau_context, set by the MAU turn, cleared by weather/daily-series turns) lets turn 3 run the breakdown too: creators by country, Instagram, March 2026. Turn 2 values are the p04 values (same session shape); turn 3 values verified two independent ways (direct GROUP BY vs IN-subquery / DISTINCT-pairs CTE), agreeing exactly; per-country posts sum to the 167,055 total and per-country creators sum to the 31,297 distinct Instagram March creators.",
+  "family": "multi_turn_context",
+  "id": "p05",
+  "origin": "user probe 2026-11-09 (chained)",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "mau",
+    "user": "What is the current MAU for Instagram?"
+   },
+   {
+    "expect_app": "instagram",
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "do you have this data by surface"
+   },
+   {
+    "expect_app": "instagram",
+    "expect_topic": "creators",
+    "expect_type": "breakdown",
+    "user": "creators by country"
+   }
+  ]
+ },
+ {
+  "checks": {
+   "mau_by_country_values": {
+    "US": 63372,
+    "IN": 52686,
+    "BR": 31623,
+    "ID": 21081,
+    "MX": 16946,
+    "DE": 12611,
+    "GB": 12490
+   },
+   "mau_by_country_US": 63372,
+   "mau_by_country_IN": 52686,
+   "mau_by_country_BR": 31623,
+   "mau_by_country_ID": 21081,
+   "mau_by_country_MX": 16946,
+   "mau_by_country_DE": 12611,
+   "mau_by_country_GB": 12490
+  },
+  "description": "User probe, live shell 2026-11-10, follow-up form (sticky MAU context): turn 1 is 'What is the current MAU for Instagram?' (MAU turn, 210,809, sets the session app to Instagram); turn 2 is the bare 'by country'. After a MAU turn, a bare 'by country' (no topic named) cuts the MAU number just shown, using the sticky MAU context (same app, March 2026): distinct users per country, US 63,372, IN 52,686, BR 31,623, ID 21,081, MX 16,946, DE 12,611, GB 12,490, total 210,809. A named topic ('creators by country') still takes the breakdown turn, as does 'by country' after a breakdown. Turn 2 values are the p06 values (same session shape); the oracle checks them with independent per-country scalar queries (DISTINCT-pairs CTE formulation).",
+  "family": "multi_turn_context",
+  "id": "p07",
+  "origin": "user probe 2026-11-10 (follow-up)",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "mau",
+    "user": "What is the current MAU for Instagram?"
+   },
+   {
+    "expect_app": "instagram",
+    "expect_type": "mau_by_country",
+    "user": "by country"
+   }
+  ]
+ },
+ {
+  "checks": {
+   "creator_share_values": {
+    "creators": 31297,
+    "mau": 210809,
+    "pct": 14.85
+   },
+   "creator_share_creators": 31297,
+   "creator_share_mau": 210809,
+   "creator_share_pct": 14.85
+  },
+  "description": "User probe, live shell 2026-11-10, follow-up form (sticky MAU context): turn 1 is 'What is the current MAU for Instagram?' (MAU turn, 210,809, sets the session app to Instagram); turn 2 is the bare 'what is the % of creators of MAU' (no app named). After a MAU turn, the follow-up inherits the app from the sticky MAU context (same app, March 2026) and answers the share -- creators 31,297, MAU 210,809, 14.85% -- not the MAU scalar again. Turn 2 values are the p08 values (same session shape); the oracle checks them with independent scalar queries (DISTINCT-pairs CTE formulation).",
+  "family": "multi_turn_context",
+  "id": "p10",
+  "origin": "user probe 2026-11-10 (follow-up)",
+  "turns": [
+   {
+    "expect_app": "instagram",
+    "expect_type": "mau",
+    "user": "What is the current MAU for Instagram?"
+   },
+   {
+    "expect_app": "instagram",
+    "expect_type": "creator_share",
+    "user": "what is the % of creators of MAU"
+   }
+  ]
+ }
+]
