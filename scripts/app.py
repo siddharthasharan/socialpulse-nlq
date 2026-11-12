@@ -6,6 +6,7 @@ Then open http://localhost:8000 in Codespace (port forwarding) or locally.
 """
 import argparse
 import json
+import os
 import re
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -22,6 +23,10 @@ from socialpulse_nlq.weather import compute_weather
 from socialpulse_nlq.chat import ChatSession
 from socialpulse_nlq.questions import load_all_questions, save_questions
 from socialpulse_nlq.usage import client_ip, record_event, usage_snapshot
+from socialpulse_nlq.llm_planner import (
+    MAX_OUTPUT_TOKENS, MODEL_ID, PROMPT_VERSION,
+    UrllibGeminiTransport, build_routing_prompt_template,
+)
 import uuid
 
 CHAT_SESSIONS = {}
@@ -56,6 +61,38 @@ def parse_experiments():
             "primary_metric": get("primary_metric"),
         })
     return out
+
+
+# Chunk B, slice 2 — owner-key LLM wiring. The server reads
+# GEMINI_API_KEY from the environment (set by the repo owner as a
+# Render env var, never committed) and hands it to each ChatSession.
+# The session's variant stays "baseline": the deterministic turns keep
+# planning deterministically, and the key is used ONLY by the LLM
+# fallback turn for otherwise-unmapped questions. No key -> the demo
+# behaves exactly as before (deterministic-only). The key is never
+# logged, never returned in any response, and never written to a
+# trace; request logging is a no-op (log_message below).
+def _llm_config():
+    key = os.environ.get("GEMINI_API_KEY") or None
+    tier = os.environ.get("GEMINI_TIER", "free")
+    if tier not in ("free", "paid"):
+        tier = "free"
+    return key, tier
+
+
+def _new_chat_session(data_dir):
+    api_key, tier = _llm_config()
+    return ChatSession(data_dir, llm_api_key=api_key, llm_tier=tier)
+
+
+def _shell_llm_status():
+    """Honest shell engine status: whether a server-side LLM key is
+    configured. No key material, ever — only the fact of it."""
+    api_key, _tier = _llm_config()
+    return {"configured": bool(api_key),
+            "model": MODEL_ID if api_key else None,
+            "mode": "owner-key" if api_key else "none",
+            "prompt_version": PROMPT_VERSION if api_key else None}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -112,8 +149,28 @@ class Handler(BaseHTTPRequestHandler):
             # Copilot backend origin for the shell. Env override (used in
             # deployment) wins; empty means the shell falls back to its
             # location heuristic (localhost -> :8001, else Render URL).
-            import os
-            self._send_json({"copilot_base": os.environ.get("COPILOT_BASE_URL", "")})
+            # "llm" is the honest engine status for the Analytics side:
+            # whether a server-side key is configured (never the key).
+            self._send_json({"copilot_base": os.environ.get("COPILOT_BASE_URL", ""),
+                             "llm": _shell_llm_status()})
+        elif path == "/api/llm-routing-prompt":
+            # Visitor-BYOK routing prompt (chunk B, slice 2): the pinned
+            # prompt with {question} and {context} left for the browser
+            # to fill. No key is involved in this endpoint — the browser
+            # calls the provider directly with the visitor's own key.
+            # The generation params are the pinned ones, so the browser
+            # uses exactly the contract the server-side path uses.
+            prompt, prompt_sha, inventory_sha = build_routing_prompt_template()
+            self._send_json({
+                "model": MODEL_ID, "prompt_version": PROMPT_VERSION,
+                "prompt_sha256": prompt_sha,
+                "inventory_sha256": inventory_sha,
+                "prompt": prompt,
+                "generation": {"temperature": 0,
+                               "maxOutputTokens": MAX_OUTPUT_TOKENS,
+                               "responseMimeType": "application/json"},
+                "endpoint": UrllibGeminiTransport().url,
+            })
         elif path == "/api/gallery":
             self._send_json({"scenarios": GALLERY_SCENARIOS})
         elif path == "/api/metrics":
@@ -145,14 +202,26 @@ class Handler(BaseHTTPRequestHandler):
             # Phase 3: one ChatSession per client session id, kept in
             # memory on this server process. Restarting app.py resets
             # chat history — that is intentional for a local demo.
+            # Chunk B, slice 2: the session is built with the owner key
+            # when one is configured (see _new_chat_session); without
+            # one it is exactly today's deterministic session.
             sid = body.get("session_id") or str(uuid.uuid4())
             if sid not in CHAT_SESSIONS:
-                CHAT_SESSIONS[sid] = ChatSession(self.data_dir)
+                CHAT_SESSIONS[sid] = _new_chat_session(self.data_dir)
                 # Usage tracking: a new chat session starts. Country +
                 # salted daily hash only — never the raw IP.
                 record_event("session_start",
                              client_ip(self.headers, self.client_address[0]))
-            reply = CHAT_SESSIONS[sid].respond(str(body.get("message", "")))
+            if "llm_choice" in body:
+                # Visitor BYOK: the browser called the provider directly
+                # with the visitor's key and posts the parsed choice.
+                # The key itself is never in this request — if it were,
+                # that would be a bug, not a feature.
+                reply = CHAT_SESSIONS[sid].respond_with_llm_choice(
+                    str(body.get("message", "")), body.get("llm_choice"),
+                    body.get("llm_tokens"))
+            else:
+                reply = CHAT_SESSIONS[sid].respond(str(body.get("message", "")))
             reply = dict(reply)
             reply["session_id"] = sid
             # Weather/drill-down evidence can be large; the UI renders

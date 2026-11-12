@@ -5,11 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Portfolio Shell — Analytics &amp; Experiments</title>
 <!--
-  Unified Muse-style shell, slice 1 (2026-11-04).
+  Unified Muse-style shell, slice 1 (2026-11-04), LLM wiring slice 2
+  (chunk B, 2026-11-11).
 
-  WHAT THIS IS: one chat shell over TWO separate, deterministic demos.
+  WHAT THIS IS: one chat shell over TWO separate demos.
   - Analytics mode  -> SocialPulse NLQ chat backend (this server, /api/chat).
-    Synthetic analytics data, 500K users, seed 42. No live LLM.
+    Synthetic analytics data, 500K users, seed 42. Deterministic planner
+    + chat by default; when the server has an owner Gemini key
+    configured (GET /api/shell-config reports it), unmapped questions
+    are routed through the LLM planner — the model picks which
+    deterministic analysis to run, it never computes a number. A
+    visitor may also use their own Gemini key (BYOK): the browser calls
+    Gemini directly, the key never touches this server.
   - Experiments mode -> Experiment Copilot platform backend (a different
     service, /api/chat, /api/run, /api/run-status). Synthetic experiment
     data, deterministic decision rules. No live LLM.
@@ -19,6 +26,8 @@
   Experiments and stays in that mode. Switching mode starts a NEW
   conversation. The mode indicator at the top of the chat always says
   which engine answered. Nothing on this page may claim otherwise.
+  With no key anywhere, the Analytics side is deterministic-only and
+  the page says so; with a key, it says which engine routed each turn.
 
   EXTENSION POINT — ANALYTICS DATASETS (code/docs only, slice 1):
   SHELL_DATASETS below lists the Analytics datasets this shell can talk
@@ -103,13 +112,28 @@
 <div id="shell">
   <aside>
     <h1>Portfolio Shell</h1>
-    <p class="sub">Two separate deterministic demos in one chat shell.
+    <p class="sub" id="sideNote">Two separate deterministic demos in one chat shell.
       Analytics and Experiments do <b>not</b> share data or sessions.
       No live LLM anywhere on this page.</p>
     <button class="newbtn" id="newAnalytics">＋ New Analytics chat</button>
     <button class="newbtn" id="newExperiments">＋ New Experiments chat</button>
     <p class="sub">Dataset (Analytics only, slice 1): <b>Social</b> — the only
       dataset wired up. See docs/shell.md for the extension point.</p>
+    <div id="byokBox">
+      <p class="sub"><b>Your Gemini key (optional, Analytics only).</b>
+        For questions the deterministic chat cannot map: the browser calls
+        Gemini directly with your key and sends only the model's routing
+        choice to this server. Your key lives only in this tab's session
+        storage — it is never sent to this server, stored, or logged.
+        Leave it blank to stay deterministic-only.</p>
+      <input id="byokKey" type="password" placeholder="Gemini API key (optional)"
+        autocomplete="off" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px">
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn secondary" id="byokSet">Use my key</button>
+        <button class="btn secondary" id="byokClear">Clear</button>
+      </div>
+      <p class="sub" id="byokStatus">No visitor key set.</p>
+    </div>
     <div><b>Chats</b></div>
     <div class="chatlist" id="chatlist"></div>
     <p class="sub"><a href="/">Back to the SocialPulse dashboard</a> ·
@@ -137,7 +161,7 @@
           query show their working here; experiment runs show their scorecard here.</p></div>
       </div>
     </div>
-    <footer>Honesty note: both engines are deterministic. The shell routes your
+    <footer id="honestyFooter">Honesty note: both engines are deterministic. The shell routes your
       message to one engine or the other; it never computes a lift, a metric, or a
       verdict itself, and it never mixes the two demos' data.</footer>
   </main>
@@ -149,9 +173,16 @@ const SHELL_DATASETS = ["social"]; // future datasets plug in via docs/shell.md
 const LS_KEY = "portfolio-shell-conversations-v1";
 const RENDER_COPILOT = "https://experiment-copilot-platform.onrender.com";
 let copilotBase = null; // resolved at startup from /api/shell-config or location
+let shellLlm = { configured: false, model: null, mode: "none", prompt_version: null };
+let routingPrompt = null; // cached GET /api/llm-routing-prompt response
 let conversations = [];
 let activeId = null;
 let runPoll = null;
+// Visitor BYOK key: sessionStorage ONLY, never sent to this server.
+// The browser calls Gemini directly with it (see byokRoute).
+const BYOK_KEY = "portfolio-shell-gemini-key";
+const byokGet = () => { try { return sessionStorage.getItem(BYOK_KEY) || ""; } catch (e) { return ""; } };
+const byokSet = (v) => { try { if (v) sessionStorage.setItem(BYOK_KEY, v); else sessionStorage.removeItem(BYOK_KEY); } catch (e) {} };
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
@@ -190,7 +221,23 @@ function setModeBar() {
   $("modeBadge").textContent = info.badge;
   $("modeBadge").className = "badge" + (c.mode === "experiments" ? " exp" : "");
   $("modeEngine").textContent = info.engine;
-  $("modeNote").textContent = info.note;
+  // Chunk B, slice 2: the Analytics note is honest about the engine.
+  // With a server-side owner key the demo routes unmapped questions
+  // through the LLM planner; without one it is deterministic-only and
+  // the note says exactly that (the static default in MODE_INFO).
+  if (c.mode === "analytics" && shellLlm.configured) {
+    $("modeNote").textContent = "LLM-routed (Gemini 3.8 Flash) — the model picks which " +
+      "deterministic analysis to run for questions the deterministic chat cannot map; " +
+      "it never computes a number. Each answer names the engine that routed it.";
+    $("sideNote").textContent = "Two separate demos in one chat shell. Analytics and " +
+      "Experiments do not share data or sessions. Analytics routes unmapped questions " +
+      "through Gemini 3.8 Flash (owner key); Experiments stays deterministic.";
+    $("honestyFooter").textContent = "Honesty note: Analytics answers are deterministic " +
+      "or LLM-routed to a deterministic analysis — the shell never computes a lift, a " +
+      "metric, or a verdict itself, and it never mixes the two demos' data.";
+  } else {
+    $("modeNote").textContent = info.note;
+  }
   $("msgInput").placeholder = c.mode === "analytics"
     ? "Ask about an app, e.g. What's the weather report for Instagram?"
     : "Ask about an experiment, pick a card, or describe a custom experiment…";
@@ -258,6 +305,20 @@ function renderWorking(w) {
   if (!w) return "";
   let h = "<p><b>Show the working</b></p>";
   h += `<p class="sub">${esc(w.deterministic_note || "Deterministic working trace: produced by the planner from allowlisted templates and the executed result. No live LLM, no API key, no external call.")}</p>`;
+  // Chunk B, slice 2: the LLM routing receipt, when this turn was
+  // LLM-routed. Real tokens from the API response, never estimates;
+  // a fallback names its reason instead of pretending the model ran.
+  if (w.llm) {
+    const l = w.llm;
+    const src = l.source === "visitor-key" ? "your key (BYOK)" : "owner key";
+    let line = `Routed by LLM (${esc(l.model || "gemini-3.8-flash")}, prompt ${esc(l.prompt_version || "")}, ${src})`;
+    if (l.fallback) line += ` — model did NOT run: fallback ${esc(l.fallback)} (${esc(l.fallback_reason || "")}); the deterministic baseline answered instead`;
+    else if (l.prompt_tokens != null || l.completion_tokens != null)
+      line += ` — real tokens: prompt ${l.prompt_tokens}, completion ${l.completion_tokens}, total ${l.total_tokens}`;
+    if (l.choice_rejected) line += ` — model choice rejected: ${esc(l.choice_rejected)}`;
+    if (l.model_explanation) line += `<br>Model's reason: ${esc(l.model_explanation)}`;
+    h += `<p class="sub">${line}</p>`;
+  }
   if (w.sql) h += `<p>SQL executed:</p><pre>${esc(w.sql)}</pre>`;
   if (w.raw_sql) h += `<p>Raw SQL (shown, NOT executed — this request was re-routed):</p><pre>${esc(w.raw_sql)}</pre>`;
   if (w.tables && w.tables.length) h += `<p>Tables: ${esc(w.tables.join(", "))}</p>`;
@@ -372,6 +433,94 @@ function renderTranscript() {
   t.scrollTop = t.scrollHeight;
 }
 function renderAll() { setModeBar(); renderList(); renderTranscript(); renderArtifact(); }
+// Chunk B, slice 2: per-answer engine labels. The backend names the
+// router in res.engine ("deterministic" / "llm" / "llm-byok"); the
+// transcript shows it so a reader always knows what routed the turn.
+function engineLabel(engine) {
+  if (engine === "llm") return "analytics · LLM (Gemini 3.8 Flash)";
+  if (engine === "llm-byok") return "analytics · LLM (your key)";
+  return "analytics · deterministic";
+}
+// Format the session context for the routing prompt's {context} slot,
+// mirroring llm_planner._format_context on the server.
+function formatContext(ctx) {
+  if (!ctx) return "No conversation context — this is the first question.";
+  const lines = [];
+  if (ctx.app) lines.push("- app: " + ctx.app);
+  if (ctx.stage) lines.push("- stage: " + ctx.stage);
+  if (ctx.mau_context) lines.push("- MAU context: app " + ctx.mau_context.app +
+    ", March 2026 (" + ctx.mau_context.start + ".." + ctx.mau_context.end + ")");
+  if (ctx.series_window) lines.push("- last daily series window: " +
+    ctx.series_window[0] + ".." + ctx.series_window[1]);
+  return lines.length ? lines.join("\n") : "No conversation context — this is the first question.";
+}
+// Parse the model's JSON choice out of a generateContent response,
+// tolerating markdown fences (same rule as llm_planner._parse_model_json).
+function parseModelChoice(data) {
+  const cands = (data && data.candidates) || [];
+  if (!cands.length) throw new Error("model response has no candidates");
+  const parts = ((cands[0].content || {}).parts) || [];
+  let text = parts.map((p) => p.text || "").join("").trim();
+  if (text.startsWith("```")) {
+    const lines = text.split("\n");
+    if (lines[0].startsWith("```")) lines.shift();
+    if (lines.length && lines[lines.length - 1].trim() === "```") lines.pop();
+    text = lines.join("\n").trim();
+  }
+  return JSON.parse(text);
+}
+async function byokRoute(c, text, serverReply) {
+  // Visitor BYOK: the browser calls Gemini DIRECTLY with the visitor's
+  // key (x-goog-api-key header), parses the routing choice, and posts
+  // only {message, llm_choice, llm_tokens} to /api/chat. The key never
+  // goes to this server. Returns the backend's reply, or null when the
+  // visitor-key path could not route the question — the deterministic
+  // clarification then stands, with a system note saying why.
+  const key = byokGet();
+  if (!key) return null;
+  try {
+    if (!routingPrompt) {
+      routingPrompt = await fetch("/api/llm-routing-prompt").then((r) => {
+        if (!r.ok) throw new Error("routing prompt fetch failed: " + r.status);
+        return r.json();
+      });
+    }
+    // Fill {context} first: the formatted context is built from
+    // allowlisted session values and can never contain "{question}",
+    // while the user's question could contain "{context}".
+    const prompt = routingPrompt.prompt
+      .replace("{context}", formatContext(serverReply.context))
+      .replace("{question}", text);
+    const data = await fetch(routingPrompt.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: routingPrompt.generation,
+      }),
+    }).then((r) => {
+      if (!r.ok) throw new Error("Gemini returned " + r.status);
+      return r.json();
+    });
+    const choice = parseModelChoice(data);
+    const usage = data.usageMetadata || {};
+    return await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        session_id: c.serverSessionId || undefined, message: text,
+        llm_choice: choice,
+        llm_tokens: { prompt: usage.promptTokenCount ?? null,
+                      completion: usage.candidatesTokenCount ?? null,
+                      total: usage.totalTokenCount ?? null },
+      }),
+    }).then((r) => r.json());
+  } catch (e) {
+    c.messages.push({ role: "system",
+      text: "Your key did not route this question (" + e.message + "). The deterministic answer above stands; check the key or try again." });
+    return null;
+  }
+}
 function pushUser(text) {
   const c = active(); c.messages.push({ role: "user", text });
   const d = document.createElement("div"); d.className = "bubble user"; d.textContent = text; $("transcript").appendChild(d);
@@ -386,7 +535,20 @@ async function sendText(text) {
       body: JSON.stringify({ session_id: c.serverSessionId || undefined, message: text }) }).then((r) => r.json()); }
     catch (e) { c.messages.push({ role: "system", text: "Analytics backend did not respond: " + e }); save(); renderTranscript(); return; }
     c.serverSessionId = res.session_id;
-    c.messages.push({ role: "assistant", engine: "analytics", text: res.text, options: res.options || [], working: res.working || null });
+    c.messages.push({ role: "assistant", engine: engineLabel(res.engine), text: res.text, options: res.options || [], working: res.working || null });
+    // Visitor BYOK, only for the generic unmapped clarification and
+    // only when the visitor set a key: the browser routes with the
+    // visitor's key and the backend's reply replaces the clarification.
+    // The key never leaves the browser except to Gemini.
+    if (res.unmapped && byokGet()) {
+      const byokRes = await byokRoute(c, text, res);
+      if (byokRes) {
+        c.serverSessionId = byokRes.session_id;
+        c.messages[c.messages.length - 1] = { role: "assistant",
+          engine: engineLabel(byokRes.engine), text: byokRes.text,
+          options: byokRes.options || [], working: byokRes.working || null };
+      }
+    }
   } else {
     await sendCopilotMessage(text);
     return;
@@ -452,18 +614,29 @@ async function newConversation(mode) {
       c.messages.push({ role: "assistant", engine: "experiments", blocks: res.blocks || [] });
     } catch (e) { c.messages.push({ role: "system", text: "Experiments backend did not respond: " + e + ". You can still start an Analytics chat, or retry this chat." }); }
   } else {
-    c.messages.push({ role: "assistant", engine: "analytics",
+    c.messages.push({ role: "assistant", engine: "analytics · deterministic",
       text: "Hi! Ask for a weather report first — for example, \"What's the weather report for Instagram?\" — then pick a topic to drill down." });
   }
   save(); renderAll();
 }
+function refreshByokStatus() {
+  $("byokStatus").textContent = byokGet()
+    ? "Visitor key set for this tab only. It is never sent to this server."
+    : "No visitor key set.";
+  if (!byokGet()) $("byokKey").value = "";
+}
 async function resolveCopilotBase() {
-  const q = new URLSearchParams(location.search).get("copilot");
-  if (q) { copilotBase = q.replace(/\/$/, ""); return; }
+  // The shell config is always fetched first: it carries the honest
+  // LLM engine status for the Analytics side, even when ?copilot=
+  // overrides the Copilot origin below.
   try {
     const cfg = await fetch("/api/shell-config").then((r) => r.json());
-    if (cfg.copilot_base) { copilotBase = cfg.copilot_base.replace(/\/$/, ""); return; }
+    if (cfg.llm) shellLlm = cfg.llm;
+    if (cfg.copilot_base) copilotBase = cfg.copilot_base.replace(/\/$/, "");
   } catch (e) {}
+  const q = new URLSearchParams(location.search).get("copilot");
+  if (q) { copilotBase = q.replace(/\/$/, ""); return; }
+  if (copilotBase) return;
   copilotBase = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
     ? "http://localhost:8001" : RENDER_COPILOT;
 }
@@ -474,8 +647,16 @@ $("attachBtn").onclick = () => { const c = active(); if (!c) return;
 $("newAnalytics").onclick = () => newConversation("analytics");
 $("newExperiments").onclick = () => newConversation("experiments");
 $("switchMode").onclick = () => { const c = active(); newConversation(c && c.mode === "analytics" ? "experiments" : "analytics"); };
+// Visitor BYOK key controls: the key is stored in sessionStorage only
+// (never sent to this server); the input is cleared after storing so
+// the key does not sit in the field.
+$("byokSet").onclick = () => { const v = $("byokKey").value.trim();
+  if (v) { byokSet(v); $("byokKey").value = ""; }
+  refreshByokStatus(); };
+$("byokClear").onclick = () => { byokSet(""); refreshByokStatus(); };
 (async () => {
   await resolveCopilotBase();
+  refreshByokStatus();
   load();
   if (!conversations.length) { await newConversation("analytics"); }
   else { activeId = conversations[conversations.length - 1].id; renderAll(); }

@@ -1,4 +1,5 @@
-"""Phase 3 multi-turn chatbot for SocialPulse NLQ. Deterministic, no LLM.
+"""Phase 3 multi-turn chatbot for SocialPulse NLQ. Deterministic routing,
+with one LLM-routed escape hatch (chunk B, slice 2).
 
 This is deliberately NOT a free-form chatbot. It is a state machine over
 the data the project already computes:
@@ -15,6 +16,17 @@ the same DuckDB tables, the same weather thresholds, and the same
 receipts as Phase 2. An LLM would be free to invent a lift, a cause, or
 a number on turn 3 that turn 1 never showed. Here, a turn can only
 surface numbers the weather report or a named drill-down query produced.
+
+Chunk B, slice 2 adds exactly one LLM entry point: when NO deterministic
+turn matches a message AND the session has an LLM available (owner key
+via GEMINI_API_KEY, or a visitor key supplied as a pre-validated choice
+through respond_with_llm_choice), the question is routed through
+plan_with_llm and the returned plan is executed through the same
+deterministic build_sql/guard path — the model chooses the analysis,
+never the number. The deterministic turns themselves are untouched:
+their _plan() calls stay on the deterministic planner (the session's
+variant stays "baseline" in the demo), so a model call can never change
+a MAU/breakdown/daily-series answer. See _llm_fallback_turn.
 
 State kept on the session (not in the user's text):
 - app: instagram / whatsapp / facebook, set by the opening question and
@@ -43,6 +55,7 @@ Honesty rules, carried from Phase 2 and Raven-style scoring:
 - Orphan rate and top-1% share are whole-window levels, never trends,
   for the exposure reason documented in weather.py.
 """
+import os
 import re
 from pathlib import Path
 
@@ -71,6 +84,88 @@ def _plan_with_variant(question, variant, context=None, llm_transport=None,
                              tier=llm_tier)
     from .planner import plan
     return plan(question, variant=variant)
+
+
+def _coerce_token_count(value):
+    """A token count from a client-posted BYOK receipt: an int, or None
+    when the browser sent nothing usable. The counts are display-only
+    (the visitor's own API response), never trusted for billing."""
+    try:
+        if value is None or isinstance(value, bool):
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sql_honors_filter(sql, dim, value):
+    """True when the executed SQL actually applies the requested filter
+    value — the same needle rule the LLM inventory probe uses
+    (llm_planner._FILTER_NEEDLES, probed with _FILTER_VALUES). The
+    fallback answer text only claims a scope the SQL honors; a
+    requested filter the template drops is named in the answer instead
+    of silently changing what the number means. This is the h07 trap:
+    wau_mean_weekly honors no app filter, so 'WAU for Instagram' must
+    not be presented as Instagram's number."""
+    from .llm_planner import _FILTER_NEEDLES, _FILTER_VALUES
+    probe = _FILTER_VALUES[dim]
+    return any(n.replace(probe, value) in sql
+               for n in _FILTER_NEEDLES[dim])
+
+
+def _fmt_llm_value(value):
+    """One number for a fallback answer: thousands-separated, two
+    decimals for a non-integral float."""
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, int):
+        return f"{value:,}"
+    if isinstance(value, float):
+        if value == int(value):
+            return f"{value:,.0f}"
+        return f"{value:,.2f}"
+    return str(value)
+
+
+def _llm_query_text(plan, cols, rows):
+    """The answer text for one LLM-routed query plan: the metric
+    definition, the value, and the scope the executed SQL actually
+    honors. A requested filter the template drops (app for WAU, the
+    h07 class) is stated plainly after the number, so the answer never
+    wears a narrower label than the SQL earned."""
+    from .planner import METRIC_DEFINITIONS
+    metric = plan.get("metric")
+    definition, _grain, denominator = METRIC_DEFINITIONS.get(
+        metric, (metric or "metric", "", ""))
+    filters = plan.get("filters") or {}
+    sql = plan.get("sql") or ""
+    honored, dropped = [], []
+    for dim in ("app", "country", "platform", "surface", "acquisition"):
+        if dim in filters:
+            (honored if _sql_honors_filter(sql, dim, filters[dim])
+             else dropped).append((dim, filters[dim]))
+    scope_parts = []
+    app = dict(honored).get("app")
+    scope_parts.append(app if app else "all apps")
+    scope_parts.extend(v for d, v in honored if d != "app")
+    ds = filters.get("date_start")
+    de = filters.get("date_end")
+    if ds and de:
+        scope_parts.append(f"{ds} to {de}")
+    scope = ", ".join(scope_parts)
+    label = str(definition).rstrip(".")
+    if len(rows) == 1 and len(cols) == 1:
+        text = (f"{label}: {_fmt_llm_value(rows[0][0])} {denominator} "
+                f"({scope}).")
+    else:
+        text = (f"{label} ({scope}): {len(rows)} row(s) — the full "
+                "table is in the working panel.")
+    for dim, value in dropped:
+        text += (f"\n\nNote: the model asked for {dim}={value}, but this "
+                 f"metric is not defined per {dim}, so the value above "
+                 f"ignores that filter — it is not the {value}'s number.")
+    return text
+
 
 TOPIC_LABELS = {
     "creators": "Creators — supply, orphan rate, concentration",
@@ -327,6 +422,144 @@ class ChatSession:
                                llm_tier=self.llm_tier)
         self.last_llm = p.get("llm")
         return p
+
+    # -- LLM fallback turn (chunk B, slice 2) ---------------------------
+    def _llm_available(self):
+        """True when a model call is possible: a transport was injected
+        (tests / harness), a key was passed to this session, or the
+        GEMINI_API_KEY environment variable is set (plan_with_llm reads
+        it itself). False means the demo is deterministic-only and an
+        unmapped question gets today's generic clarification."""
+        if self.llm_transport is not None or self.llm_api_key:
+            return True
+        return bool(os.environ.get("GEMINI_API_KEY"))
+
+    def _llm_context(self):
+        """The session context plan_with_llm routes with — the same
+        shape _plan() builds."""
+        return {"app": self.app, "stage": self.stage,
+                "mau_context": self.mau_context,
+                "series_window": self.series_window}
+
+    def _llm_fallback_turn(self, message):
+        """Server-side owner-key fallback: the deterministic router
+        found no turn for this message, so route it through
+        plan_with_llm and execute the returned plan through the same
+        deterministic path. plan_with_llm's own fallbacks hold
+        end-to-end (no key / API error / bad response -> the
+        deterministic baseline plan, labeled in the receipt)."""
+        from .llm_planner import plan_with_llm
+        plan = plan_with_llm(message, context=self._llm_context(),
+                             transport=self.llm_transport,
+                             api_key=self.llm_api_key, tier=self.llm_tier)
+        return self._render_llm_plan(plan, engine="llm")
+
+    def respond_with_llm_choice(self, message, choice, tokens=None):
+        """Visitor-BYOK execution: the browser already called the
+        provider directly with the visitor's key and posts the parsed
+        JSON choice here (plus the real token counts from the API
+        response). The choice is validated against the SAME allowlist
+        as plan_with_llm and executed through the SAME deterministic
+        plan_from_choice dispatch — an invalid choice is a
+        clarification, never an execution. The visitor's key is never
+        sent to this backend, so it cannot appear in any reply, trace,
+        or log; only the token counts the browser posts are recorded,
+        in the receipt. `tokens` is {"prompt": int, "completion": int,
+        "total": int} or None; non-integer values are dropped."""
+        from .llm_planner import (
+            MODEL_ID, PROMPT_VERSION, _validate_choice, cost_usd_paid_rate,
+            plan_from_choice, prompt_sha256,
+        )
+        ok, reason, clean = _validate_choice(choice)
+        receipt = {"model": MODEL_ID, "prompt_version": PROMPT_VERSION,
+                   "prompt_sha256": prompt_sha256(), "tier": "visitor-key",
+                   "source": "visitor-key",
+                   "prompt_tokens": _coerce_token_count(
+                       (tokens or {}).get("prompt")),
+                   "completion_tokens": _coerce_token_count(
+                       (tokens or {}).get("completion")),
+                   "total_tokens": _coerce_token_count(
+                       (tokens or {}).get("total")),
+                   "cost_usd_paid_rate": None, "billed_usd": None,
+                   "fallback": None, "fallback_reason": None,
+                   "raw_choice": choice, "choice_rejected": None}
+        receipt["cost_usd_paid_rate"] = cost_usd_paid_rate(
+            receipt["prompt_tokens"], receipt["completion_tokens"])
+        if not ok:
+            receipt["choice_rejected"] = reason
+            reply = self._clarify(
+                f"I am not answering that as asked: {reason}.")
+            reply["engine"] = "llm-byok"
+            reply.setdefault("working", {})["llm"] = receipt
+            self.last_llm = None
+            return reply
+        plan = plan_from_choice(clean, message)
+        return self._render_llm_plan(plan, engine="llm-byok",
+                                     receipt=receipt)
+
+    def _render_llm_plan(self, plan, engine, receipt=None):
+        """Execute one LLM-routed plan through the deterministic engine
+        and render the reply. Shared by the server-side fallback turn
+        and the BYOK path, so both show the same working panel: the
+        exact executed SQL, the result table/chart, the metric
+        definition, and the llm receipt. A clarification/refusal plan
+        shows its text and never executes anything. The reply's
+        "engine" names the router ("llm" = owner key, "llm-byok" =
+        visitor key); deterministic turns keep "deterministic"."""
+        receipt = receipt if receipt is not None else plan.get("llm")
+        self._set_options([])
+        self.last_llm = None
+        ptype = plan.get("type")
+        if ptype == "query":
+            from .planner import metric_definition, run_plan
+            cols, rows, _ms = run_plan(plan, self.data_dir)
+            text = _llm_query_text(plan, cols, rows)
+            definition = metric_definition(plan.get("metric"))
+            self.last_working = {
+                "sql": plan.get("sql"), "tables": plan.get("tables", []),
+                "row_count": len(rows),
+                "result_columns": cols, "result_rows": rows,
+                "metric_definition": ({"definition": definition[0],
+                                       "grain": definition[1],
+                                       "denominator": definition[2]}
+                                      if definition else None),
+                # The working-panel note must not claim this trace is
+                # deterministic: the ROUTING was the model's; only the
+                # SQL and the number are deterministic.
+                "deterministic_note": ("LLM-routed working trace: the model chose which "
+                                       "deterministic analysis to run; the SQL below is from the "
+                                       "allowlisted planner templates and is the executed query. "
+                                       "The model never computed the number."),
+            }
+            self.last_llm = receipt
+            # Session state follows what was actually answered: the app
+            # only when the executed SQL honors the app filter.
+            filters = plan.get("filters") or {}
+            sql = plan.get("sql") or ""
+            if filters.get("app") and _sql_honors_filter(
+                    sql, "app", filters["app"]):
+                self.app = filters["app"]
+            self.stage = "query"
+            reply = self._reply("query", text, engine=engine)
+        elif ptype == "weather_report":
+            reply = self._weather_turn(plan.get("app"))
+            reply["engine"] = engine
+        elif ptype in ("experiment_list", "experiment_info"):
+            text = (plan.get("explanation") or "") + (
+                "\n\nExperiment runs live in Experiments mode in this "
+                "shell — switch modes above to run one.")
+            reply = self._reply(ptype, text, engine=engine)
+        else:
+            # clarification / refusal / anything unrecognised: show the
+            # text, never execute.
+            text = (plan.get("clarification") or plan.get("explanation")
+                    or "I could not map that question to a catalog metric.")
+            reply = self._clarify(text)
+            reply["engine"] = engine
+        if receipt is not None:
+            reply.setdefault("working", {})["llm"] = receipt
+        self.last_llm = None
+        return reply
 
     # -- DuckDB helpers (same tables as weather.py, read-only views) ----
     def _connect(self):
@@ -1525,8 +1758,17 @@ class ChatSession:
         return self._reply("clarification", text)
 
     def _reply(self, type_, text, **extra):
+        # Chunk B, slice 2: every reply says which engine routed it
+        # ("deterministic" unless the caller passes engine="llm" /
+        # "llm-byok") and carries the session context the browser needs
+        # to fill the BYOK routing prompt (app, stage, MAU context,
+        # series window). Extra keys are ignored by the harness.
         out = {"type": type_, "stage": self.stage, "app": self.app,
-               "text": text, "options": self.options}
+               "text": text, "options": self.options,
+               "engine": "deterministic",
+               "context": {"app": self.app, "stage": self.stage,
+                           "mau_context": self.mau_context,
+                           "series_window": self.series_window}}
         out.update(extra)
         if getattr(self, "last_working", None):
             working = dict(self.last_working)
@@ -1869,7 +2111,20 @@ class ChatSession:
             if "look at" in q or "show me" in q or "drill" in q:
                 return self._clarify("Pick a drill-down from the last message (a/b/c/d), or name a topic: "
                                      "creators, retention, growth, messaging, or engagement.")
-        return self._clarify("I could not map that to a chat turn. Try: \"What is the current state of Instagram?\", "
-                             "\"What about WhatsApp?\", \"creators by country\", \"what's driving the creator drop?\", or "
-                             "\"What's the MAU for Instagram?\" — "
-                             "then pick a drill-down, ask for a diagnosis, an experiment recommendation, or the PM/Eng brief.")
+        # Chunk B, slice 2 — LLM fallback turn: no deterministic turn
+        # matched. When the session has an LLM available (owner key or
+        # an injected transport), route the question through
+        # plan_with_llm instead of giving up: that is what makes
+        # "What's the WAU for Instagram?" answerable — there is no
+        # standalone WAU turn. When no LLM is available, the generic
+        # clarification below is unchanged; "unmapped" marks it so the
+        # shell knows the browser may try the visitor's own key (BYOK)
+        # for exactly this reply, and no other clarification.
+        if self._llm_available():
+            return self._llm_fallback_turn(message)
+        reply = self._clarify("I could not map that to a chat turn. Try: \"What is the current state of Instagram?\", "
+                              "\"What about WhatsApp?\", \"creators by country\", \"what's driving the creator drop?\", or "
+                              "\"What's the MAU for Instagram?\" — "
+                              "then pick a drill-down, ask for a diagnosis, an experiment recommendation, or the PM/Eng brief.")
+        reply["unmapped"] = True
+        return reply

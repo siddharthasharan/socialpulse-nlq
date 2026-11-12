@@ -337,6 +337,23 @@ def build_prompt(question, context=None):
     return prompt, hashlib.sha256(inventory.encode("utf-8")).hexdigest()
 
 
+def build_routing_prompt_template():
+    """The pinned prompt with {question} and {context} left as literal
+    placeholders, for the visitor-BYOK path (chunk B, slice 2): the
+    browser fills them in and calls the provider directly, so the
+    server never sees the visitor's key. Returns (prompt_text,
+    prompt_sha256, inventory_sha256). The inventory is rendered here,
+    so the browser's prompt is identical to the server-side one for
+    the same contract version — the only difference is who fills in
+    the question and the session context."""
+    template = _load_prompt_template()
+    inventory = _build_inventory()
+    prompt = template.replace("{inventory}", inventory)
+    assert "{question}" in prompt and "{context}" in prompt
+    return (prompt, _PROMPT_CACHE["sha256"],
+            hashlib.sha256(inventory.encode("utf-8")).hexdigest())
+
+
 # --------------------------------------------------------------------------
 # Choice validation + deterministic execution
 # --------------------------------------------------------------------------
@@ -428,6 +445,53 @@ def _execute_choice(metric, filters, breakdown, question, series=None):
             "explanation": (f"Metric {metric}, grain {grain}, filters {f}, "
                             f"breakdown {breakdown}."),
             "clarification": None}
+
+
+def plan_from_choice(clean, question):
+    """The deterministic plan for a VALIDATED choice — the dispatch
+    plan_with_llm applies after _validate_choice passes, factored out
+    so the visitor-BYOK path (chat.respond_with_llm_choice, chunk B
+    slice 2) executes exactly the same plans as the server-side LLM
+    path. `clean` must be the cleaned choice _validate_choice
+    returned; a raw model choice must go through _validate_choice
+    first. Returns a bare plan dict (no "llm" key); callers attach
+    their own receipt."""
+    ctype = clean["type"]
+    if ctype == "clarification":
+        return _clarification_plan(
+            clean["explanation"] or _GENERIC_CLARIFICATION,
+            metric=clean["metric"])
+    if ctype == "refusal":
+        return {"type": "refusal", "metric": None, "sql": None, "tables": [],
+                "grain": "", "explanation": "",
+                "clarification": _REFUSAL_TEXT}
+    if ctype == "weather_report":
+        app = clean["app"]
+        return {"type": "weather_report", "metric": None, "sql": None,
+                "tables": [],
+                "grain": (f"product health for {app} (last 28 days vs prior 28 days)"
+                          if app else "product health (last 28 days vs prior 28 days)"),
+                "app": app,
+                "explanation": (f"Weather report for {app}: DAU, WAU, retention, and creator health, "
+                                "computed from the Phase 1 tables scoped to that app. No single score; see the cards and watchouts."
+                                if app else
+                                "Weather report: DAU, WAU, retention, and creator health, "
+                                "computed from the Phase 1 tables. No single score; see the cards and watchouts."),
+                "clarification": None}
+    if ctype == "experiment_list":
+        return _experiment_plan("list experiments")
+    if ctype == "experiment_info":
+        return _experiment_plan(_EXPERIMENT_INFO_QUESTIONS[clean["metric"]])
+    series = {"scalar": False, "series": True}.get(clean["grain"])
+    # The app is a top-level choice field; build_sql reads it from the
+    # filters dict, so merge it in (a filters.app, if the model also
+    # set one, must agree — the validator already checked both are
+    # allowlisted, and the top-level app is the question's app).
+    filters = dict(clean["filters"])
+    if clean["app"]:
+        filters["app"] = clean["app"]
+    return _execute_choice(clean["metric"], filters,
+                           clean["breakdown"], question, series=series)
 
 
 def _parse_model_json(response):
@@ -600,39 +664,4 @@ def plan_with_llm(question, context=None, transport=None, api_key=None,
         return _clarification_plan(
             f"I am not answering that as asked: {reason}.", metric=metric,
             llm=llm)
-    ctype = clean["type"]
-    if ctype == "clarification":
-        text = clean["explanation"] or _GENERIC_CLARIFICATION
-        return _clarification_plan(text, metric=clean["metric"], llm=llm)
-    if ctype == "refusal":
-        return _refusal_plan(llm)
-    if ctype == "weather_report":
-        app = clean["app"]
-        p = {"type": "weather_report", "metric": None, "sql": None,
-             "tables": [],
-             "grain": (f"product health for {app} (last 28 days vs prior 28 days)"
-                       if app else "product health (last 28 days vs prior 28 days)"),
-             "app": app,
-             "explanation": (f"Weather report for {app}: DAU, WAU, retention, and creator health, "
-                             "computed from the Phase 1 tables scoped to that app. No single score; see the cards and watchouts."
-                             if app else
-                             "Weather report: DAU, WAU, retention, and creator health, "
-                             "computed from the Phase 1 tables. No single score; see the cards and watchouts."),
-             "clarification": None}
-        return _with_llm(p, llm)
-    if ctype == "experiment_list":
-        return _with_llm(_experiment_plan("list experiments"), llm)
-    if ctype == "experiment_info":
-        return _with_llm(
-            _experiment_plan(_EXPERIMENT_INFO_QUESTIONS[clean["metric"]]), llm)
-    series = {"scalar": False, "series": True}.get(clean["grain"])
-    # The app is a top-level choice field; build_sql reads it from the
-    # filters dict, so merge it in (a filters.app, if the model also
-    # set one, must agree — the validator already checked both are
-    # allowlisted, and the top-level app is the question's app).
-    filters = dict(clean["filters"])
-    if clean["app"]:
-        filters["app"] = clean["app"]
-    p = _execute_choice(clean["metric"], filters,
-                        clean["breakdown"], question, series=series)
-    return _with_llm(p, llm)
+    return _with_llm(plan_from_choice(clean, question), llm)

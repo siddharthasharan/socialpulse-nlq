@@ -1,10 +1,11 @@
-# LLM planner — chunk B, slice 1 (2026-11-11)
+# LLM planner — chunk B, slices 1–2 (2026-11-11)
 
 The LLM planner (`src/socialpulse_nlq/llm_planner.py`) adds a fourth
-planner variant, `llm`, to the frozen v8 benchmark. It is the first
-chunk B slice: the LLM planner under the common contract, owner-key
-only. The hybrid router and visitor BYOK are later slices; the weekly
-chart / watch-outs turns are parked, not part of this slice.
+planner variant, `llm`, to the frozen v8 benchmark. Slice 1 is the LLM
+planner under the common contract, owner-key only. Slice 2 wires it
+into the live demo (owner key + honest shell status + visitor BYOK);
+the hybrid router is a later slice; the weekly chart / watch-outs turns
+are parked, not part of this work.
 
 ## The design, in one paragraph
 
@@ -171,7 +172,91 @@ respects them:
   fallback (exit non-zero) unless `--allow-fallbacks` is passed, in
   which case the output is labeled as containing fallbacks throughout.
 
-## Live verification status
+## Slice 2 — live-demo wiring (2026-11-11)
+
+The demo (`scripts/app.py`, `/shell` + `/api/chat`) now uses the LLM
+planner in exactly one place: the fallback turn. The design decision,
+recorded because the brief's literal wording said otherwise: the demo
+session is constructed with the owner key (`llm_api_key`, tier from
+`GEMINI_TIER` or `free`) but its variant stays `"baseline"`. Setting
+`variant="llm"` would route the five deterministic turns' internal
+planning through the model — they call `_plan()` with synthetic
+canonical questions ("MAU and creators for instagram by country"), and
+a model returning a different plan shape would break the turn that
+unpacks it. So the deterministic turns keep planning deterministically
+(zero model calls — pinned by test), and the LLM is consulted only when
+no deterministic turn matches a message.
+
+- **Owner key.** `app.py` reads `GEMINI_API_KEY` from the environment
+  at session creation. When present, the session has an LLM available;
+  when absent, the demo is exactly today's deterministic demo. The key
+  is never logged, never returned in any response, and never written to
+  a trace. The planner's fallback holds end-to-end: no key / API error
+  / timeout / bad response → the deterministic baseline plan, labeled
+  `fallback` in the receipt.
+- **LLM fallback turn.** In `ChatSession.respond()`, just before the
+  generic "could not map" clarification: when an LLM is available, the
+  question goes through `plan_with_llm` and the returned plan is
+  executed through `_render_llm_plan` — the same working-panel path as
+  every other turn (exact SQL, result table/chart, metric definition,
+  llm receipt). Query / weather_report / experiment_list /
+  experiment_info / clarification / refusal are all handled; a
+  clarification or refusal shows its text and never executes. Every
+  fallback reply carries `"engine": "llm"` (deterministic turns carry
+  `"engine": "deterministic"`); the generic clarification carries
+  `"unmapped": true` so the shell knows BYOK may try it. Every reply
+  also carries `"context"` (app, stage, mau_context, series_window)
+  for the BYOK prompt.
+- **Honest scope in the answer text.** `_llm_query_text` states only
+  the scope the executed SQL actually honors (same needle rule as the
+  inventory probe). A requested filter the template drops is named
+  after the number, so the answer never wears a narrower label than
+  the SQL earned. See the WAU note below — this is the h07 trap, and
+  the fallback turn is built to surface it, not hide it.
+- **Honest shell status.** `GET /api/shell-config` now returns
+  `"llm": {"configured", "model", "mode", "prompt_version"}` alongside
+  `copilot_base`. The shell's Analytics note reads "LLM-routed (Gemini
+  3.8 Flash)" when a key is configured and "Deterministic — no live
+  LLM" when not; each answer's transcript label names its router.
+- **Visitor BYOK.** A key field in the shell sidebar (Analytics only).
+  The key lives only in the visitor's browser `sessionStorage` and is
+  never sent to this backend. The browser fetches the pinned routing
+  prompt from `GET /api/llm-routing-prompt` (rendered inventory +
+  version + model id + pinned generation params, with `{question}` and
+  `{context}` left to fill), substitutes the question and the session
+  context, calls Gemini `generateContent` directly, parses the JSON
+  choice, and POSTs `{message, llm_choice, llm_tokens}` to `/api/chat`.
+  The backend validates the choice with `_validate_choice` and executes
+  it with `plan_from_choice` — the same validation and the same
+  dispatch `plan_with_llm` uses (factored out in this slice, so the two
+  paths cannot drift). An invalid choice is a clarification, never an
+  execution. The reply carries `"engine": "llm-byok"` and a receipt with
+  the real token counts the browser posted. With no key anywhere, the
+  demo behaves exactly as today. A jailbreak choice can at most produce
+  an aggregate answer: execution is always through allowlisted
+  templates, never raw SQL.
+- **WAU acceptance — the honest outcome.** "What's the WAU for
+  Instagram?" is the acceptance question because the deterministic
+  chat has no standalone WAU turn. The engine has NO app-scoped WAU
+  scalar: `wau_mean_weekly` honors no filters (inventory: filters
+  none), so there is no "Instagram WAU number" for the fallback to
+  return as a scalar. What the fallback does, verified with mocked
+  transport (19 tests in `tests/test_demo_llm.py`):
+  - a rule-following model clarifies (the h07 expected behavior);
+  - a model that picks `wau_mean_weekly` + instagram executes the
+    template and the answer says "267,348.93 distinct users (all apps,
+    2026-01-01 to 2026-03-31)" plus "it is not the instagram's number"
+    — the all-apps value, labeled as such, never Instagram's;
+  - a model that picks the weather report returns the real Instagram
+    WAU: the weather card's mean weekly WAU is 147,138.5 users/week
+    (last 4 complete weeks, prior 136,624.0, +7.7%);
+  - an API error falls back to the deterministic plan, labeled
+    `api_error`.
+  Adding a genuinely app-scoped WAU scalar would be a planner change
+  (it would also change h07's expected behavior and the v8 comparison
+  baseline) — a separate decision, not taken in this slice.
+
+## Live verification status (demo wiring)
 
 Live verification is PENDING — the key is now accepted, but
 generation has not yet been observed working. Timeline 2026-11-11:
@@ -184,7 +269,8 @@ demand, try again later", the third timed out at 60s. Requests reach
 the model; the model is overloaded/slow right now. Retry later. The
 transport's 120s timeout and retry-once on 429/503 exist for exactly
 this: slow or overloaded free-tier calls get a second chance instead
-of an immediate fallback.
+of an immediate fallback. Last retest 2026-11-11 15:21 PST timed out
+at 60s.
 
 Until a live call succeeds:
 
@@ -199,9 +285,19 @@ Until a live call succeeds:
 - When the model answers, run the smoke script first (5 cases, ~1
   minute), then the full comparison run on the frozen v8 set.
 
-## What BYOK will add later (not this slice)
+`scripts/smoke_demo_llm.py` is the live check for the wired demo:
+it starts the server with the owner key, checks `/api/shell-config`
+and `/api/llm-routing-prompt`, asks "What's the WAU for Instagram?"
+through the owner-key path, then simulates the BYOK path (fetch the
+prompt, call Gemini directly, post the choice). Exit codes match
+`smoke_llm.py`: 0 all live passes, 1 a live failure, 2 no key
+(pending), 3 blocked (the model did not run — a fallback is never
+counted as a pass). It needs the owner to set `GEMINI_API_KEY` as a
+Render env var before the live demo can be checked on Render.
 
-Visitor BYOK for the demo: the visitor's key lives only in their
-browser's session storage, the browser calls the provider directly,
-and the key never touches the backend, is never stored, and is never
-logged. The study still runs on the pinned owner key, server-side.
+## What the hybrid router will add later (not this slice)
+
+The hybrid router (deterministic first, LLM fallback with a routing
+policy) is the next slice. The fallback turn built here is its
+mechanism; the router adds the policy decision (which questions go to
+the LLM, when to abstain) on top.
