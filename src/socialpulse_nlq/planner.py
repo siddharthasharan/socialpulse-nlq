@@ -240,6 +240,16 @@ def _abstain(metric, reason):
 METRIC_DEFINITIONS = {
     "dau_mean_daily": ("Mean distinct users with at least one session per day.", "user x day", "distinct users"),
     "wau_mean_weekly": ("Mean distinct users with at least one session per ISO week.", "user x week", "distinct users"),
+    # wau_by_week (2026-11-12) is a template-only metric, like
+    # mau_by_country / creator_share / mau_creators_by_country: it is
+    # NOT in catalog/measures.yaml, which stays at 20 metrics. The
+    # weekly WAU series -- distinct users with >=1 session in each
+    # ISO week, one row per week -- app-scoped on fact_sessions.app,
+    # unlike wau_mean_weekly, which honors no app filter and only ever
+    # returns the all-apps mean. The first week (Mon Dec 29 2025)
+    # covers only Jan 1-4 and the last week (Mon Mar 30 2026) only
+    # Mar 30-31, so both are partial weeks with lower counts.
+    "wau_by_week": ("Distinct users with at least one session in each ISO week, by week (Jan 1-Mar 31 2026). App-scoped: the weekly values are that app's own, unlike wau_mean_weekly, which honors no app filter and only ever returns the all-apps mean. The first week (Dec 29) covers only Jan 1-4 and the last week (Mar 30) only Mar 30-31.", "user x week", "distinct users"),
     "mau_march": ("Distinct users with at least one session in March 2026.", "user x month", "distinct users"),
     # mau_by_country (2026-11-10) is a template-only metric, like the
     # routed metrics: it is NOT in catalog/measures.yaml, which stays
@@ -659,6 +669,31 @@ def build_sql(metric: str, f: dict, breakdown, q: str, series=None):
         return ("SELECT AVG(wau) AS value FROM (SELECT DATE_TRUNC('week', CAST(start_time AS DATE)) AS w, "
                 "COUNT(DISTINCT user_id) AS wau FROM fact_sessions "
                 f"WHERE CAST(start_time AS DATE) BETWEEN DATE '{ds}' AND DATE '{de}' GROUP BY w)"), tables, grain
+
+    if metric == "wau_by_week":
+        # Weekly WAU series (2026-11-12): distinct users per ISO week,
+        # app-scoped on fact_sessions.app -- the same session-app
+        # definition as mau_march, so the weekly values are that app's
+        # own (unlike wau_mean_weekly, which honors no filters and only
+        # ever returns the all-apps mean). The inner query is the one
+        # wau_mean_weekly already computes inside its AVG() wrapper;
+        # this template returns the per-week rows instead of averaging
+        # them away. The week is CAST to DATE so the first column reads
+        # as a date (the sqlviz line-chart rule needs YYYY-MM-DD, not a
+        # timestamp). First/last weeks of the window are partial (the
+        # window starts Jan 1 and ends Mar 31); the chat turn says so.
+        # No breakdown: a per-country weekly series is a different
+        # template, not this one.
+        tables = ["fact_sessions"]
+        grain = "user x week"
+        if breakdown:
+            raise ValueError("WAU by week cannot be broken down: ask for the weekly series "
+                             "for one app, or WAU by country for the monthly cut.")
+        app_where = f" AND app = '{f['app']}'" if "app" in f else ""
+        return (f"SELECT CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) AS w, "
+                f"COUNT(DISTINCT user_id) AS wau FROM fact_sessions "
+                f"WHERE CAST(start_time AS DATE) BETWEEN DATE '{ds}' AND DATE '{de}'{app_where} "
+                f"GROUP BY w ORDER BY w"), tables, grain
 
     if metric == "mau_march":
         tables = ["fact_sessions"]
@@ -1099,6 +1134,25 @@ def plan(question: str, variant: str = "baseline"):
         metric = "median_session_duration_min"
     elif "stickiness" in q or "dau/mau" in q or "dau / mau" in q:
         metric = "dau_mau_stickiness"
+    elif (("week" in q or "weekly" in q)
+            and ("trend" in q or "by week" in q or "each week" in q or "per week" in q)
+            and ("wau" in q or "active user" in q)
+            and "dau" not in q and "mau" not in q
+            and "mean" not in q and "average" not in q):
+        # WAU by week (2026-11-12): the weekly series, not the mean
+        # scalar. "What's the weekly trend for active users for
+        # Instagram?" is the Nov 12 live probe: before this branch it
+        # fell through to the generic clarification (no weekly series
+        # existed). The series word (trend / by week / each week /
+        # per week) is required on purpose: "weekly active users"
+        # alone is the WAU metric name, and stays the mean scalar
+        # (wau_mean_weekly) -- the h07-adjacent question. Placed
+        # before the "wau" branch so a question naming the series
+        # never takes the scalar. Variant boundary (same as
+        # mau_by_country / creator_share): the metric is not in the
+        # 20-metric catalog, so catalog-assisted and validated
+        # abstain on it; only the baseline answers it.
+        metric = "wau_by_week"
     elif "wau" in q or "weekly active" in q:
         metric = "wau_mean_weekly"
     elif "creator" in q and (

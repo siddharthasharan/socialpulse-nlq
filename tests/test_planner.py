@@ -490,3 +490,68 @@ def test_mau_creators_by_country_variants_abstain():
         p = plan(q, variant=variant)
         assert p["type"] == "clarification" and p["sql"] is None, variant
         assert "no catalog definition" in p["clarification"], variant
+
+
+def test_wau_by_week_series_sql():
+    # 2026-11-12 (p13): "What's the weekly trend for active users
+    # for Instagram?" is the weekly WAU series, not the mean scalar.
+    # The SQL is the inner query wau_mean_weekly already computes
+    # inside its AVG() wrapper, returned as rows: DATE_TRUNC('week')
+    # + COUNT(DISTINCT user_id), grouped by week, app-scoped on
+    # fact_sessions.app -- unlike wau_mean_weekly, which honors no
+    # filters. The week is CAST to DATE so the first column reads as
+    # a date (the sqlviz line-chart rule needs YYYY-MM-DD).
+    p = plan("What's the weekly trend for active users for Instagram?")
+    assert p["type"] == "query" and p["metric"] == "wau_by_week"
+    assert p["grain"] == "user x week"
+    assert "DATE_TRUNC('week'" in p["sql"] and "COUNT(DISTINCT user_id)" in p["sql"]
+    assert "GROUP BY w ORDER BY w" in p["sql"]
+    assert "app = 'instagram'" in p["sql"]
+    assert "AVG(" not in p["sql"]
+    assert "2026-01-01" in p["sql"] and "2026-03-31" in p["sql"]
+    assert "country = '" not in p["sql"]
+    # The other apps scope the same way; without an app the series
+    # is all-apps (same no-app convention as the other templates).
+    p_wa = plan("What's the WAU by week for WhatsApp?")
+    assert p_wa["metric"] == "wau_by_week" and "app = 'whatsapp'" in p_wa["sql"]
+    p_no_app = plan("What's the weekly trend for active users?")
+    assert p_no_app["metric"] == "wau_by_week" and "app = " not in p_no_app["sql"]
+
+
+def test_wau_by_week_scalar_phrasing_stays_scalar():
+    # The series word is required on purpose: "weekly active users"
+    # alone is the WAU metric name, and stays the mean scalar
+    # (wau_mean_weekly) -- the h07-adjacent question. Likewise the
+    # bare WAU question and the DAU trend are untouched by the new
+    # branch.
+    assert plan("What's the WAU for Instagram?")["metric"] == "wau_mean_weekly"
+    assert plan("What are the weekly active users for Instagram?")["metric"] == "wau_mean_weekly"
+    assert plan("What's the DAU trend for Instagram?")["metric"] == "dau_mean_daily"
+    assert plan("What was DAU last week?")["metric"] == "dau_mean_daily"
+    assert plan("What is the mean daily DAU for instagram?")["metric"] == "dau_mean_daily"
+    # "mean"/"average" stays the scalar even with a week word.
+    assert plan("What is the mean WAU by week for Instagram?")["metric"] == "wau_mean_weekly"
+
+
+def test_wau_by_week_breakdown_clarifies_in_planner():
+    # A per-country weekly series is a different template, not this
+    # one: the planner refuses instead of silently returning the
+    # unbroken series for a breakdown question.
+    p = plan("What's the WAU by week for Instagram by country?")
+    assert p["type"] == "clarification" and p["metric"] == "wau_by_week"
+    assert "cannot be broken down" in p["clarification"]
+
+
+def test_wau_by_week_variants_abstain():
+    # Variant boundary (same as mau_by_country / creator_share /
+    # mau_creators_by_country): the metric is not in the 20-metric
+    # catalog, so catalog-assisted and validated abstain on it; only
+    # the baseline answers it. The benchmark runs the baseline; if
+    # the metric is ever added to the catalog, this test is the one
+    # that has to change.
+    q = "What's the weekly trend for active users for Instagram?"
+    assert plan(q, variant="baseline")["metric"] == "wau_by_week"
+    for variant in ("catalog-assisted", "validated"):
+        p = plan(q, variant=variant)
+        assert p["type"] == "clarification" and p["sql"] is None, variant
+        assert "no catalog definition" in p["clarification"], variant

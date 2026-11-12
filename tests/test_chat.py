@@ -990,3 +990,108 @@ def test_daily_series_option_letter_advances():
     s.respond("show me the DAU for month of Mar 2026 by individual day in a line chart")
     r = s.respond("a")
     assert r["type"] == "weather" and r["app"] == "instagram"
+
+
+def test_weekly_series_turn_standalone_no_weather():
+    # 2026-11-12 (p13): the Nov 12 live probe -- "What's the weekly
+    # trend for active users for Instagram?" -- answers as a first
+    # turn with no weather report. 500K seed-42 golds: 14 weeks,
+    # mean 120,285.79/week, low 63,764 (week of Dec 29, partial),
+    # high 147,939 (week of Mar 2).
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What's the weekly trend for active users for Instagram?")
+    assert r["type"] == "weekly_series" and r["app"] == "instagram"
+    assert "by week" in r["text"] and "14 weeks" in r["text"]
+    assert "partial" in r["text"] and "2025-12-29" in r["text"] and "2026-03-30" in r["text"]
+    ws = r["weekly_series"]
+    assert ws["start"] == "2026-01-01" and ws["end"] == "2026-03-31" and ws["weeks"] == 14
+    assert abs(ws["mean"] - 120285.79) < 1.0 and ws["low"] == 63764 and ws["high"] == 147939
+    assert ws["low_week"] == "2025-12-29" and ws["high_week"] == "2026-03-02"
+    assert ws["partial_weeks"] == ["2025-12-29", "2026-03-30"]
+    w = r["working"]
+    assert "GROUP BY w" in w["sql"] and "AVG(" not in w["sql"]
+    assert "app = 'instagram'" in w["sql"] and "country" not in w["sql"]
+    viz = w["visualization"]
+    assert viz["available"] is True and viz["chart"]["kind"] == "line"
+    assert len(viz["chart"]["points"]) == 14
+    assert viz["rows"][0] == ["2025-12-29", 63764] and viz["rows"][-1] == ["2026-03-30", 69683]
+    assert viz["rows"][9] == ["2026-03-02", 147939]
+    assert viz["diagram"] is not None
+
+
+def test_weekly_series_no_app_clarifies_which_app():
+    # The probe names no app, so as a first turn it correctly clarifies
+    # which app -- it must never silently answer one app's series.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("What's the weekly trend for active users?")
+    assert r["type"] == "clarification"
+    assert "instagram" in r["text"] and "whatsapp" in r["text"]
+
+
+def test_weekly_series_followup_same_for_swaps_app_keeps_window():
+    # 2026-11-12 (p14): "same for WhatsApp" after a weekly-series
+    # turn keeps the series intent AND the window, and swaps the app.
+    # WhatsApp golds: 14 weeks, mean 79,951/week.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("same for WhatsApp")
+    assert r["type"] == "weekly_series" and r["app"] == "whatsapp"
+    ws = r["weekly_series"]
+    assert ws["start"] == "2026-01-01" and ws["end"] == "2026-03-31" and ws["weeks"] == 14
+    assert abs(ws["mean"] - 79951.0) < 1.0 and ws["low"] == 41660 and ws["high"] == 98372
+    assert r["working"]["visualization"]["chart"]["kind"] == "line"
+    assert r["working"]["visualization"]["rows"][0] == ["2025-12-29", 41660]
+    assert r["working"]["visualization"]["rows"][-1] == ["2026-03-30", 46177]
+
+
+def test_weekly_series_followup_what_about_swaps_app():
+    # "what about whatsapp?" after a weekly-series turn is the same
+    # app-switch as "same for WhatsApp".
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("what about whatsapp?")
+    assert r["type"] == "weekly_series" and r["app"] == "whatsapp"
+    assert abs(r["weekly_series"]["mean"] - 79951.0) < 1.0
+
+
+def test_weekly_series_mau_followup_inherits_app():
+    # A bare weekly-trend follow-up after a MAU turn inherits the app
+    # from the sticky MAU context (same pattern as p10/p12).
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the MAU for Instagram?")
+    r = s.respond("What's the weekly trend for active users?")
+    assert r["type"] == "weekly_series" and r["app"] == "instagram"
+    assert abs(r["weekly_series"]["mean"] - 120285.79) < 1.0
+
+
+def test_weekly_series_scalar_phrasing_still_clarifies():
+    # "weekly active users" alone is the WAU metric name, not a
+    # series question -- the chat has no standalone WAU turn, so it
+    # clarifies, exactly as the bare WAU question (h07) does.
+    s = _real_session()
+    if s is None:
+        return
+    assert s.respond("What are the weekly active users for Instagram?")["type"] == "clarification"
+    assert s.respond("What's the WAU for Instagram?")["type"] == "clarification"
+
+
+def test_weekly_series_option_letter_advances():
+    # Option letters work after a weekly-series turn (stage ==
+    # "weekly_series" satisfies the letter gate): "a" is the weather
+    # option for the same app.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("a")
+    assert r["type"] == "weather" and r["app"] == "instagram"

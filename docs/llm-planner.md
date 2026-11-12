@@ -255,6 +255,24 @@ no deterministic turn matches a message.
   Adding a genuinely app-scoped WAU scalar would be a planner change
   (it would also change h07's expected behavior and the v8 comparison
   baseline) — a separate decision, not taken in this slice.
+- **Weekly series — now routable (2026-11-12, v9).** "What's the
+  weekly trend for active users for Instagram?" was a live
+  clarification on 2026-11-12 (the model never ran — a Gemini
+  timeout — and no weekly-series capability existed). The weekly
+  series is now a capability the fallback can route to:
+  `wau_by_week` appears in the generated prompt inventory
+  (filters honored: app; breakdowns: none) with no prompt-text or
+  version change — the inventory is generated at prompt-build time
+  from `METRIC_DEFINITIONS` + the mechanical `build_sql` probe.
+  A model picking `wau_by_week` + instagram gets the 14-week
+  app-scoped series (mean 120,285.79 users/week; first and last
+  weeks partial, flagged as such). The bare WAU scalar question
+  above is unchanged: there is still no app-scoped WAU scalar and
+  h07's expected behavior is unchanged — a bare "weekly active
+  users" question still takes the `wau_mean_weekly` scalar. The
+  routing is pinned by mocked-transport tests in
+  `tests/test_llm_planner.py` (choice execution through
+  `build_sql`, inventory line).
 
 ## Live verification status (demo wiring)
 

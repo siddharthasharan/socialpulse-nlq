@@ -562,3 +562,51 @@ def test_rubric_mau_creators_by_country_type():
                                      columns=["creators", "mau", "share_pct"]))
     assert r3["items"]["result_equiv"]["pass"] is False
     assert r3["task_success"] is False
+
+
+def test_rubric_weekly_series_type():
+    # 2026-11-12 (p13): the weekly_series expected_type scores a
+    # 14-row, two-column result (week, wau). Row count is exact and
+    # the values are exact counts. A fabricated passing outcome: all
+    # five rubric items pass and task succeeds.
+    ig = [63764, 90699, 99611, 108169, 117025, 126050, 134298,
+          139222, 146926, 147939, 147048, 147057, 146510, 69683]
+    weeks = ["2025-12-29", "2026-01-05", "2026-01-12", "2026-01-19",
+             "2026-01-26", "2026-02-02", "2026-02-09", "2026-02-16",
+             "2026-02-23", "2026-03-02", "2026-03-09", "2026-03-16",
+             "2026-03-23", "2026-03-30"]
+    case = {"id": "p13", "expected_type": "weekly_series",
+            "expected_metric": "wau_by_week",
+            "expected_rows": 14,
+            "expected_values": ig,
+            "family": "aggregation_grain",
+            "question": "What's the weekly trend for active users for Instagram?"}
+    plan = {"type": "query", "metric": "wau_by_week",
+            "sql": ("SELECT CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) AS w, "
+                    "COUNT(DISTINCT user_id) AS wau FROM fact_sessions "
+                    "WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-01-01' "
+                    "AND DATE '2026-03-31' AND app = 'instagram' GROUP BY w ORDER BY w"),
+            "tables": ["fact_sessions"], "grain": "user x week"}
+    rows = [[w, float(v)] for w, v in zip(weeks, ig)]
+    r = score_single(case, _outcome(plan=plan, rows=rows,
+                                    columns=["w", "wau"]))
+    assert all(v["pass"] is True for v in r["items"].values()), r["items"]
+    assert r["sql_semantic"] is True and r["task_success"] is True
+    # The silent-substitution guards: the WAU mean scalar (1 row x 1
+    # col, the wau_mean_weekly answer) fails the shape check before
+    # any value is read, and so does the 90-row daily DAU series, so
+    # neither can stand in for the weekly series.
+    mean_plan = dict(plan, metric="wau_mean_weekly")
+    r2 = score_single(case, _outcome(plan=mean_plan, rows=[[120285.79]],
+                                     columns=["value"]))
+    assert r2["items"]["result_equiv"]["pass"] is False
+    assert r2["items"]["final_answer"]["pass"] is False
+    assert r2["task_success"] is False
+    daily_plan = dict(plan, metric="dau_mean_daily")
+    daily_rows = [[f"2026-01-{d:02d}", 40000.0] for d in range(1, 32)]
+    daily_rows += [[f"2026-02-{d:02d}", 40000.0] for d in range(1, 29)]
+    daily_rows += [[f"2026-03-{d:02d}", 40000.0] for d in range(1, 32)]
+    r3 = score_single(case, _outcome(plan=daily_plan, rows=daily_rows,
+                                     columns=["date", "dau"]))
+    assert r3["items"]["result_equiv"]["pass"] is False
+    assert r3["task_success"] is False

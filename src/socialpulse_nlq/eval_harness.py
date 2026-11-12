@@ -128,6 +128,15 @@ VERSIONS = {
            "singles": "benchmark_v8.json",
            "convs": "conversation_v8.json",
            "oracle": "oracle_v8.json"},
+    # v9 (weekly-series turn, 2026-11-12): v8's 162 cases plus the
+    # user probes p13 ("What's the weekly trend for active users for
+    # Instagram?", single) and p14 (the same question as a
+    # follow-up -- "same for WhatsApp" after the weekly series,
+    # conversation). Both in dev; held-out stays 30.
+    "v9": {"manifest": "benchmark_v9_manifest.json",
+           "singles": "benchmark_v9.json",
+           "convs": "conversation_v9.json",
+           "oracle": "oracle_v9.json"},
 }
 
 
@@ -367,6 +376,25 @@ def _result_equiv_single(case, rows, cols):
                 if not close(gp, v["share_pct"]):
                     return False, f"{k} share_pct {gp} != {v['share_pct']}"
         return True, ""
+    if etype == "weekly_series":
+        # 2026-11-12 (p13): the weekly WAU series -- one row per ISO
+        # week, two columns (week, wau). Row count is exact (14 weeks
+        # in the Jan 1-Mar 31 window, first and last partial) and the
+        # values are exact counts. The expected_type pins the turn: a
+        # wau_mean_weekly scalar (1 row x 1 col) or a dau_mean_daily
+        # daily series (90 rows) fails the shape check before any
+        # value is read, so neither can be silently substituted for
+        # the weekly series -- the Nov 12 live failure was the
+        # clarification, not a substitution, but the shape check is
+        # what keeps a future wrong-metric answer from passing.
+        if len(rows) != case.get("expected_rows"):
+            return False, f"rows={len(rows)} != {case.get('expected_rows')}"
+        if "expected_values" in case:
+            got = [float(r[-1]) for r in rows]
+            if len(got) != len(case["expected_values"]) or any(
+                    not close(g, e) for g, e in zip(got, case["expected_values"])):
+                return False, "weekly series values differ from expected"
+        return True, ""
     return False, f"no result comparison defined for type {etype!r}"
 
 
@@ -407,7 +435,7 @@ def score_single(case, outcome, structural_specs=None):
 
     items = {}
     if etype in ("scalar", "series", "series_by_dim", "breakdown", "mau_by_country",
-                 "creator_share", "mau_creators_by_country"):
+                 "creator_share", "mau_creators_by_country", "weekly_series"):
         items["sql_syntax"] = (_item(True, "") if outcome["syntax_ok"]
                                else _item(False, outcome.get("syntax_error", "")))
         items["sql_safety"] = (_item(True, outcome["guard"][1]) if outcome["guard"][0]
@@ -863,7 +891,7 @@ def _run_single(case, con, data_dir, structural_specs, variant="baseline",
                "trace": None}
     if case["expected_type"] in ("scalar", "series", "series_by_dim", "breakdown",
                                 "mau_by_country", "creator_share",
-                                "mau_creators_by_country"):
+                                "mau_creators_by_country", "weekly_series"):
         if p.get("sql"):
             try:
                 con.execute("EXPLAIN " + p["sql"])

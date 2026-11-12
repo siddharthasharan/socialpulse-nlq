@@ -354,3 +354,37 @@ def test_chat_llm_variant_turn_carries_receipt():
     assert reply["type"] == "mau", reply
     assert reply["working"]["llm"]["model"] == MODEL_ID, reply["working"]
     assert reply["working"]["llm"]["fallback"] is None
+
+
+def test_weekly_series_choice_routes_to_wau_by_week():
+    # 2026-11-12 (p13): a model choice of wau_by_week with grain
+    # "series" executes through the weekly template -- the per-week
+    # rows, app-scoped, never averaged. The model never writes SQL:
+    # the choice is validated against the allowlist (wau_by_week is
+    # in METRIC_DEFINITIONS) and executed via build_sql.
+    p = _plan("What's the weekly trend for active users for Instagram?",
+              FakeTransport(_query_choice(metric="wau_by_week",
+                                          grain="series")))
+    assert p["type"] == "query" and p["metric"] == "wau_by_week", p
+    assert p["grain"] == "user x week", p
+    assert "GROUP BY w ORDER BY w" in p["sql"], p["sql"]
+    assert "app = 'instagram'" in p["sql"], p["sql"]
+    assert "AVG(" not in p["sql"], p["sql"]
+    assert p["llm"]["fallback"] is None and p["llm"]["not_consulted"] is None
+
+
+def test_weekly_series_in_inventory():
+    # The prompt inventory is generated at prompt-build time from
+    # METRIC_DEFINITIONS + the mechanical build_sql probe, so the new
+    # capability appears automatically -- no prompt-text change, no
+    # version bump. The inventory line pins what the model can be
+    # told: the weekly series honors the app filter (unlike
+    # wau_mean_weekly, which honors none) and has no breakdowns.
+    prompt, _sha = build_prompt("What's the weekly trend for active users for Instagram?")
+    line = next(l for l in prompt.splitlines()
+                if l.startswith("- wau_by_week"))
+    assert "Filters honored: app" in line, line
+    assert "Breakdowns: none" in line, line
+    wau_line = next(l for l in prompt.splitlines()
+                    if l.startswith("- wau_mean_weekly"))
+    assert "Filters honored: none" in wau_line, wau_line

@@ -984,6 +984,124 @@ class ChatSession:
         phrase = _window_phrase(*self.series_window) if self.series_window else ""
         return f"daily DAU for {app}{phrase}"
 
+    def _weekly_series_question(self, app):
+        """Question that re-asks the stored weekly series for an app.
+
+        Mirror of _series_question for the weekly WAU series: same
+        window as the last weekly series, so an app-switch follow-up
+        ("what about WhatsApp?", "same for WhatsApp") re-runs the
+        same weekly series for the new app instead of opening a
+        weather report.
+        """
+        phrase = _window_phrase(*self.series_window) if self.series_window else ""
+        return f"weekly WAU by week for {app}{phrase}"
+
+    def _weekly_series_turn(self, app, question=None):
+        """Standalone weekly-series turn (2026-11-12): WAU by week.
+
+        A single metric series, so like the daily-series turn it needs
+        no weather report first. The planner's wau_by_week template
+        supplies the week-by-week query (the same inner query
+        wau_mean_weekly already computes inside its AVG() wrapper,
+        returned as rows instead of averaged away), and the working
+        payload carries it with the metric definition, so the shell
+        renders the line chart + table + SQL diagram from the same
+        receipts the single-shot ask UI shows. The turn verifies the
+        plan is really the weekly series (grain "user x week",
+        app-scoped) before running it: the WAU mean scalar must never
+        be presented as a series, and a question about another metric
+        has no weekly series in the planner and clarifies instead of
+        inventing one. First/last weeks of the window are partial
+        (the window starts Jan 1 and ends Mar 31), and the reply
+        says so plainly instead of letting the low counts read as a
+        drop.
+        """
+        import datetime
+        from .planner import metric_definition, run_plan
+        self.app = app
+        self.stage = "weekly_series"
+        self.topic = None
+        # A weekly series establishes its own context and is not a
+        # breakdown context, so it clears the sticky MAU context:
+        # after this turn a breakdown asks for weather first again.
+        # (The app is resolved by the caller from the sticky context
+        # before this turn runs, so clearing here loses nothing.)
+        self.mau_context = None
+        q = question or f"weekly WAU by week for {app}"
+        if not _word(q.lower(), app):
+            # The session app is inherited, not named in the question
+            # (the probe names no app on the follow-up form): say it,
+            # or the plan would run the all-apps series while the
+            # reply claims one app. The window and any other slot
+            # still come from the question.
+            q = f"{q} for {app}"
+        p = self._plan(q)
+        if (p["type"] != "query" or p.get("metric") != "wau_by_week"
+                or p.get("grain") != "user x week" or not p.get("sql")
+                or p.get("filters", {}).get("app") != app):
+            return self._clarify("I could not build a weekly WAU series for "
+                                 f"{app} from that question. Try \"Weekly WAU by week for {app}\".")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        if not rows:
+            return self._clarify(f"No weekly WAU series came back for {app} — the window may be empty.")
+        start = p["filters"]["date_start"]
+        end = p["filters"]["date_end"]
+        self.series_window = (start, end)
+        label = _window_label(start, end)
+        vals = [r[1] for r in rows]
+        weeks = [str(r[0]) for r in rows]
+        mean = sum(vals) / len(vals)
+        low_i = vals.index(min(vals))
+        high_i = vals.index(max(vals))
+        # Partial weeks: a week whose Monday falls before the window
+        # start, or whose Sunday falls after the window end, covers
+        # fewer than 7 in-window days. For the full 90-day window
+        # that is the first week (Mon Dec 29 2025, Jan 1-4 only) and
+        # the last week (Mon Mar 30 2026, Mar 30-31 only).
+        start_d = datetime.date.fromisoformat(start)
+        end_d = datetime.date.fromisoformat(end)
+        partial = []
+        for w in weeks:
+            wd = datetime.date.fromisoformat(w)
+            if wd < start_d or wd + datetime.timedelta(days=6) > end_d:
+                partial.append(w)
+        definition = metric_definition("wau_by_week")
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": cols, "result_rows": rows,
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        phrase = _window_phrase(*self.series_window)
+        self._set_options([
+            {"label": f"Weather — what's happening with {app}?",
+             "send": f"What's happening with {app}?"},
+            {"label": f"Weekly WAU for {others[0]}",
+             "send": f"Weekly WAU by week for {others[0]}{phrase}"},
+            {"label": f"Weekly WAU for {others[1]}",
+             "send": f"Weekly WAU by week for {others[1]}{phrase}"},
+        ])
+        partial_note = ""
+        if partial:
+            partial_note = (" Note: the " + ("weeks" if len(partial) > 1 else "week") +
+                            " of " + " and ".join(partial) +
+                            (" are partial — the window starts Jan 1 and ends Mar 31, so those "
+                             "weeks cover fewer than 7 days and their counts are lower, not a drop."))
+        text = (f"Weekly active users for {app} in {label}, by week ({len(rows)} weeks).\n\n"
+                f"Mean {mean:,.0f} per week, low {min(vals):,} (week of {weeks[low_i]}), "
+                f"high {max(vals):,} (week of {weeks[high_i]}). The full week-by-week series — "
+                "line chart, table, and the exact SQL — is in the working panel."
+                f"{partial_note}\n\n"
+                "This is the weekly series, not the average: ask for \"WAU\" "
+                "if you want the single mean instead.")
+        return self._reply("weekly_series", text,
+                           weekly_series={"app": app, "start": start, "end": end,
+                                         "weeks": len(rows), "mean": mean,
+                                         "low": min(vals), "low_week": weeks[low_i],
+                                         "high": max(vals), "high_week": weeks[high_i],
+                                         "partial_weeks": partial})
+
     def _daily_series_turn(self, app, question=None):
         """Standalone daily-series turn (2026-11-06): DAU by day.
 
@@ -1804,7 +1922,7 @@ class ChatSession:
         # send text is what is actually sent, so a letter after a
         # drill-down advances to diagnosis/recommendation/brief instead
         # of re-opening the same drill-down.
-        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage in ("mau", "daily_series")):
+        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage in ("mau", "daily_series", "weekly_series")):
             idx = ord(q) - ord("a") if q.isalpha() else int(q) - 1
             if 0 <= idx < len(self.options):
                 send = self.options[idx].get("send") or self.options[idx].get("topic")
@@ -1838,6 +1956,10 @@ class ChatSession:
                 # Daily-series follow-up keeps the series intent and
                 # the window, and swaps the app.
                 return self._daily_series_turn(stripped_clean, self._series_question(stripped_clean))
+            if self.stage == "weekly_series":
+                # Weekly-series follow-up keeps the series intent and
+                # the window, and swaps the app.
+                return self._weekly_series_turn(stripped_clean, self._weekly_series_question(stripped_clean))
             if q.startswith("same for") and self.topic and self.weather:
                 # Same drill-down, different app: weather the new app
                 # first (so its numbers are the receipt), then re-run
@@ -1975,6 +2097,35 @@ class ChatSession:
             return self._reply("clarification",
                                "Which app's daily DAU? Reply instagram, whatsapp, or facebook — "
                                "for example, \"Daily DAU for Instagram in March 2026\".")
+        # Weekly-series intent (2026-11-12): "WAU by week" asks for the
+        # week-by-week series, not the averaged scalar. Placed after
+        # the daily-series block (a daily question never names a week)
+        # and before breakdown (a series is not a decomposition). The
+        # series word (trend / by week / each week / per week) is
+        # required, matching the planner branch: "weekly active users"
+        # alone is the WAU metric name and stays the mean scalar
+        # (no deterministic WAU turn, so it clarifies, as h07 does).
+        # "mean"/"average" stays the scalar; DAU/MAU questions are
+        # not weekly series; "by country/surface/platform/app/
+        # acquisition" is a breakdown, not a series.
+        if (("week" in q or "weekly" in q)
+                and ("trend" in q or "by week" in q or "each week" in q or "per week" in q)
+                and ("wau" in q or "active user" in q)
+                and "dau" not in q and "mau" not in q
+                and "mean" not in q and "average" not in q
+                and " by country" not in q and " by surface" not in q
+                and " by platform" not in q and " by app" not in q
+                and " by acquisition" not in q):
+            app = (app_found or (self.mau_context["app"] if self.mau_context else None)
+                   or self.app)
+            if app:
+                return self._weekly_series_turn(app, message)
+            self._set_options([
+                {"label": a, "send": f"Weekly WAU by week for {a}?", "topic": None} for a in APPS
+            ])
+            return self._reply("clarification",
+                               "Which app's weekly WAU? Reply instagram, whatsapp, or facebook — "
+                               "for example, \"Weekly WAU by week for Instagram\".")
         # Breakdown: "creators by country", "creators by surface".
         # This is the country/surface decomposition the user chose
         # first (2026-10-29), ahead of creator cohorts. The trigger

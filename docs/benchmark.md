@@ -2021,3 +2021,256 @@ fallback pass as a live pass; the comparison script refuses a trace
 containing any fallback unless `--allow-fallbacks` is passed. The
 mocked-transport tests (`tests/test_llm_planner.py`, 20 tests) are the
 verification actually completed in this slice.
+
+# Benchmark v9 — Weekly-series turn + the weekly-trend probe (2026-11-12)
+
+## The probe (live shell, 2026-11-12)
+
+After the honest WAU answer, the next question in the same session
+failed:
+
+**"What's the weekly trend for active users for Instagram?"**
+answered with the generic "could not map" clarification. The model
+never ran — the trace says fallback `api_error`, a Gemini read
+timeout after 120s, not a model answer. It was neither an eval case
+(no "weekly trend" case in v8) nor an LLM failure: **no weekly
+series turn existed**. The closest real capability was the DAU-by-day
+series (p03). And the SQL shape already existed inside
+`wau_mean_weekly`: the template computes `DATE_TRUNC('week',
+start_time)` + `COUNT(DISTINCT user_id)` per week from
+`fact_sessions`, then averages it into one scalar — the per-week
+series is computed and thrown away by the AVG wrapper. (The column
+is `start_time`, not `occured_at` — no such column exists in the
+schema.) The user authorized the build 2026-11-12 13:47 PST, asking
+also whether this makes the LLM "actually run queries instead of
+being focused on just turns in SQL" — the answer is no: the LLM
+still picks from the deterministic capability inventory and never
+writes SQL or computes a number; the weekly series adds a
+capability the LLM fallback can now route to. The watch-outs /
+diagnosis-after-MAU part of the parked weekly build stays parked.
+
+## The turn (`src/socialpulse_nlq/planner.py`, `src/socialpulse_nlq/chat.py`)
+
+The planner carries the query, the chat carries the turn — the same
+split as the v5–v8 turns:
+
+1. **Planner (`wau_by_week` template in `build_sql`):** per-week
+   DISTINCT users from `fact_sessions`, **app-scoped**
+   (`app = '{f['app']}'` — unlike `wau_mean_weekly`, which honors
+   no filters), window 2026-01-01..2026-03-31,
+   `CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) AS w,
+   COUNT(DISTINCT user_id) AS wau`, `GROUP BY w ORDER BY w`, grain
+   `"user x week"`. Any breakdown raises ValueError. The result is
+   14 rows, one per Mon-start ISO week 2025-12-29–2026-03-30.
+   `wau_by_week` is recorded in `METRIC_DEFINITIONS` (display
+   only) — **not** in `catalog/measures.yaml`, which stays at 20
+   metrics, so the catalog-assisted and validated variants abstain
+   on it, the same boundary as `mau_by_country`, `creator_share`,
+   and `mau_creators_by_country`.
+2. **Planner (`plan()` metric detection):** a `wau_by_week` branch
+   placed before the `wau_mean_weekly` branch. It matches
+   (week|weekly) + (trend|by week|each week|per week) + (wau|active
+   user), excluding dau/mau/mean/average. **A series word is
+   required in both planner and chat** so the two agree — a
+   deliberate deviation from the brief's literal trigger: "weekly
+   active users" alone stays the WAU scalar (`wau_mean_weekly`),
+   the h07-adjacent question. Bare "What's the WAU for Instagram?",
+   "What's the DAU trend for Instagram?", and "What was DAU last
+   week?" are all untouched by the new branch.
+3. **Chat (`_weekly_series_turn(app)`):** type `weekly_series`,
+   standalone like the daily-series turn — no weather required.
+   App from the question → sticky `mau_context` → session app →
+   clarify if none. Clears `mau_context` like the daily turn and
+   stores `series_window`, so "what about whatsapp?" / "same for
+   WhatsApp" re-run the same series for the new app. The reply
+   states the definition plainly (weekly active users, by week, N
+   weeks) with the mean, low, and high, and **flags the partial
+   weeks honestly**: the first week (2025-12-29) covers only Jan
+   1–4, the last week (2026-03-30) covers only Mar 30–31. The
+   working panel shows the exact SQL, the result table, and a line
+   chart (sqlviz: a DATE first column + a numeric second column →
+   line). A single SELECT, so the SQL diagram renders — unlike the
+   v7/v8 CTE turns.
+4. **Oracle values (verified from the 500K data by two independent
+   forms — grouped COUNT(DISTINCT) vs DISTINCT-pairs — agreeing
+   exactly; the mean is the mean of the 14 weekly values):**
+
+   | Week starting | Instagram | WhatsApp | Facebook |
+   |---|---|---|---|
+   | 2025-12-29 (partial, Jan 1–4) | 63,764 | 41,660 | 35,368 |
+   | 2026-01-05 | 90,699 | 59,924 | 50,734 |
+   | 2026-01-12 | 99,611 | 65,795 | 55,511 |
+   | 2026-01-19 | 108,169 | 71,728 | 60,498 |
+   | 2026-01-26 | 117,025 | 77,911 | 65,623 |
+   | 2026-02-02 | 126,050 | 84,107 | 70,310 |
+   | 2026-02-09 | 134,298 | 89,297 | 75,048 |
+   | 2026-02-16 | 139,222 | 92,651 | 77,696 |
+   | 2026-02-23 | 146,926 | 97,829 | 81,882 |
+   | 2026-03-02 | 147,939 | 98,372 | 82,466 |
+   | 2026-03-09 | 147,048 | 98,125 | 82,164 |
+   | 2026-03-16 | 147,057 | 98,063 | 81,690 |
+   | 2026-03-23 | 146,510 | 97,675 | 81,697 |
+   | 2026-03-30 (partial, Mar 30–31) | 69,683 | 46,177 | 38,883 |
+   | **Mean / week** | **120,285.79** | **79,951.0** | **67,112** |
+
+   The per-week rows are the same inner query `wau_mean_weekly`
+   averages inside its AVG wrapper — the new template returns the
+   rows instead of averaging them away, and app-scopes them. The
+   all-apps mean of those 14 weekly values is exactly the
+   `wau_mean_weekly` scalar, 267,348.93; the Instagram mean
+   (120,285.79) is that app's own series mean, not the scalar.
+
+## The cases (p13, p14)
+
+- **p13 (single, aggregation_grain, dev):** the exact probe
+  phrasing, "What's the weekly trend for active users for
+  Instagram?" → `weekly_series`, 14 Instagram values, chart kind
+  line. The chart-kind check is carried in the case for the record
+  and is **not** harness-evaluated for singles (`check_values`
+  runs for conversations only) — the same caveat as p03; the
+  chart-kind mechanism itself is pinned by p14, and the line chart
+  was verified by a fresh-session turn probe.
+- **p14 (conversation, multi_turn_context, dev):** the weekly
+  series for Instagram, then "same for WhatsApp" → the WhatsApp
+  series. This pins the new app-switch path (series window +
+  stage), not the sticky-MAU path — the MAU → bare-weekly
+  follow-up also works and was verified by direct probe, but is
+  not a case. Wired by `scripts/wire_weekly_series_cases.py`.
+
+## Harness extension
+
+v9 added to `VERSIONS` in `eval_harness.py`; a `weekly_series`
+branch in `_result_equiv_single` (exact 14 rows + exact values),
+`score_single`, and `_run_single`; a weekly `check_values` branch
+in `scripts/run_conversation_benchmark.py` (the LAST weekly_series
+reply's values exact vs `checks["weekly_series_values"]`, chart
+kind vs `checks["weekly_series_chart_kind"]`). The oracle entries
+are kind `"series"` with the DISTINCT-pairs SQL form, and the
+structural checks include `not_contains "AVG("` — which pins the
+series, not the averaged scalar. p14 has NO app structural check:
+structural runs against every turn's SQL, turn 1 is Instagram and
+turn 2 is WhatsApp, so the turn-2 app is pinned by `check_turn` +
+`check_values` instead. The silent-substitution guard is pinned
+at the harness level (`tests/test_eval_harness.py`): the WAU mean
+scalar (1 row x 1 col) and the 90-row daily DAU series both fail
+the shape check before any value is read, so neither can stand in
+for the weekly series.
+
+## v9 counts by family and split
+
+| Family | v8 | + probes | v9 total | v9 dev | v9 held-out |
+|---|---|---|---|---|---|
+| metric_scoping | 51 | 0 | 51 | 39 | 12 |
+| aggregation_grain | 31 | 1 (p13) | 32 | 29 | 3 |
+| complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
+| ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
+| multi_turn_context | 16 | 1 (p14) | 17 | 14 | 3 |
+| incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
+| guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
+| sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
+| **Total** | **162** | **2** | **164** | **134** | **30** |
+
+Held-out is unchanged (30 cases, same ids as v8). **Honest
+limitation:** the probes were run during the build (that is how the
+turn was verified), so v9 held-out means "held out from fixes", not
+pristine — the same caveat as v1–v8. One arithmetic correction
+worth recording: the brief said "144 singles + 20 conversations",
+which is wrong — v8 (142 singles + 20 conversations) + p13
+(single) + p14 (conversation) = **143 singles + 21 conversations
+= 164**; the wiring script asserts 143/21.
+
+## v9 results
+
+**Dev run (2026-11-12): 126/134 task success** — the 124 v8 dev
+passes plus p13 and p14. Per family:
+
+| Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
+|---|---|---|---|---|---|---|---|
+| metric_scoping | 39 | 32/39 | 31/31 | 31/31 | 31/31 | 29/29 | 32/39 |
+| aggregation_grain | 29 | 29/29 | 29/29 | 29/29 | 29/29 | 29/29 | 29/29 |
+| complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
+| ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
+| multi_turn_context | 14 | 14/14 | 13/13 | 13/13 | 14/14 | 8/8 | 14/14 |
+| incorrect_assumption | 9 | 8/9 | — | — | 1/1 | — | 8/9 |
+| guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
+| sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
+
+**Oracle agreement: v9 164/164, no inexact entries** (dev run trace;
+the held-out run was `--skip-oracle`, as usual).
+
+**Held-out run (2026-11-12): 27/30 task success**, the same 3
+failures as v8 (h02, h08, h18 — reported only, drove no fix). Per
+family: metric_scoping 10/12, aggregation_grain 3/3,
+complex_joins_breakdowns 5/5, ambiguous_metric 2/2,
+multi_turn_context 3/3, incorrect_assumption 1/2,
+guardrail_adversarial 2/2, sql_safety_syntax 1/1.
+
+**Dev failures (8 total — the same expected findings as v8):** h01,
+h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
+new failures: **p13 and p14 pass all five rubric items**
+(`result_equiv` for p13 is scored by the new `weekly_series`
+branch in `_result_equiv_single` — 14 rows x 2 cols, exact values;
+`result_equiv` for p14 is scored by the new `check_values` weekly
+branch — the turn-2 reply's WhatsApp values exact, chart kind
+line). No "right answer, wrong SQL" warnings in either run.
+
+**v8 regression with the new code (same day, same data): dev 124/132,
+held-out 27/30, oracle 162/162 agree in both runs** (traces
+`evals/runs/benchmark_v8_baseline_dev_20261112-223030.json` and the
+held-out trace of the same evening). The weekly-series turn, the
+planner branch, and the harness extensions changed no v8 outcome:
+the failures are exactly the 8 known dev findings and the 3 known
+held-out findings, and p01–p12 still pass.
+
+**Test suite (2026-11-12): 233 pass / 1 known fail / 5 skipped**
+(plain runner; the fail is the pre-existing
+`test_docked_chat_only::test_rounded_corners` on an untouched file;
+the 5 skips are the `test_questions` `tmp_path` fixture tests). 14 new tests: 4 planner (weekly series SQL shape +
+gold values, scalar phrasing stays scalar, breakdown clarifies,
+variants abstain), 7 chat (standalone with gold values + line chart
++ diagram, no-app clarifies, same-for and what-about swap app
+keeping the window, MAU follow-up inherits app, scalar phrasing
+still clarifies, option letter advances), 1 harness (the
+`weekly_series` rubric type scores a fabricated passing outcome,
+and the WAU-mean scalar and the 90-row daily series both fail
+result equivalence — the silent-substitution guard, pinned at the
+harness level), and 2 LLM (mocked-transport choice routes the
+weekly question to `wau_by_week` through `build_sql`, no AVG;
+inventory line pins app filter honored, no breakdowns).
+
+**Live verification (local server probe, workspace ChatSession on
+the 500K data):** "What's the weekly trend for active users for
+Instagram?" returns the weekly series — "Weekly active users for
+instagram in Jan 1 – Mar 31, 2026, by week (14 weeks). Mean 120,286
+per week, low 63,764 (week of 2025-12-29), high 147,939 (week of
+2026-03-02). ... Note: the weeks of 2025-12-29 and 2026-03-30 are
+partial", with a line chart of 14 points, the result table, the
+exact SQL, and a rendered SQL diagram in the working panel. "same
+for WhatsApp" returns the WhatsApp series (mean 79,951.0). MAU →
+"What is the weekly trend for active users?" returns the Instagram
+series via sticky context. A fresh session with no app clarifies
+"Which app's weekly active users?".
+
+## Running v9
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v9.py --split dev      # default
+PYTHONPATH=src python scripts/run_benchmark_v9.py --split heldout  # report only
+PYTHONPATH=src python scripts/run_benchmark_v9.py --split all
+PYTHONPATH=src python scripts/run_benchmark_v9.py --skip-oracle     # benchmark only
+PYTHONPATH=src python scripts/run_benchmark_v9.py --variant llm --split dev   # chunk B, same frozen set
+```
+
+## v9 with the LLM planner (chunk B, slice 1 + 2)
+
+The frozen v9 set (164 cases) also runs with `variant="llm"` — the
+LLM planner under the common contract (see `docs/llm-planner.md`).
+No benchmark, oracle, or manifest file changes for the LLM variant.
+The new capability is visible to the model: `wau_by_week` appears
+in the generated prompt inventory (filters honored: app;
+breakdowns: none) with no prompt-text or version change, and a
+mocked-transport test pins the routing (`tests/test_llm_planner.py`:
+choice execution through `build_sql`, inventory line). Live
+verification is still PENDING — Gemini generation has never been
+observed working (last verified states: HTTP 503 at 13:29 PST and a
+120s read timeout at 13:36 PST, both 2026-11-12).

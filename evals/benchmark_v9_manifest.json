@@ -1,0 +1,1071 @@
+{
+ "benchmark": "socialpulse-nlq",
+ "created": "2026-11-12",
+ "data": {
+  "counts": {
+   "dim_users": 500000,
+   "fact_content_creation": 1759999,
+   "fact_messages": 4654610,
+   "fact_sessions": 13614220
+  },
+  "max_session_date": "2026-03-31",
+  "seed": 42,
+  "users": 500000,
+  "window": [
+   "2026-01-01",
+   "2026-03-31"
+  ]
+ },
+ "families": [
+  "metric_scoping",
+  "ambiguous_metric",
+  "multi_turn_context",
+  "complex_joins_breakdowns",
+  "incorrect_assumption",
+  "guardrail_adversarial",
+  "sql_safety_syntax",
+  "aggregation_grain"
+ ],
+ "heldout_proposal": {
+  "heldout": [
+   "b10",
+   "b15",
+   "b19",
+   "b23",
+   "b30",
+   "b36",
+   "b37",
+   "b39",
+   "c2",
+   "c8",
+   "h02",
+   "h08",
+   "h18",
+   "h21",
+   "h26",
+   "h30",
+   "t06",
+   "t08",
+   "t10",
+   "t13",
+   "t16",
+   "t19",
+   "t25",
+   "t30",
+   "t40",
+   "t45",
+   "t47",
+   "t51",
+   "t56",
+   "t64"
+  ],
+  "note": "v9 held-out (30): unchanged from v8 -- the new probe cases (p13, p14) are in dev. HONEST LIMITATION: the probes were run during the build (that is how the turn was verified), so like v1-v8, v9 held-out means 'held out from fixes', not pristine. Truly fresh held-out cases (designed without probing) have not arrived yet. The 120/30 target split is exceeded at 164 cases (134 dev / 30 held-out).",
+  "rationale": "Different (metric, app, window) combinations plus hard cases held back entirely."
+ },
+ "rules": [
+  "The harness runs dev-only, held-out-only, or all -- never a mixed aggregate. Held-out results are reported in a separate table; they must never be folded into the dev aggregate or used to decide a fix.",
+  "A fix decided against a dev failure is re-verified on held-out only by reporting, never by tuning against held-out failures. If a held-out failure drives a change, that case moves to dev in the next benchmark version and the version number changes.",
+  "The manifest version (v3) and the eval files must agree: the harness refuses to run if a case id is missing from, or duplicated in, either side, or if the data pin (users, counts, max date) does not match the data dir.",
+  "New cases (slice 2b) get a manifest entry with family + split at creation time, before any fix is made against them. The version bumps to v3 when the case set changes.",
+  "Templated cases (t01-t70) are labeled as such in the case file and in docs/benchmark.md; they are not independent observations. The family, not the individual case, is the unit of uncertainty.",
+  "Hard cases (h01-h31) are labeled as such in their oracle notes; they are hand-designed, not templated, and their expected behavior (clarification/refusal) is the finding, not a value.",
+  "Probe cases (p01-p03) are labeled with their origin (user probe 2026-11-06) in the case file and in docs/benchmark.md; they pin behavior the user actually saw in the live shell, not behavior designed in advance.",
+  "Probe case p04 is labeled with its origin (user probe 2026-11-09) in the case file and in docs/benchmark.md; it pins behavior the user actually saw in the live shell, not behavior designed in advance.",
+  "Probe case p05 (chained breakdown, sticky MAU context) is labeled the same way; it pins the turn-3 behavior the user authorized as an extension of the p04 probe.",
+  "Probe case p06 is labeled with its origin (user probe 2026-11-10) in the case file and in docs/benchmark.md; it pins behavior the user actually saw in the live shell, not behavior designed in advance.",
+  "Probe case p07 (bare 'by country' follow-up after a MAU turn) is labeled the same way; it pins the turn-2 behavior the user authorized as the follow-up form of the p06 probe.",
+  "Probe cases p08/p09 are labeled with their origin (user probe 2026-11-10) in the case file and in docs/benchmark.md; they pin behavior the user actually saw in the live shell, not behavior designed in advance.",
+  "Probe case p10 (bare '% of creators of MAU' follow-up after a MAU turn) is labeled the same way; it pins the turn-2 behavior the user authorized as the follow-up form of the p08 probe.",
+  "Probe cases p11/p12 are labeled with their origin (user probe 2026-11-11) in the case file and in docs/benchmark.md; they pin behavior the user actually saw in the live shell, not behavior designed in advance.",
+  "Probe case p12 (bare 'I need the Monthly active users and creators by country' follow-up after a MAU-by-country turn) is labeled the same way; it pins the turn-2 behavior the user authorized as the follow-up form of the p11 probe.",
+  "Probe cases p13/p14 are labeled with their origin (user probe 2026-11-12) in the case file and in docs/benchmark.md; they pin behavior the user actually saw in the live shell, not behavior designed in advance.",
+  "Probe case p14 (bare 'same for WhatsApp' follow-up after a weekly-series turn) is labeled the same way; it pins the turn-2 behavior the user authorized as the follow-up form of the p13 probe."
+ ],
+ "version": "v9",
+ "cases": [
+  {
+   "family": "aggregation_grain",
+   "id": "b01",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b02",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b03",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b04",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b05",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b06",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b07",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b08",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "b09",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "b10",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "b11",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "b12",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "b13",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "b14",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "b15",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b16",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b17",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "b18",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b19",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b20",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b21",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b22",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b23",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "b24",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b25",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b26",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b27",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b28",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b29",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "b30",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "b31",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "b32",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "b33",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "b34",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b35",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b36",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "b37",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b38",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "b39",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "c1",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "c2",
+   "kind": "conversation",
+   "split": "heldout"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "c3",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "c4",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "c5",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "c6",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "c7",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "c8",
+   "kind": "conversation",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "c9",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "c10",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t01",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t02",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t03",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t04",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t05",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t06",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t07",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t08",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t09",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t10",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t11",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t12",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t13",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t14",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t15",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t16",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t17",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t18",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t19",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t20",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t21",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "t22",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t23",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t24",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t25",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t26",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t27",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t28",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t29",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t30",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t31",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t32",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t33",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t34",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t35",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "t36",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t37",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t38",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t39",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t40",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t41",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t42",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t43",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t44",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t45",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t46",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t47",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t48",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "complex_joins_breakdowns",
+   "id": "t49",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "t50",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "t51",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "t52",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "t53",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "t54",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "t55",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "t56",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "t57",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "t58",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "t59",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "t60",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "t61",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "t62",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "t63",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "t64",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "t65",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "t66",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "t67",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "t68",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "t69",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "t70",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h01",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h02",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h03",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h04",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h05",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h06",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h07",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h08",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h09",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h10",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h11",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "h12",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "h13",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "h14",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "h15",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "ambiguous_metric",
+   "id": "h16",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "h17",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "h18",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "incorrect_assumption",
+   "id": "h19",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "h20",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "h21",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "h22",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "h23",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "guardrail_adversarial",
+   "id": "h24",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "h25",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "h26",
+   "kind": "single",
+   "split": "heldout"
+  },
+  {
+   "family": "sql_safety_syntax",
+   "id": "h27",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "h28",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "h29",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "h30",
+   "kind": "conversation",
+   "split": "heldout"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "h31",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "p01",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "p02",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "p03",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "p04",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "p05",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "p06",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "p07",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "p08",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "p09",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "p10",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "metric_scoping",
+   "id": "p11",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "p12",
+   "kind": "conversation",
+   "split": "dev"
+  },
+  {
+   "family": "aggregation_grain",
+   "id": "p13",
+   "kind": "single",
+   "split": "dev"
+  },
+  {
+   "family": "multi_turn_context",
+   "id": "p14",
+   "kind": "conversation",
+   "split": "dev"
+  }
+ ]
+}

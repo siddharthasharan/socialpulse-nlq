@@ -109,6 +109,32 @@ def check_values(conv, replies, failures):
                 failures.append(f"daily series rows: got {len(got)}, expected {len(want)}")
             elif any(g != w for g, w in zip(got, want)):
                 failures.append("daily series values differ from expected")
+    # Weekly series (2026-11-12, p14): the reply's working payload
+    # carries the visualization built from the executed weekly SQL,
+    # so the chart kind and the week-by-week values are checked
+    # against the same receipts the shell shows. The LAST
+    # weekly_series reply is the one checked: turn 1 is the Instagram
+    # series (the question that opens the conversation) and turn 2 is
+    # the WhatsApp series (the app-switch the case pins), so the first
+    # match would check the wrong app. Exact equality is right here:
+    # both sides are counts from the same deterministic data, not
+    # re-derivations with rounding.
+    weekly_replies = [r for r in replies if r.get("weekly_series")]
+    if weekly_replies:
+        viz = (weekly_replies[-1].get("working") or {}).get("visualization") or {}
+        if "weekly_series_chart_kind" in checks:
+            chart = viz.get("chart") or {}
+            if chart.get("kind") != checks["weekly_series_chart_kind"]:
+                failures.append(f"weekly series chart: expected "
+                                f"{checks['weekly_series_chart_kind']}, got {chart.get('kind')}")
+        if "weekly_series_values" in checks:
+            rows = viz.get("rows") or []
+            got = [float(r[-1]) for r in rows if len(r) > 1]
+            want = [float(v) for v in checks["weekly_series_values"]]
+            if len(got) != len(want):
+                failures.append(f"weekly series rows: got {len(got)}, expected {len(want)}")
+            elif any(g != w for g, w in zip(got, want)):
+                failures.append("weekly series values differ from expected")
     # MAU by country (2026-11-10, p07): the "by country" follow-up
     # after a MAU turn cuts the MAU number just shown (distinct users
     # per country), not the creators breakdown. Rows carry the country
