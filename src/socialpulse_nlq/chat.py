@@ -1102,6 +1102,293 @@ class ChatSession:
                                          "high": max(vals), "high_week": weeks[high_i],
                                          "partial_weeks": partial})
 
+    def _weekly_creators_series(self, app, start, end):
+        """Weekly distinct creators per ISO week, app-scoped.
+
+        Same grain as the weekly WAU series, but the population is
+        creators (distinct creator_id publishing in the week) from
+        fact_content_creation joined to dim_content for the app --
+        the same join the weather report's daily-creators card uses
+        (weather.py), so the weekly series and the card agree on
+        what a creator is. Returns a list of (week_str, creators)
+        ordered by week.
+        """
+        con = self._connect()
+        sql = (
+            "SELECT CAST(DATE_TRUNC('week', CAST(f.published_at AS DATE)) AS DATE) AS w, "
+            "COUNT(DISTINCT f.creator_id) AS n "
+            "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+            f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}' "
+            f"AND c.app = '{app}' GROUP BY w ORDER BY w")
+        rows = con.execute(sql).fetchall()
+        return [(str(w), int(n)) for w, n in rows]
+
+    def _daily_creators_series(self, app, start, end):
+        """Daily distinct creators, app-scoped. Same definition as
+        _weekly_creators_series, one row per day. Used for the
+        timing of a weekly break: the day the level changes."""
+        con = self._connect()
+        sql = (
+            "SELECT CAST(f.published_at AS DATE) AS d, COUNT(DISTINCT f.creator_id) AS n "
+            "FROM fact_content_creation f JOIN dim_content c ON c.content_id = f.content_id "
+            f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{start}' AND DATE '{end}' "
+            f"AND c.app = '{app}' GROUP BY d ORDER BY d")
+        rows = con.execute(sql).fetchall()
+        return [(str(d), int(n)) for d, n in rows]
+
+    def _watchouts_turn(self, app):
+        """Watch-outs after a weekly series (2026-11-12): "tell me
+        what to watch out" / "what drove the plateau?".
+
+        A diagnosis of the weekly series, not a new metric: it
+        reuses the diagnosis machinery -- the weather cards for the
+        app (computed locally, NOT stored as self.weather) with the
+        same problem-set rules and the same priority (creators >
+        retention > growth > engagement, from the questions file)
+        -- plus the weekly evidence the series itself shows: weekly
+        creators by week (the shock) and the WAU plateau. The reply
+        names the creator-supply shock as the top finding, the
+        plateau, the partial weeks, and what to monitor, and says
+        plainly that it describes the window only -- it is not a
+        forecast.
+
+        Deliberately standalone: self.weather is NOT set here, so
+        the recommendation / brief / drill-down turns still ask for
+        a weather report first (their gates are unchanged). The
+        honest path to a recommendation is "What's happening with
+        {app}?" first. Like diagnosis, this turn has no working
+        panel: it runs several queries (cards + two series), not
+        one SQL.
+        """
+        import datetime
+        from .planner import run_plan
+        start, end = self.series_window or ("2026-01-01", "2026-03-31")
+        # The WAU series, re-run (same verification as the weekly
+        # turn): the turn must not trust a stale stored series.
+        q = f"weekly WAU by week for {app}"
+        p = self._plan(q)
+        if (p["type"] != "query" or p.get("metric") != "wau_by_week"
+                or p.get("grain") != "user x week" or not p.get("sql")
+                or p.get("filters", {}).get("app") != app):
+            return self._clarify("I could not rebuild the weekly WAU series for "
+                                 f"{app} to diagnose it. Try \"Weekly WAU by week for {app}\" first.")
+        _cols, wau_rows, _ms = run_plan(p, self.data_dir)
+        if not wau_rows:
+            return self._clarify(f"No weekly WAU series came back for {app} — the window may be empty.")
+        wau = [(str(w), int(v)) for w, v in wau_rows]
+        creators = self._weekly_creators_series(app, start, end)
+        daily = dict(self._daily_creators_series(app, start, end))
+        # Diagnosis evidence, computed locally: the weather cards
+        # for the app, with the same problem-set rules as
+        # _diagnosis_turn. self.weather is deliberately NOT set
+        # (see the docstring).
+        weather = compute_weather(self.data_dir, app=app)
+        cards = _cards(weather)
+        problem_set = set()
+        if (cards["orphan_post_rate"]["current"] > 0.20
+                or cards["daily_creators"]["direction"] == "down"
+                or cards["creator_penetration"]["direction"] == "down"):
+            problem_set.add("creators")
+        if cards["d7_retention"]["direction"] == "down":
+            problem_set.add("retention")
+        if cards["dau"]["direction"] == "down":
+            problem_set.add("growth")
+        if cards["engagement_rate"]["direction"] == "down":
+            problem_set.add("engagement")
+        problems = [t for t in self.diagnosis_priority if t in problem_set]
+        problems += [t for t in sorted(problem_set) if t not in problems]
+        primary = problems[0] if problems else None
+        self.topic = primary or self.topic
+        self.stage = "watchouts"
+        # Complete weeks only for trend claims: a week whose Monday
+        # falls before the window start, or whose Sunday falls after
+        # the window end, covers fewer than 7 in-window days.
+        start_d = datetime.date.fromisoformat(start)
+        end_d = datetime.date.fromisoformat(end)
+
+        def _is_partial(week):
+            wd = datetime.date.fromisoformat(week)
+            return wd < start_d or wd + datetime.timedelta(days=6) > end_d
+
+        partial = sorted({w for w, _ in wau + creators if _is_partial(w)})
+        complete_wau = [(w, v) for w, v in wau if not _is_partial(w)]
+        complete_creators = [(w, v) for w, v in creators if not _is_partial(w)]
+        # The shock: the largest week-over-week drop between
+        # consecutive complete weeks in weekly creators. A drop of
+        # 20% or more is the break; anything smaller is not called
+        # a shock, and the creators finding reports the range
+        # instead.
+        shock = None
+        for (w0, v0), (w1, v1) in zip(complete_creators, complete_creators[1:]):
+            if v0 and (v0 - v1) / v0 >= 0.20:
+                if shock is None or (v0 - v1) / v0 > shock["drop_pct"]:
+                    shock = {"before_week": w0, "before": v0,
+                             "after_week": w1, "after": v1,
+                             "drop_pct": (v0 - v1) / v0}
+        # Daily timing of the shock: the break day is the day
+        # before the break week's Monday (the first low day). The
+        # before/after means are the 10 days ending the day before
+        # the break day, and the 14 days starting on it.
+        break_day = before_mean = after_mean = None
+        if shock:
+            after_monday = datetime.date.fromisoformat(shock["after_week"])
+            break_day = after_monday - datetime.timedelta(days=1)
+            before_days = [break_day - datetime.timedelta(days=i)
+                           for i in range(1, 11)]
+            after_days = [break_day + datetime.timedelta(days=i)
+                          for i in range(14)]
+            before_vals = [daily[str(d)] for d in before_days if str(d) in daily]
+            after_vals = [daily[str(d)] for d in after_days if str(d) in daily]
+            before_mean = sum(before_vals) / len(before_vals) if before_vals else None
+            after_mean = sum(after_vals) / len(after_vals) if after_vals else None
+        # The plateau: complete-week WAU values -- the peak, and
+        # the last three complete weeks (flat when their spread is
+        # small next to the peak).
+        peak_week, peak_val = max(complete_wau, key=lambda t: t[1])
+        first_week, first_val = complete_wau[0]
+        last3 = [v for _, v in complete_wau[-3:]]
+        last3_mean = sum(last3) / len(last3)
+        spread_pct = (max(last3) - min(last3)) / last3_mean * 100 if last3_mean else 0.0
+        peak_i = [w for w, _ in complete_wau].index(peak_week)
+        grew_every_week = all(complete_wau[i + 1][1] >= complete_wau[i][1]
+                              for i in range(peak_i))
+        dau, d7 = cards["dau"], cards["d7_retention"]
+        dc, pen = cards["daily_creators"], cards["creator_penetration"]
+        orph, eng = cards["orphan_post_rate"], cards["engagement_rate"]
+        label = _window_label(start, end)
+        others = [a for a in APPS if a != app]
+        phrase = _window_phrase(start, end)
+        self._set_options([
+            {"label": f"Weather — what's happening with {app}?",
+             "send": f"What's happening with {app}?"},
+            {"label": f"Weekly WAU for {others[0]}",
+             "send": f"Weekly WAU by week for {others[0]}{phrase}"},
+            {"label": f"Weekly WAU for {others[1]}",
+             "send": f"Weekly WAU by week for {others[1]}{phrase}"},
+        ])
+        payload = {
+            "app": app, "start": start, "end": end,
+            "primary_topic": primary, "problems": problems,
+            "weekly_creators": [v for _, v in creators],
+            "weekly_wau": [v for _, v in wau],
+            "creators_before": shock["before"] if shock else None,
+            "creators_before_week": shock["before_week"] if shock else None,
+            "creators_after": shock["after"] if shock else None,
+            "creators_after_week": shock["after_week"] if shock else None,
+            "creators_drop_pct": shock["drop_pct"] if shock else None,
+            "break_day": str(break_day) if shock else None,
+            "daily_creators_before_mean": before_mean,
+            "daily_creators_after_mean": after_mean,
+            "wau_peak": peak_val, "wau_peak_week": peak_week,
+            "wau_plateau_last3": last3,
+            "wau_first_complete": first_val,
+            "wau_first_complete_week": first_week,
+            "partial_weeks": partial,
+            "dau_current": dau["current"], "dau_direction": dau["direction"],
+            "dau_change_pct": dau["change_pct"],
+            "d7_current": d7["current"], "d7_change_pp": d7["change_pp"],
+            "orphan_rate": orph["current"],
+        }
+        if not primary:
+            text = (f"No metric fired as problematic on the weather thresholds for {app}: "
+                    "growth, retention, creators and engagement are all flat or up. "
+                    "That is a statement about this synthetic window, not a guarantee.")
+            return self._reply("watchouts", text, watchouts=payload)
+        lines = [f"Watch-outs for {app} — weekly active users, {label} ({len(wau)} weeks)."]
+        if shock:
+            lines.append(
+                "The creator-supply shock is the top finding, and the user plateau "
+                "starts the same weeks it lands.")
+        # Findings in diagnosis priority order.
+        findings = []
+        if "creators" in problems:
+            if shock:
+                before_range = (f"{(break_day - datetime.timedelta(days=10)).strftime('%b %-d')}–"
+                                f"{(break_day - datetime.timedelta(days=1)).strftime('%b %-d')}")
+                after_range = (f"{break_day.strftime('%b %-d')}–"
+                               f"{(break_day + datetime.timedelta(days=13)).strftime('%b %-d')}")
+                post_vals = [v for w, v in complete_creators if w >= shock["after_week"]]
+                detail = (
+                    f"Creator supply collapsed in mid-February and has not recovered. "
+                    f"Weekly creators were {shock['before']:,} in the week of {shock['before_week']}, "
+                    f"then {shock['after']:,} in the week of {shock['after_week']} — down "
+                    f"{shock['drop_pct'] * 100:.1f}% in one week — and stayed near {shock['after']:,} "
+                    f"in every complete week after ({min(post_vals):,}–{max(post_vals):,} through "
+                    f"{complete_creators[-1][0]}). Daily: about {before_mean:,.0f} creators a day "
+                    f"{before_range}, then about {after_mean:,.0f} a day {after_range}. The drop lands "
+                    f"on {break_day} and is sustained, not a one-day blip. In the current 28 days "
+                    f"daily creators are {_fmt(dc['current'], 'creators/day')} ({dc['direction']}, "
+                    f"{dc['change_pct']:+.1f}% vs the prior 28 days) and penetration is "
+                    f"{_fmt(pen['current'], 'share')} ({pen['direction']}). "
+                    f"{_fmt(orph['current'], 'share')} of posts get zero engagement (whole window).")
+            else:
+                detail = (
+                    f"Creator supply is the first problem for {app}: daily creators are "
+                    f"{_fmt(dc['current'], 'creators/day')} ({dc['direction']}, "
+                    f"{dc['change_pct']:+.1f}% vs the prior 28 days), penetration is "
+                    f"{_fmt(pen['current'], 'share')} ({pen['direction']}), and "
+                    f"{_fmt(orph['current'], 'share')} of posts get zero engagement (whole window). "
+                    f"Weekly creators show no sharp one-week break (largest complete-week drop under 20%).")
+            findings.append(detail)
+        if "retention" in problems:
+            findings.append(
+                f"Retention is also down: D7 is {_fmt(d7['current'], 'share')} "
+                f"({d7['direction']}, {d7['change_pp']:+.1f} points vs prior cohorts).")
+        # Growth: the plateau. DAU direction decides whether growth
+        # itself is a problem; the plateau is the watch item either
+        # way, and it is reported here rather than as a DAU claim.
+        growth_bits = []
+        if "growth" in problems:
+            growth_bits.append(
+                f"Growth is down: DAU is {_fmt(dau['current'], 'users/day')} "
+                f"({dau['direction']}, {dau['change_pct']:+.1f}% vs the prior 28 days).")
+        if grew_every_week:
+            growth_bits.append(
+                f"Weekly users grew every complete week from {_fmt(first_val, 'users')} "
+                f"(week of {first_week}) to {_fmt(peak_val, 'users')} (week of {peak_week}), "
+                f"then sat at {', '.join(f'{v:,}' for v in last3)} for the last three complete "
+                f"weeks — flat within {spread_pct:.1f}%.")
+        else:
+            growth_bits.append(
+                f"Weekly users rose from {_fmt(first_val, 'users')} (week of {first_week}) to "
+                f"{_fmt(peak_val, 'users')} (week of {peak_week}), then sat at "
+                f"{', '.join(f'{v:,}' for v in last3)} for the last three complete weeks — "
+                f"flat within {spread_pct:.1f}%.")
+        if shock:
+            growth_bits.append(
+                "The plateau starts the same weeks the creators collapsed. That timing is a fact "
+                "about this window; it does not prove the creator drop caused the plateau.")
+        findings.append(" ".join(growth_bits))
+        if "engagement" in problems:
+            findings.append(
+                f"Engagement is down: engagement rate is {_fmt(eng['current'], 'share')} "
+                f"({eng['direction']}).")
+        # What did not break: metrics outside the problem set.
+        ok = []
+        if "growth" not in problems:
+            ok.append(f"DAU is {_fmt(dau['current'], 'users/day')} ({dau['direction']}, "
+                      f"{dau['change_pct']:+.1f}% vs the prior 28 days)")
+        if "engagement" not in problems:
+            ok.append(f"engagement is flat ({_fmt(eng['current'], 'share')})")
+        if ok:
+            tail = "What did not break: " + "; ".join(ok) + "."
+            if primary == "creators" and "growth" not in problems:
+                tail += (" So this is a creator-supply problem inside healthy growth, "
+                         "not a general collapse.")
+            findings.append(tail)
+        text = "\n\n".join(lines + [f"{i + 1}. {f}" for i, f in enumerate(findings)])
+        if partial:
+            text += ("\n\nNote: the " + ("weeks" if len(partial) > 1 else "week") +
+                     " of " + " and ".join(partial) +
+                     (" are partial — the window starts Jan 1 and ends Mar 31, so those "
+                      "weeks cover fewer than 7 days and their counts are lower, not a drop."))
+        text += ("\n\nWhat to monitor: "
+                 + (f"whether weekly creators recover above ~{shock['after']:,}; "
+                    if shock else "whether weekly creators recover; ")
+                 + "whether DAU follows creators down; whether D7 keeps falling. "
+                   "This describes the Jan–Mar 2026 window only — it is not a forecast.")
+        return self._reply("watchouts", text, watchouts=payload)
+
     def _daily_series_turn(self, app, question=None):
         """Standalone daily-series turn (2026-11-06): DAU by day.
 
@@ -1922,7 +2209,7 @@ class ChatSession:
         # send text is what is actually sent, so a letter after a
         # drill-down advances to diagnosis/recommendation/brief instead
         # of re-opening the same drill-down.
-        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage in ("mau", "daily_series", "weekly_series")):
+        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage in ("mau", "daily_series", "weekly_series", "watchouts")):
             idx = ord(q) - ord("a") if q.isalpha() else int(q) - 1
             if 0 <= idx < len(self.options):
                 send = self.options[idx].get("send") or self.options[idx].get("topic")
@@ -1956,9 +2243,13 @@ class ChatSession:
                 # Daily-series follow-up keeps the series intent and
                 # the window, and swaps the app.
                 return self._daily_series_turn(stripped_clean, self._series_question(stripped_clean))
-            if self.stage == "weekly_series":
+            if self.stage in ("weekly_series", "watchouts"):
                 # Weekly-series follow-up keeps the series intent and
-                # the window, and swaps the app.
+                # the window, and swaps the app. After a watch-outs
+                # turn the same swap re-runs the weekly series for
+                # the new app first (the watch-outs turn diagnoses
+                # the series, so a new app needs its own series
+                # before it can be diagnosed).
                 return self._weekly_series_turn(stripped_clean, self._weekly_series_question(stripped_clean))
             if q.startswith("same for") and self.topic and self.weather:
                 # Same drill-down, different app: weather the new app
@@ -2126,6 +2417,29 @@ class ChatSession:
             return self._reply("clarification",
                                "Which app's weekly WAU? Reply instagram, whatsapp, or facebook — "
                                "for example, \"Weekly WAU by week for Instagram\".")
+        # Watch-outs after a weekly series (2026-11-12): "tell me
+        # what to watch out" / "what drove the plateau?" after a
+        # weekly-series turn returns the diagnosis of the series --
+        # the creator-supply shock, the WAU plateau, retention --
+        # reusing the diagnosis evidence plus the weekly series.
+        # Gated on stage == "weekly_series": with no series state
+        # it clarifies, and after MAU/daily-series state it
+        # clarifies too (scope is weekly-series only). Placed after
+        # the weekly-series block and before breakdown/why, so
+        # "what's driving the plateau" lands here, not in the why
+        # turn (the why turn still answers "driving" questions in
+        # every other state).
+        if self.stage == "weekly_series" and (
+                "watch out" in q or "watchout" in q
+                or "what drove" in q
+                or "what's driving" in q or "what is driving" in q
+                or ("why did" in q and "plateau" in q)):
+            app = self.app
+            if app:
+                return self._watchouts_turn(app)
+            return self._clarify("Ask for a weekly series first — for example, "
+                                 "\"What's the weekly trend for active users for Instagram?\" — "
+                                 "then ask what to watch out for.")
         # Breakdown: "creators by country", "creators by surface".
         # This is the country/surface decomposition the user chose
         # first (2026-10-29), ahead of creator cohorts. The trigger

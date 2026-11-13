@@ -2274,3 +2274,272 @@ choice execution through `build_sql`, inventory line). Live
 verification is still PENDING — Gemini generation has never been
 observed working (last verified states: HTTP 503 at 13:29 PST and a
 120s read timeout at 13:36 PST, both 2026-11-12).
+
+# Benchmark v10 — the watch-outs turn (2026-11-12)
+
+## The probe (live shell, 2026-11-11)
+
+The second half of the probe that produced v9: after the v8 answer
+the user asked **"can you put it in a chart for weekly users and
+tell me what things to watch out"** → "I could not map that to a
+chat turn." The chart half shipped as v9 (commit `7550bb4`, live).
+The watch-outs half was parked while chunk B ran, then un-parked
+2026-11-12 15:21 PST when the user tapped "Watch-outs after the
+weekly series" — the build adds the watch-outs half only.
+
+The data already told the story. From the workspace 500K data
+(verified independently, two formulations agreeing exactly):
+Instagram weekly creators run ~31,900–32,000 through January, are
+31,289 in the week of Feb 9, then **18,120 from the week of Feb 16
+onward** — a −42.1% step, stable near 18,000 through the Mar 23
+week. Daily distinct creators confirm the timing: ~10,314 a day
+Feb 5–14, then **~4,667 a day from Feb 15 onward, sustained** —
+the break lands on Sunday Feb 15, 2026, and daily DAU shows no
+parallel drop (Instagram DAU 45,249, +4.0%). The same shock is
+platform-wide, not Instagram-specific: WhatsApp 20,690 → 11,880
+(−42.6%), Facebook 17,382 → 10,020 (−42.4%), in the same weeks.
+Instagram WAU by week grows every complete week 90,699 (Jan 5) →
+147,939 (Mar 2), then **147,048 / 147,057 / 146,510** — flat within
+0.4% for the last three complete weeks: a plateau that starts the
+same weeks the creator supply breaks. The diagnosis flow already
+prioritizes creators first, and the weather cards for all three
+apps already show the same problem set (creators + retention):
+daily creators down ~32% in the last 28 days, D7 down ~1.8pp,
+orphan ~25%, DAU up ~4%, engagement flat.
+
+## The turn (`src/socialpulse_nlq/chat.py`)
+
+The watch-outs turn reuses the existing diagnosis machinery — it
+does not invent a parallel one, a new metric, a new threshold, or
+a new scoring rule:
+
+1. **Diagnosis evidence, reused.** `_weather_turn` sets
+   `self.weather = compute_weather(self.data_dir, app=app)`
+   (weather.py: current = last 28 days of sessions, Mar 4–31;
+   prior = 28 days before, Feb 4–Mar 3; daily creators =
+   AVG(COUNT(DISTINCT creator_id)) per day from
+   `fact_content_creation` JOIN `dim_content` on content_id,
+   app-scoped via `c.app`; D7 cohorts; thresholds counts 2%,
+   rates 1pp; orphan >20%, top-1% >8%). `_diagnosis_turn`
+   requires `self.weather`, uses `_cards(self.weather)`, and
+   applies the problem set: creators if orphan > 0.20 OR daily
+   creators down OR creator penetration down; retention if D7
+   down; growth if DAU down; engagement if engagement_rate down;
+   priority from `self.diagnosis_priority` (creators > retention
+   > growth > engagement, from the questions file). The
+   watch-outs turn computes the weather cards **locally** for the
+   app (`compute_weather`, NOT stored as `self.weather`) and
+   applies the same problem set and priority, plus the weekly
+   evidence (weekly creators by week, WAU plateau). The choice
+   is documented in the turn docstring: the turn stands alone
+   (see "What the turn deliberately does NOT do" below).
+2. **Weekly evidence, new.** `_weekly_creators_series(app,
+   start, end)` — weekly COUNT(DISTINCT creator_id) per ISO
+   week, app-scoped via the same `dim_content` join as the
+   weather cards. `_daily_creators_series(app, start, end)` —
+   the same, per day. Complete-weeks-only trend claims: a week
+   whose Monday falls before the window start or whose Sunday
+   falls after the window end is partial. The shock is the
+   largest week-over-week drop between consecutive complete
+   weeks in weekly creators, threshold ≥20%. The break day is
+   the day before the break-week Monday; the before mean is the
+   mean daily creators over the 10 days ending the day before
+   the break day; the after mean is the mean over the 14 days
+   starting the break day. The plateau is the peak complete-week
+   WAU plus the last 3 complete weeks plus the spread.
+3. **Routing.** `_watchouts_turn(app)` (type `watchouts`,
+   stage `watchouts`) sits after the weekly-series block, before
+   breakdown/why, gated on `self.stage == "weekly_series"`,
+   triggers: "watch out", "watchout", "what drove", "what's
+   driving", "what is driving", "why did" + "plateau". App from
+   the question → sticky `mau_context` → session app → clarify
+   if none (same inheritance as the weekly turn). A fresh session
+   with no series state → generic clarification; after MAU or
+   daily-series state only → clarification (scope is
+   weekly-series only, as authorized). The app-switch branch
+   (stage in `("weekly_series", "watchouts")`) re-runs the
+   weekly series for the new app — the watch-outs turn diagnoses
+   the series, so a new app needs its own series first. The
+   letter-option gate tuple now includes `"watchouts"`, so
+   option letters work after the turn.
+4. **Reply content.** The findings the data actually supports,
+   in priority order: (1) the creator-supply shock as the top
+   finding (weekly 31,289 → 18,120, −42.1%; the week range it
+   holds at ~18,000; daily ~10,314 Feb 5–Feb 14 → ~4,667 Feb
+   15–Feb 28; break Feb 15; the current-28d daily creators,
+   penetration, and orphan rate from the local cards); (2)
+   retention (D7 19.6%, −1.8pp); (3) the plateau (grew every
+   complete week 90,699 → 147,939, then 147,048 / 147,057 /
+   146,510, flat within 0.4% — with the explicit caveat that
+   the timing "does not prove the creator drop caused the
+   plateau"); (4) what did not break (DAU 45,249, +4.0%;
+   engagement flat at 16.0%); the partial-weeks note; what to
+   monitor (whether creator supply recovers, whether DAU
+   follows, whether the plateau holds) — and the sentence "This
+   describes the Jan–Mar 2026 window only — it is not a
+   forecast." The reply carries no forecast language: the
+   harness text check forbids "will " (see below), and the
+   turn's own text was checked to contain "forecast" only in
+   "it is not a forecast". The turn sets `self.topic =
+   primary`, `self.stage = "watchouts"`, and options = weather
+   for the app + weekly WAU for the other apps. **No working
+   panel** (it runs several queries, not one SQL) — the same
+   presentation as diagnosis, which also gets none by design.
+   The reply payload is `watchouts={app, start, end,
+   primary_topic, problems, weekly_creators (14 values),
+   weekly_wau (14 values), creators_before,
+   creators_before_week, creators_after, creators_after_week,
+   creators_drop_pct, break_day, daily_creators_before_mean,
+   daily_creators_after_mean, wau_peak, wau_peak_week,
+   wau_plateau_last3, wau_first_complete,
+   wau_first_complete_week, partial_weeks, dau_current,
+   dau_direction, dau_change_pct, d7_current, d7_change_pp,
+   orphan_rate}`.
+5. **Oracle values (verified from the 500K data by two
+   independent forms — grouped COUNT(DISTINCT) vs
+   DISTINCT-pairs — agreeing exactly, plus partial-week ties
+   and daily-mean anchors):**
+
+   | | Instagram | WhatsApp | Facebook |
+   |---|---|---|---|
+   | Weekly creators, Jan weeks | ~31,900–32,000 | ~21,250 | ~17,750 |
+   | Weekly creators, week of Feb 9 | 31,289 | 20,690 | 17,382 |
+   | Weekly creators, week of Feb 16 | 18,120 | 11,880 | 10,020 |
+   | Drop Feb 9 → Feb 16 | −42.1% | −42.6% | −42.4% |
+   | Daily creators Feb 5–14 mean | 10,314.2 | 6,829.7 | 5,747.3 |
+   | Daily creators Feb 15 (break day) | 4,813 | 3,024 | 2,552 |
+   | Daily creators Feb 15–28 mean | 4,666.7 | 3,078.9 | 2,594.4 |
+   | WAU peak (week of Mar 2) | 147,939 | 98,372 | 82,466 |
+   | WAU last 3 complete weeks | 147,048 / 147,057 / 146,510 | 98,125 / 98,063 / 97,675 | 82,164 / 81,690 / 81,697 |
+
+   Instagram weekly creators (14 Mon-start weeks
+   2025-12-29–2026-03-30; first/last partial): [26,410, 31,979,
+   31,832, 31,995, 31,898, 31,955, 31,289, 18,120, 17,942,
+   18,142, 18,186, 18,057, 18,073, 8,252]. WhatsApp:
+   [17,429, 21,308, 21,250, 21,270, 21,245, 21,219, 20,690,
+   11,880, 11,925, 11,820, 11,970, 11,934, 11,970, 5,458].
+   Facebook: [14,606, 17,744, 17,744, 17,655, 17,767, 17,796,
+   17,382, 10,020, 9,965, 10,021, 10,017, 10,002, 10,088,
+   4,600]. Diagnosis problem set for all three apps:
+   [creators, retention].
+
+## The cases (p15, p16)
+
+- **p15 (conversation, multi_turn_context, dev):** the
+  author's verbatim probe — the weekly series for Instagram,
+  then "tell me what to watch out" → `watchouts`. Oracle:
+  top finding is the creator-supply shock with the derived
+  numbers (creators_before 31,289 week 2026-02-09,
+  creators_after 18,120 week 2026-02-16, daily means 10,314.2
+  / 4,666.71, WAU peak 147,939 week 2026-03-02, plateau last
+  146,510) and the plateau named. Wired by
+  `scripts/wire_watchouts_cases.py`.
+- **p16 (conversation, multi_turn_context, dev):** the weekly
+  series for Instagram, then "what drove the plateau?" →
+  `watchouts` with the same numbers — the plateau question is
+  answered by the shock timing plus the no-causation caveat.
+
+## Harness extension
+
+v10 added to `VERSIONS` in `eval_harness.py`; a `watchouts`
+branch in `_turn_topic` (the turn's `primary_topic`) and a
+watchouts `check_values` branch in
+`scripts/run_conversation_benchmark.py` (a missing watchouts
+reply is itself a failure; `primary_topic` exact;
+creators_before/before_week, creators_after/after_week,
+wau_peak/peak_week exact; daily means within 1.0;
+`wau_plateau_last3` exact list; text must contain "creator
+supply" + "plateau", must not contain "will "). `check_turn`
+topic extraction handles `reply["watchouts"]["primary_topic"]`.
+The oracle entries are kind `"conversation_values"` with 6 SQL
+checks (creators_before/after tol 0; daily means tol 1.0;
+wau_peak/wau_plateau_last tol 0) — the SQL forms are the same
+two-form-verified queries as the wiring script, planner never
+consulted for a value. The `watchouts_values` in the
+conversation checks carry the same six numbers flat plus the
+nested `watchouts_values` (weeks, peak week, plateau list) and
+the text must/must-not lists.
+
+## v10 counts by family and split
+
+| Family | v9 | + probes | v10 total | v10 dev | v10 held-out |
+|---|---|---|---|---|---|
+| metric_scoping | 51 | 0 | 51 | 39 | 12 |
+| aggregation_grain | 32 | 0 | 32 | 29 | 3 |
+| complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
+| ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
+| multi_turn_context | 17 | 2 (p15, p16) | 19 | 16 | 3 |
+| incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
+| guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
+| sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
+| **Total** | **164** | **2** | **166** | **136** | **30** |
+
+Held-out is unchanged (30 cases, same ids as v9). **Honest
+limitation:** the probes were run during the build (that is how
+the turn was verified), so v10 held-out means "held out from
+fixes", not pristine — the same caveat as v1–v9. v10 = 143
+singles + 23 conversations = 166; the wiring script asserts
+143/23.
+
+## v10 results
+
+[RESULTS PENDING — to be filled from the traces once the dev,
+held-out, and v9-regression runs land. Expected: dev 128/136
+(the 126 v9 dev passes plus p15 and p16), held-out 27/30
+(h02, h08, h18), oracle 166/166 agree, 0 inexact, v9
+regression unchanged (126/134, 27/30, oracle 164/164).]
+
+## What the turn deliberately does NOT do
+
+- **No recommendation or brief after watch-outs.** The
+  watch-outs turn sets no `self.weather`, so the recommendation
+  and brief turns still gate on a weather report — asking for
+  one after a watch-outs turn returns the clarification "Ask
+  for a weather report first, so the recommendation has a
+  metric to target." (Pinned by
+  `test_watchouts_recommendation_still_needs_weather`.) The
+  honest path to a recommendation is "What's happening with
+  {app}?" first. Widening the recommendation gate to accept
+  watch-outs state would be a bigger change and was not
+  authorized.
+- **No drill-down after watch-outs.** Drill-down, diagnosis,
+  recommendation, and brief all gate on `self.weather`; the
+  watch-outs turn does not set it.
+- **No forecast.** The turn describes the Jan–Mar 2026 window
+  only and says so; the harness forbids "will " in the reply
+  text.
+- **No planner metric, no LLM routing.** There is no
+  `watchouts` metric in `METRIC_DEFINITIONS` or
+  `catalog/measures.yaml`, and the LLM prompt inventory gains
+  nothing (see `docs/llm-planner.md`, "v10 watch-outs turn").
+  The catalog-assisted and validated variants therefore do not
+  apply to the turn at all — it is a chat turn, not a planner
+  query, and the variants score it only insofar as the
+  conversation harness runs the same chat session.
+- **No new metrics, thresholds, or scoring rule.** The problem
+  set and priority are the diagnosis turn's; the shock
+  threshold (≥20% week-over-week drop between complete weeks)
+  is the turn's one new number, and it is documented here as a
+  turn rule, not a catalog metric.
+
+## Running v10
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v10.py --split dev      # default
+PYTHONPATH=src python scripts/run_benchmark_v10.py --split heldout  # report only
+PYTHONPATH=src python scripts/run_benchmark_v10.py --split all
+PYTHONPATH=src python scripts/run_benchmark_v10.py --skip-oracle     # benchmark only
+PYTHONPATH=src python scripts/run_benchmark_v10.py --variant llm --split dev   # chunk B, same frozen set
+```
+
+## v10 with the LLM planner (chunk B, slice 1 + 2)
+
+The frozen v10 set (166 cases) also runs with `variant="llm"` —
+the LLM planner under the common contract (see
+`docs/llm-planner.md`). No benchmark, oracle, or manifest file
+changes for the LLM variant. The watch-outs turn adds nothing to
+the prompt inventory (see the v10 note in `docs/llm-planner.md`),
+so the model sees exactly the v9 capability list. Live
+verification is still PENDING — Gemini generation has never been
+observed working (last verified states: HTTP 503 at 13:29 PST
+and a 120s read timeout at 13:36 PST, both 2026-11-12).

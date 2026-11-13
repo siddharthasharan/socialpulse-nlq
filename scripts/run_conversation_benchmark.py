@@ -42,6 +42,8 @@ def check_turn(conv, turn, reply, failures):
         topic = reply["recommendation"]["topic"]
     elif reply.get("brief"):
         topic = reply["brief"]["topic"]
+    elif reply.get("watchouts"):
+        topic = reply["watchouts"]["primary_topic"]
     if exp.get("expect_topic") and topic != exp["expect_topic"]:
         failures.append(f"topic: expected {exp['expect_topic']}, got {topic}")
 
@@ -135,6 +137,44 @@ def check_values(conv, replies, failures):
                 failures.append(f"weekly series rows: got {len(got)}, expected {len(want)}")
             elif any(g != w for g, w in zip(got, want)):
                 failures.append("weekly series values differ from expected")
+    # Watch-outs after a weekly series (2026-11-12, p15/p16): the
+    # reply carries a watchouts payload (app, primary_topic, weekly
+    # creators + WAU values, break numbers, plateau values). Counts
+    # exact; means within 1.0; the plateau list exact. A missing
+    # watchouts reply is itself a failure: without it the values
+    # check would silently pass on nothing. The text checks pin the
+    # two things the reply must say (creator supply, plateau) and
+    # the one thing it must not (forecast language -- "will ").
+    if "watchouts_values" in checks:
+        wo = next((r.get("watchouts") for r in replies if r.get("watchouts")), None)
+        if wo is None:
+            failures.append("watch-outs: no watchouts reply")
+        else:
+            want = checks["watchouts_values"]
+            if wo.get("primary_topic") != want["primary_topic"]:
+                failures.append(f"watch-outs primary topic: expected {want['primary_topic']}, "
+                                f"got {wo.get('primary_topic')}")
+            for key in ("creators_before", "creators_before_week",
+                        "creators_after", "creators_after_week",
+                        "wau_peak", "wau_peak_week"):
+                if wo.get(key) != want[key]:
+                    failures.append(f"watch-outs {key}: expected {want[key]}, got {wo.get(key)}")
+            for key in ("daily_creators_before_mean", "daily_creators_after_mean"):
+                if abs(float(wo.get(key) or 0) - want[key]) > 1.0:
+                    failures.append(f"watch-outs {key}: expected ~{want[key]}, got {wo.get(key)}")
+            if wo.get("wau_plateau_last3") != want["wau_plateau_last3"]:
+                failures.append(f"watch-outs plateau: expected {want['wau_plateau_last3']}, "
+                                f"got {wo.get('wau_plateau_last3')}")
+    if "watchouts_text_must_contain" in checks:
+        wo_text = next((r["text"] for r in replies if r.get("watchouts")), "")
+        for phrase in checks["watchouts_text_must_contain"]:
+            if phrase.lower() not in wo_text.lower():
+                failures.append(f"watch-outs text missing {phrase!r}")
+    if "watchouts_text_must_not_contain" in checks:
+        wo_text = next((r["text"] for r in replies if r.get("watchouts")), "")
+        if checks["watchouts_text_must_not_contain"].lower() in wo_text.lower():
+            failures.append(f"watch-outs text must not contain "
+                            f"{checks['watchouts_text_must_not_contain']!r}")
     # MAU by country (2026-11-10, p07): the "by country" follow-up
     # after a MAU turn cuts the MAU number just shown (distinct users
     # per country), not the creators breakdown. Rows carry the country

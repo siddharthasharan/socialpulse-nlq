@@ -137,6 +137,15 @@ VERSIONS = {
            "singles": "benchmark_v9.json",
            "convs": "conversation_v9.json",
            "oracle": "oracle_v9.json"},
+    # v10 (watch-outs turn after a weekly series, 2026-11-12):
+    # v9's 164 cases plus the user probes p15 ("tell me what to
+    # watch out" after the weekly series, conversation) and p16
+    # ("what drove the plateau?" after the weekly series,
+    # conversation). Both in dev; held-out stays 30.
+    "v10": {"manifest": "benchmark_v10_manifest.json",
+            "singles": "benchmark_v10.json",
+            "convs": "conversation_v10.json",
+            "oracle": "oracle_v10.json"},
 }
 
 
@@ -547,6 +556,8 @@ def _turn_topic(reply):
         return reply["recommendation"]["topic"]
     if reply.get("brief"):
         return reply["brief"]["topic"]
+    if reply.get("watchouts"):
+        return reply["watchouts"]["primary_topic"]
     return None
 
 

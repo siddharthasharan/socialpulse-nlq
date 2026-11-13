@@ -9,6 +9,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from socialpulse_nlq.chat import ChatSession
 
+# _stub_session() monkeypatches chat.compute_weather to a fake and
+# never restores it. Save the genuine function here (module import
+# runs before any test) so _real_session() can restore it: a
+# data-dependent test must see real weather, not the stub's shape.
+import socialpulse_nlq.chat as _chat_mod
+_REAL_COMPUTE_WEATHER = _chat_mod.compute_weather
+
 
 def _stub_session():
     """A session whose weather call is replaced by the seed-42 Instagram
@@ -167,6 +174,12 @@ def _real_session():
     data = Path(__file__).resolve().parents[1] / "data/phase1"
     if not (data / "dim_users.parquet").exists():
         return None
+    # _stub_session() replaces chat.compute_weather with a fake and
+    # never restores it; without this, a data test running after a
+    # stub test silently diagnoses the fake weather (its D7 is "up",
+    # the real seed-42 D7 is down). Restore the genuine function.
+    import socialpulse_nlq.chat as chat_mod
+    chat_mod.compute_weather = _REAL_COMPUTE_WEATHER
     return ChatSession(data)
 
 
@@ -1093,5 +1106,159 @@ def test_weekly_series_option_letter_advances():
     if s is None:
         return
     s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("a")
+    assert r["type"] == "weather" and r["app"] == "instagram"
+
+
+def test_watchouts_after_weekly_series_names_shock_and_plateau():
+    # 2026-11-12 (p15): the verbatim probe -- weekly IG, then
+    # "tell me what to watch out". The creator-supply shock is the
+    # top finding (weekly creators 31,289 -> 18,120 in the Feb 9 ->
+    # Feb 16 weeks, -42.1%, staying near 18,000 after; daily about
+    # 10,314 a day Feb 5-14, then about 4,667 a day Feb 15-28), the
+    # WAU plateau (147,939 peak Mar 2, then 147,048 / 147,057 /
+    # 146,510), retention down, DAU up -- no forecast, partial
+    # weeks flagged. Like diagnosis, the turn has no working panel
+    # and sets no weather state.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("tell me what to watch out")
+    assert r["type"] == "watchouts" and r["app"] == "instagram"
+    assert "creator supply" in r["text"].lower() and "plateau" in r["text"].lower()
+    assert "31,289" in r["text"] and "18,120" in r["text"] and "42.1%" in r["text"]
+    assert "147,939" in r["text"] and "2026-02-15" in r["text"]
+    assert "10,314" in r["text"] and "4,667" in r["text"]
+    assert "not a forecast" in r["text"] and "will " not in r["text"].lower()
+    assert "partial" in r["text"] and "2025-12-29" in r["text"] and "2026-03-30" in r["text"]
+    assert "working" not in r
+    assert s.weather is None
+    wo = r["watchouts"]
+    assert wo["primary_topic"] == "creators" and wo["problems"] == ["creators", "retention"]
+    assert wo["creators_before"] == 31289 and wo["creators_before_week"] == "2026-02-09"
+    assert wo["creators_after"] == 18120 and wo["creators_after_week"] == "2026-02-16"
+    assert abs(wo["creators_drop_pct"] - 0.42088) < 0.001
+    assert wo["break_day"] == "2026-02-15"
+    assert abs(wo["daily_creators_before_mean"] - 10314.2) < 0.05
+    assert abs(wo["daily_creators_after_mean"] - 4666.71) < 0.05
+    assert wo["wau_peak"] == 147939 and wo["wau_peak_week"] == "2026-03-02"
+    assert wo["wau_plateau_last3"] == [147048, 147057, 146510]
+    assert wo["partial_weeks"] == ["2025-12-29", "2026-03-30"]
+    assert wo["weekly_creators"] == [26410, 31979, 31832, 31995, 31898, 31955, 31289,
+                                     18120, 17942, 18142, 18186, 18057, 18073, 8252]
+    assert wo["weekly_wau"] == [63764, 90699, 99611, 108169, 117025, 126050, 134298,
+                                139222, 146926, 147939, 147048, 147057, 146510, 69683]
+
+
+def test_watchouts_what_drove_the_plateau():
+    # 2026-11-12 (p16): "what drove the plateau?" after the weekly
+    # series is the same watch-outs turn -- the plateau is answered
+    # by the shock timing, with the explicit caveat that timing
+    # does not prove cause.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("what drove the plateau?")
+    assert r["type"] == "watchouts" and r["app"] == "instagram"
+    assert r["watchouts"]["primary_topic"] == "creators"
+    assert r["watchouts"]["creators_before"] == 31289
+    assert r["watchouts"]["creators_after"] == 18120
+    assert "does not prove" in r["text"] and "plateau" in r["text"].lower()
+    assert "will " not in r["text"].lower()
+
+
+def test_watchouts_no_state_clarifies():
+    # With no weekly series in the session, the watch-outs
+    # phrasings clarify instead of inventing a diagnosis.
+    s = _real_session()
+    if s is None:
+        return
+    assert s.respond("tell me what to watch out")["type"] == "clarification"
+    assert s.respond("what drove the plateau?")["type"] == "clarification"
+    assert s.respond("what should I watch out for")["type"] == "clarification"
+
+
+def test_watchouts_after_mau_clarifies():
+    # Scope is weekly-series only: after a MAU turn the same
+    # phrasings clarify (no series state to diagnose).
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the MAU for Instagram?")
+    assert s.respond("tell me what to watch out")["type"] == "clarification"
+    assert s.respond("what drove the plateau?")["type"] == "clarification"
+
+
+def test_watchouts_after_daily_series_clarifies():
+    # Scope is weekly-series only: after a daily series the same
+    # phrasings clarify.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("show me the DAU for month of Mar 2026 by individual day in a line chart")
+    assert s.respond("tell me what to watch out")["type"] == "clarification"
+
+
+def test_watchouts_whatsapp_app_inheritance():
+    # The turn is data-driven per app: after the WhatsApp weekly
+    # series it diagnoses WhatsApp's shock (20,690 -> 11,880 in
+    # the Feb 9 -> Feb 16 weeks, daily about 6,830 Feb 5-14, then
+    # about 3,079 Feb 15-28; WAU peak 98,372 Mar 2).
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    s.respond("same for WhatsApp")
+    r = s.respond("tell me what to watch out")
+    assert r["type"] == "watchouts" and r["app"] == "whatsapp"
+    wo = r["watchouts"]
+    assert wo["primary_topic"] == "creators"
+    assert wo["creators_before"] == 20690 and wo["creators_after"] == 11880
+    assert abs(wo["daily_creators_before_mean"] - 6829.7) < 0.05
+    assert abs(wo["daily_creators_after_mean"] - 3078.9) < 0.05
+    assert wo["wau_peak"] == 98372 and wo["wau_peak_week"] == "2026-03-02"
+    assert wo["wau_plateau_last3"] == [98125, 98063, 97675]
+    assert "will " not in r["text"].lower()
+
+
+def test_watchouts_recommendation_still_needs_weather():
+    # The watch-outs turn is deliberately standalone: it sets no
+    # weather state, so a recommendation after it still asks for a
+    # weather report first (the gates are unchanged).
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    s.respond("tell me what to watch out")
+    r = s.respond("what experiment would you recommend?")
+    assert r["type"] == "clarification"
+    assert "weather report first" in r["text"]
+
+
+def test_watchouts_app_switch_reruns_weekly_series():
+    # After a watch-outs turn, "same for WhatsApp" re-runs the
+    # weekly series for the new app (the watch-outs turn diagnoses
+    # the series, so a new app needs its own series first).
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    s.respond("tell me what to watch out")
+    r = s.respond("same for WhatsApp")
+    assert r["type"] == "weekly_series" and r["app"] == "whatsapp"
+    assert abs(r["weekly_series"]["mean"] - 79951.0) < 1.0
+
+
+def test_watchouts_option_letter_advances():
+    # Option letters work after a watch-outs turn (stage ==
+    # "watchouts" satisfies the letter gate): "a" is the weather
+    # option for the same app.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    s.respond("tell me what to watch out")
     r = s.respond("a")
     assert r["type"] == "weather" and r["app"] == "instagram"

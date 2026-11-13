@@ -319,3 +319,30 @@ The hybrid router (deterministic first, LLM fallback with a routing
 policy) is the next slice. The fallback turn built here is its
 mechanism; the router adds the policy decision (which questions go to
 the LLM, when to abstain) on top.
+
+## v10 watch-outs turn — no planner metric, no inventory change (2026-11-12)
+
+The v10 watch-outs turn (benchmark v10, cases p15/p16) is a
+deterministic chat turn like diagnosis: it runs off the weekly
+series in the session state, computes the weekly creators series
+and the weather cards locally, and applies the diagnosis problem
+set and priority (creators > retention > growth > engagement).
+There is **no planner metric for it** — no `wau_by_week`-style
+template exists for watch-outs, and none was added — so the
+generated prompt inventory gains nothing: `_build_inventory()`
+derives the inventory from `METRIC_DEFINITIONS` plus the
+mechanical `build_sql` probe, and neither contains a watch-outs
+line. The model therefore cannot route a question to the
+watch-outs turn; those questions reach it through the
+deterministic chat routing (stage == `"weekly_series"`), never
+through the LLM. No mocked-transport test is needed for routing
+that does not exist; the negative is pinned instead
+(`tests/test_llm_planner.py`:
+`test_inventory_gains_nothing_for_watchouts` — "watchouts",
+"watch out", and "watch-outs" are absent from the inventory and
+`"watchouts"` is not a metric id). The inventory line for
+`wau_by_week` is unchanged (filters honored: app; breakdowns:
+none). Live verification is still PENDING — Gemini generation
+has never been observed working (last verified states: HTTP 503
+at 13:29 PST and a 120s read timeout at 13:36 PST, both
+2026-11-12).

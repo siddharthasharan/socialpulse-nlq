@@ -610,3 +610,53 @@ def test_rubric_weekly_series_type():
                                      columns=["date", "dau"]))
     assert r3["items"]["result_equiv"]["pass"] is False
     assert r3["task_success"] is False
+
+
+def test_check_values_watchouts_branch():
+    # 2026-11-12 (p15/p16): the watchouts check_values branch scores
+    # the turn-2 reply's payload against the stored numbers (counts
+    # exact, means within 1.0, plateau list exact) and the text
+    # checks (must say "creator supply" + "plateau", must not say
+    # "will "). The branch lives in
+    # scripts/run_conversation_benchmark.py, loaded the same way the
+    # harness loads it.
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "run_conversation_benchmark",
+        ROOT / "scripts/run_conversation_benchmark.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    check_values = module.check_values
+    wo = {"primary_topic": "creators",
+          "creators_before": 31289, "creators_before_week": "2026-02-09",
+          "creators_after": 18120, "creators_after_week": "2026-02-16",
+          "daily_creators_before_mean": 10314.2,
+          "daily_creators_after_mean": 4666.714285714285,
+          "wau_peak": 147939, "wau_peak_week": "2026-03-02",
+          "wau_plateau_last3": [147048, 147057, 146510]}
+    text = ("Watch-outs for instagram. The creator supply shock is the top finding, "
+            "and the user plateau starts the same weeks it lands. "
+            "This describes the window only — it is not a forecast.")
+    conv = {"id": "p15", "checks": {
+        "watchouts_values": dict(wo),
+        "watchouts_text_must_contain": ["creator supply", "plateau"],
+        "watchouts_text_must_not_contain": "will "}}
+    failures = []
+    check_values(conv, [{"type": "weekly_series"},
+                        {"type": "watchouts", "text": text, "watchouts": wo}], failures)
+    assert failures == [], failures
+    # A wrong number fails, naming the key.
+    bad = dict(wo, creators_after=99999)
+    failures = []
+    check_values(conv, [{"type": "watchouts", "text": text, "watchouts": bad}], failures)
+    assert any("creators_after" in f for f in failures), failures
+    # No watchouts reply at all fails instead of silently passing.
+    failures = []
+    check_values(conv, [{"type": "weekly_series", "text": "x"}], failures)
+    assert any("no watchouts reply" in f for f in failures), failures
+    # Forecast language fails the text check.
+    failures = []
+    check_values(conv, [{"type": "watchouts",
+                         "text": text + " Creators will recover soon.",
+                         "watchouts": wo}], failures)
+    assert any("must not contain" in f for f in failures), failures

@@ -304,6 +304,21 @@ def test_prompt_contract():
     assert "Breakdowns: app, country, platform" in dau_line, dau_line
 
 
+def test_inventory_gains_nothing_for_watchouts():
+    # 2026-11-12 (v10): the watch-outs turn is a deterministic chat
+    # turn like diagnosis -- there is NO planner metric for it, so
+    # the generated prompt inventory gains no line for it. The model
+    # cannot route to a capability that is not a metric; watch-outs
+    # questions reach the turn through the deterministic chat
+    # routing (stage == "weekly_series"), never through the LLM.
+    from socialpulse_nlq.llm_planner import _build_inventory
+    inventory = _build_inventory()
+    assert "watchouts" not in inventory
+    assert "watch out" not in inventory.lower()
+    assert "watch-outs" not in inventory
+    assert "watchouts" not in METRIC_DEFINITIONS
+
+
 def test_harness_llm_dispatch_clarification_needs_no_data():
     # h20 through the harness with a mocked model that would comply:
     # the pre-check clarifies, so no SQL and no data are touched.
