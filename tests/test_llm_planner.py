@@ -403,3 +403,73 @@ def test_weekly_series_in_inventory():
     wau_line = next(l for l in prompt.splitlines()
                     if l.startswith("- wau_mean_weekly"))
     assert "Filters honored: none" in wau_line, wau_line
+
+
+def test_last4_choice_routes_to_wau_last_4_weeks():
+    # 2026-11-13 (v11, p17/p18): a model choice of wau_last_4_weeks
+    # with grain "series" executes through the last-4 template -- the
+    # last 4 complete weeks via the explicit IN list, app-scoped,
+    # never averaged, never the literal last 4 rows. The model never
+    # writes SQL: the choice is validated against the allowlist
+    # (wau_last_4_weeks is in METRIC_DEFINITIONS) and executed via
+    # build_sql.
+    p = _plan("what about the last 4 weeks only? for instagram",
+              FakeTransport(_query_choice(metric="wau_last_4_weeks",
+                                          grain="series")))
+    assert p["type"] == "query" and p["metric"] == "wau_last_4_weeks", p
+    assert p["grain"] == "user x week", p
+    assert "IN (DATE '2026-03-02'" in p["sql"], p["sql"]
+    assert "2026-03-30" not in p["sql"], p["sql"]
+    assert "app = 'instagram'" in p["sql"], p["sql"]
+    assert "AVG(" not in p["sql"], p["sql"]
+    assert p["llm"]["fallback"] is None and p["llm"]["not_consulted"] is None
+
+
+def test_creators_by_week_choice_routes():
+    # 2026-11-13 (v11, p21/p22): a model choice of creators_by_week
+    # with grain "series" executes through the creators template --
+    # per-week DISTINCT creators, app-scoped via the dim_content
+    # join. The model never writes SQL.
+    p = _plan("weekly trend for creators on Instagram",
+              FakeTransport(_query_choice(metric="creators_by_week",
+                                          grain="series")))
+    assert p["type"] == "query" and p["metric"] == "creators_by_week", p
+    assert p["grain"] == "creator x week", p
+    assert "COUNT(DISTINCT f.creator_id)" in p["sql"], p["sql"]
+    assert "JOIN dim_content" in p["sql"], p["sql"]
+    assert "c.app = 'instagram'" in p["sql"], p["sql"]
+    assert "AVG(" not in p["sql"], p["sql"]
+    assert p["llm"]["fallback"] is None and p["llm"]["not_consulted"] is None
+
+
+def test_last4_and_creators_in_inventory():
+    # The prompt inventory is generated at prompt-build time from
+    # METRIC_DEFINITIONS + the mechanical build_sql probe, so the new
+    # capabilities appear automatically -- no prompt-text change, no
+    # version bump. The inventory lines pin what the model can be
+    # told: both metrics honor the app filter (unlike
+    # wau_mean_weekly, which honors none) and have no breakdowns.
+    prompt, _sha = build_prompt("what about the last 4 weeks only? for instagram")
+    last4 = next(l for l in prompt.splitlines()
+                 if l.startswith("- wau_last_4_weeks"))
+    assert "Filters honored: app" in last4, last4
+    assert "Breakdowns: none" in last4, last4
+    creators = next(l for l in prompt.splitlines()
+                    if l.startswith("- creators_by_week"))
+    assert "Filters honored: app" in creators, creators
+    assert "Breakdowns: none" in creators, creators
+
+
+def test_inventory_gains_nothing_for_compare():
+    # 2026-11-13 (v11): the compare turn is a deterministic chat turn
+    # like watch-outs -- there is NO planner metric for it (planner
+    # templates are single-app), so the generated prompt inventory
+    # gains no line for it. The model cannot route to a capability
+    # that is not a metric; compare questions reach the turn through
+    # the deterministic chat routing (compare block), never through
+    # the LLM.
+    from socialpulse_nlq.llm_planner import _build_inventory
+    inventory = _build_inventory()
+    assert "weekly_compare" not in inventory
+    assert "compare" not in inventory.lower()
+    assert "weekly_compare" not in METRIC_DEFINITIONS

@@ -1262,3 +1262,318 @@ def test_watchouts_option_letter_advances():
     s.respond("tell me what to watch out")
     r = s.respond("a")
     assert r["type"] == "weather" and r["app"] == "instagram"
+
+
+def test_weekly_last4_after_weekly_series_p17():
+    # 2026-11-13 (p17): the verbatim probe -- weekly IG, then "what
+    # about the last 4 weeks only?" -- returns the last 4 COMPLETE
+    # weeks (Mar 2/9/16/23), 147,939 / 147,048 / 147,057 / 146,510,
+    # mean 147,138.5, with the explicit note that the partial Mar 30
+    # week is excluded and why -- it would read as a crash.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("what about the last 4 weeks only?")
+    assert r["type"] == "weekly_last4" and r["app"] == "instagram"
+    assert "last 4 complete weeks" in r["text"] and "2026-03-02" in r["text"]
+    assert "2026-03-30" in r["text"] and "left out on purpose" in r["text"]
+    assert "crash" in r["text"] and "not the literal last 4 rows" in r["text"]
+    l4 = r["weekly_last4"]
+    assert l4["weeks"] == ["2026-03-02", "2026-03-09", "2026-03-16", "2026-03-23"]
+    assert l4["values"] == [147939, 147048, 147057, 146510]
+    assert abs(l4["mean"] - 147138.5) < 0.01
+    assert l4["excluded_partial_weeks"] == ["2026-03-30"]
+    w = r["working"]
+    assert "IN (DATE '2026-03-02'" in w["sql"] and "app = 'instagram'" in w["sql"]
+    assert "AVG(" not in w["sql"]
+    viz = w["visualization"]
+    assert viz["available"] is True and viz["chart"]["kind"] == "line"
+    assert len(viz["chart"]["points"]) == 4
+    assert viz["rows"] == [["2026-03-02", 147939], ["2026-03-09", 147048],
+                           ["2026-03-16", 147057], ["2026-03-23", 146510]]
+    assert viz["diagram"] is not None
+
+
+def test_weekly_last4_same_for_whatsapp_p18():
+    # 2026-11-13 (p18): last-4, then "same for WhatsApp" re-runs
+    # last-4 for the new app (stage weekly_last4), not the full
+    # series. WhatsApp golds: 98,372 / 98,125 / 98,063 / 97,675,
+    # mean 98,058.75.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    s.respond("what about the last 4 weeks only?")
+    r = s.respond("same for WhatsApp")
+    assert r["type"] == "weekly_last4" and r["app"] == "whatsapp"
+    assert r["weekly_last4"]["values"] == [98372, 98125, 98063, 97675]
+    assert abs(r["weekly_last4"]["mean"] - 98058.75) < 0.01
+    assert r["weekly_last4"]["excluded_partial_weeks"] == ["2026-03-30"]
+    assert "app = 'whatsapp'" in r["working"]["sql"]
+
+
+def test_weekly_last4_clarifies_without_series_or_after_mau():
+    # Last-4 is a follow-up, not a first turn: with no series state
+    # it clarifies, and after a MAU turn (a different stage) it
+    # clarifies too -- the MAU scalar is not a series.
+    s = _real_session()
+    if s is None:
+        return
+    assert s.respond("what about the last 4 weeks only?")["type"] == "clarification"
+    s.respond("What's the MAU for Instagram?")
+    assert s.respond("what about the last 4 weeks only?")["type"] == "clarification"
+
+
+def test_weekly_last4_option_letter_advances():
+    # Option letters work after a last-4 turn (stage ==
+    # "weekly_last4" satisfies the letter gate): "a" is the full
+    # weekly series for the same app (the last-4 turn's own options
+    # are series-first, not weather-first), "b" the other app's
+    # weekly WAU.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    s.respond("what about the last 4 weeks only?")
+    r = s.respond("a")
+    assert r["type"] == "weekly_series" and r["app"] == "instagram"
+    assert abs(r["weekly_series"]["mean"] - 120285.79) < 1.0
+    s2 = _real_session()
+    s2.respond("What's the weekly trend for active users for Instagram?")
+    s2.respond("what about the last 4 weeks only?")
+    r2 = s2.respond("b")
+    assert r2["type"] == "weekly_series" and r2["app"] == "whatsapp"
+    assert abs(r2["weekly_series"]["mean"] - 79951.0) < 1.0
+
+
+def test_weekly_compare_single_shot_p19():
+    # 2026-11-13 (p19): "compare weekly Instagram vs WhatsApp"
+    # answers as a first turn (both apps named). Both series side by
+    # side, 14 weeks, two-series line chart, exact combined SQL, and
+    # the comparison stats: both peak Mar 2 (147,939 / 98,372) and
+    # plateau together (-0.97% / -0.71%); growth first complete week
+    # -> peak +63.1% / +64.2%; Instagram runs 1.50x WhatsApp in the
+    # last 4 weeks.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("compare weekly Instagram vs WhatsApp")
+    assert r["type"] == "weekly_compare" and r["app"] == "instagram"
+    assert "Both peak in the week of 2026-03-02" in r["text"]
+    assert "147,939" in r["text"] and "98,372" in r["text"]
+    assert "-0.97%" in r["text"] and "-0.71%" in r["text"]
+    assert "+63.1%" in r["text"] and "+64.2%" in r["text"]
+    assert "1.50x" in r["text"]
+    wc = r["weekly_compare"]
+    assert wc["app_a"] == "instagram" and wc["app_b"] == "whatsapp"
+    # Unlike the series payloads (which carry a count), the compare
+    # payload carries the week list -- the two series share it.
+    assert len(wc["weeks"]) == 14
+    assert wc["weeks"][0] == "2025-12-29" and wc["weeks"][-1] == "2026-03-30"
+    assert wc["values_a"] == [63764, 90699, 99611, 108169, 117025, 126050, 134298,
+                              139222, 146926, 147939, 147048, 147057, 146510, 69683]
+    assert wc["values_b"] == [41660, 59924, 65795, 71728, 77911, 84107, 89297,
+                              92651, 97829, 98372, 98125, 98063, 97675, 46177]
+    assert wc["peak_a"] == 147939 and wc["peak_a_week"] == "2026-03-02"
+    assert wc["peak_b"] == 98372 and wc["peak_b_week"] == "2026-03-02"
+    assert abs(wc["growth_a_pct"] - 63.1) < 0.05 and abs(wc["growth_b_pct"] - 64.2) < 0.05
+    assert abs(wc["change_a_pct"] - -0.97) < 0.01 and abs(wc["change_b_pct"] - -0.71) < 0.01
+    assert abs(wc["mean4_a"] - 147138.5) < 0.01 and abs(wc["mean4_b"] - 98058.75) < 0.01
+    assert abs(wc["ratio"] - 1.50) < 0.01
+    w = r["working"]
+    assert "FULL OUTER JOIN" in w["sql"]
+    assert "app = 'instagram'" in w["sql"] and "app = 'whatsapp'" in w["sql"]
+    viz = w["visualization"]
+    assert viz["available"] is True and viz["chart"]["kind"] == "line"
+    assert len(viz["chart"]["series"]) == 2
+    assert [p["label"] for p in viz["chart"]["series"]] == ["instagram", "whatsapp"]
+    assert len(viz["chart"]["series"][0]["points"]) == 14
+    assert viz["rows"][0] == ["2025-12-29", 63764, 41660]
+    assert viz["rows"][9] == ["2026-03-02", 147939, 98372]
+    assert viz["rows"][-1] == ["2026-03-30", 69683, 46177]
+    # The diagram is honestly unavailable for the joined-subquery
+    # shape (never a guessed diagram).
+    assert viz["diagram"] is None and "subquery" in viz["diagram_unavailable_reason"]
+
+
+def test_weekly_compare_followup_p20():
+    # 2026-11-13 (p20): "compare with WhatsApp" after the weekly
+    # series compares the series app (Instagram) with the named app.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("compare with WhatsApp")
+    assert r["type"] == "weekly_compare" and r["app"] == "instagram"
+    assert r["weekly_compare"]["app_b"] == "whatsapp"
+    assert abs(r["weekly_compare"]["ratio"] - 1.50) < 0.01
+
+
+def test_weekly_compare_clarifies_without_series_app():
+    # "compare with WhatsApp" with no series state has nothing to
+    # compare against -- it clarifies instead of guessing the other
+    # app. (The single-shot form with both apps named works fresh;
+    # see test_weekly_compare_single_shot_p19.)
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("compare with WhatsApp")
+    assert r["type"] == "clarification"
+
+
+def test_weekly_compare_same_for_falls_to_weather():
+    # A compare has two apps, so "same for WhatsApp" after a compare
+    # is ambiguous -- it falls through to the weather report for the
+    # named app, not a re-compare.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("compare weekly Instagram vs WhatsApp")
+    r = s.respond("same for WhatsApp")
+    assert r["type"] == "weather" and r["app"] == "whatsapp"
+
+
+def test_creators_series_after_weekly_series_p21():
+    # 2026-11-13 (p21): the verbatim probe -- weekly IG, then "can
+    # you give me a similar trend for creators on Instagram?" --
+    # returns the per-week DISTINCT creators series, 14 weeks, mean
+    # 23,866.43, with the Feb 16 shock named (31,289 -> 18,120,
+    # -42.1%) and the partial weeks flagged.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("can you give me a similar trend for creators on Instagram?")
+    assert r["type"] == "creators_series" and r["app"] == "instagram"
+    assert "Weekly creators" in r["text"]
+    assert "2026-02-16" in r["text"] and "-42.1%" in r["text"]
+    assert "partial" in r["text"]
+    cs = r["creators_series"]
+    assert cs["start"] == "2026-01-01" and cs["end"] == "2026-03-31" and cs["weeks"] == 14
+    assert abs(cs["mean"] - 23866.43) < 1.0
+    assert cs["low"] == 8252 and cs["high"] == 31995
+    assert cs["partial_weeks"] == ["2025-12-29", "2026-03-30"]
+    w = r["working"]
+    assert "COUNT(DISTINCT f.creator_id)" in w["sql"]
+    assert "JOIN dim_content" in w["sql"] and "c.app = 'instagram'" in w["sql"]
+    assert "AVG(" not in w["sql"]
+    viz = w["visualization"]
+    assert viz["available"] is True and viz["chart"]["kind"] == "line"
+    assert len(viz["chart"]["points"]) == 14
+    assert viz["rows"][0] == ["2025-12-29", 26410]
+    assert viz["rows"][6] == ["2026-02-09", 31289]
+    assert viz["rows"][7] == ["2026-02-16", 18120]
+    assert viz["rows"][-1] == ["2026-03-30", 8252]
+    assert viz["diagram"] is not None
+
+
+def test_creators_series_same_for_whatsapp_p22():
+    # 2026-11-13 (p22): creators series, then "same for WhatsApp"
+    # re-runs the creators series for the new app. WhatsApp golds:
+    # 14 weeks, mean 15,812.0, same shock (20,690 -> 11,880).
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("weekly trend for creators on Instagram")
+    r = s.respond("same for WhatsApp")
+    assert r["type"] == "creators_series" and r["app"] == "whatsapp"
+    cs = r["creators_series"]
+    assert abs(cs["mean"] - 15812.0) < 1.0
+    assert cs["low"] == 5458 and cs["high"] == 21308
+    assert "2026-02-16" in r["text"] and "-42.6%" in r["text"]
+
+
+def test_creators_series_single_shot_and_same_for_creators():
+    # Single-shot with the app named works as a first turn, and
+    # "same for creators" after a weekly series is the same turn.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("weekly trend for creators on Instagram")
+    assert r["type"] == "creators_series" and r["app"] == "instagram"
+    assert abs(r["creators_series"]["mean"] - 23866.43) < 1.0
+    s2 = _real_session()
+    s2.respond("What's the weekly trend for active users for Instagram?")
+    r2 = s2.respond("same for creators")
+    assert r2["type"] == "creators_series" and r2["app"] == "instagram"
+    assert abs(r2["creators_series"]["mean"] - 23866.43) < 1.0
+
+
+def test_creators_series_clarifies_without_app():
+    # "weekly trend for creators" with no app and no session app
+    # clarifies which app -- it must never silently answer one
+    # app's creators series.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("weekly trend for creators")
+    assert r["type"] == "clarification"
+    assert "instagram" in r["text"] and "whatsapp" in r["text"]
+
+
+def test_daily_creators_scalar_turn_p23_turn1():
+    # 2026-11-13 (p23, turn 1): "daily creators for Instagram?"
+    # now answers deterministically (type query, metric
+    # daily_creators_mean, mean 7,493.02 distinct creators/day).
+    # Before the build, the live shell answered it only via the LLM
+    # fallback turn (the model never ran; the deterministic baseline
+    # plan answered) because the deterministic chat had no scalar
+    # turn for it.
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("daily creators for Instagram?")
+    assert r["type"] == "query" and r["app"] == "instagram"
+    assert "Daily creators" in r["text"] and "7,493.02" in r["text"]
+    dc = r["daily_creators"]
+    assert abs(dc["value"] - 7493.02) < 0.01
+    assert dc["start"] == "2026-01-01" and dc["end"] == "2026-03-31"
+    assert "AVG(creators)" in r["working"]["sql"]
+    assert "app = 'instagram'" in r["working"]["sql"]
+    assert s.last_metric == "daily_creators_mean"
+
+
+def test_weekly_trend_for_this_after_daily_creators_p23():
+    # 2026-11-13 (p23, turn 2): the verbatim probe -- after the
+    # daily-creators scalar, "can you give me a weekly trend for
+    # this from 2026-01-01 to 2026-03-31" resolves "this" against
+    # the last answered metric (creators) and returns the full
+    # 14-week creators series for Instagram.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("daily creators for Instagram?")
+    r = s.respond("can you give me a weekly trend for this from 2026-01-01 to 2026-03-31")
+    assert r["type"] == "creators_series" and r["app"] == "instagram"
+    assert abs(r["creators_series"]["mean"] - 23866.43) < 1.0
+    assert r["creators_series"]["weeks"] == 14
+
+
+def test_weekly_trend_for_this_clarifies_after_wau_or_weather():
+    # The anaphora gate is metric-only: after a WAU series
+    # (last_metric wau_by_week, not a creators metric) "weekly trend
+    # for this" does NOT fire the creators turn, and after a weather
+    # report (last_metric cleared) it does not fire either.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    assert s.respond("can you give me a weekly trend for this")["type"] == "clarification"
+    s2 = _real_session()
+    s2.respond("How is Instagram doing?")
+    assert s2.respond("can you give me a weekly trend for this")["type"] == "clarification"
+
+
+def test_last_metric_cleared_by_compare_and_weather():
+    # A compare turn (two apps) and a weather turn (no metric) clear
+    # last_metric, so a later "weekly trend for this" cannot resolve
+    # against a stale metric.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("daily creators for Instagram?")
+    assert s.last_metric == "daily_creators_mean"
+    s.respond("compare weekly Instagram vs WhatsApp")
+    assert s.last_metric is None
+    assert s.respond("can you give me a weekly trend for this")["type"] == "clarification"

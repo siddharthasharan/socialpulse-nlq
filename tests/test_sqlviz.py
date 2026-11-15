@@ -153,3 +153,75 @@ if __name__ == "__main__":
             fn()
             print(f"PASS {name}")
     print("all sqlviz tests pass")
+
+
+def test_chart_multi_series_line_for_dates_with_two_numeric_columns():
+    # 2026-11-13 (v11, p19/p20): a result whose first column looks
+    # like a date and whose second AND third columns are numeric
+    # draws a multi-series line chart -- one line per numeric column,
+    # in column order. The payload carries "series" alongside the
+    # single-series "points" (the first series, kept so the existing
+    # single-series renderers keep drawing the first series
+    # unchanged) and "y_label" (the first series' label).
+    v = build_visualization("SELECT w, instagram, whatsapp FROM t",
+                            ["w", "instagram", "whatsapp"],
+                            [["2026-03-02", 147939, 98372],
+                             ["2026-03-09", 147048, 98125],
+                             ["2026-03-16", 147057, 98063]])
+    chart = v["chart"]
+    assert chart["kind"] == "line"
+    assert chart["x_label"] == "w" and chart["y_label"] == "instagram"
+    assert [s["label"] for s in chart["series"]] == ["instagram", "whatsapp"]
+    assert chart["series"][0]["points"] == chart["points"]
+    assert chart["series"][0]["points"] == [
+        {"x": "2026-03-02", "y": 147939},
+        {"x": "2026-03-09", "y": 147048},
+        {"x": "2026-03-16", "y": 147057}]
+    assert chart["series"][1]["points"] == [
+        {"x": "2026-03-02", "y": 98372},
+        {"x": "2026-03-09", "y": 98125},
+        {"x": "2026-03-16", "y": 98063}]
+    assert v["rows"][0] == ["2026-03-02", 147939, 98372]
+
+
+def test_chart_single_series_unchanged_no_series_key():
+    # Single-series behavior is byte-identical: a two-column date
+    # result carries no "series" key at all, so nothing downstream
+    # can mistake it for a multi-series chart.
+    v = build_visualization("SELECT w, wau FROM t", ["w", "wau"],
+                            [["2026-03-02", 147939], ["2026-03-09", 147048]])
+    chart = v["chart"]
+    assert chart["kind"] == "line"
+    assert "series" not in chart
+    assert chart["points"] == [{"x": "2026-03-02", "y": 147939},
+                               {"x": "2026-03-09", "y": 147048}]
+    assert chart["y_label"] == "wau"
+
+
+def test_chart_multi_series_falls_back_when_third_column_not_numeric():
+    # If any later column is not numeric for every row, the payload
+    # falls back to the single-series chart of the first two columns
+    # -- the third column stays in the table only, never faked into
+    # a line.
+    v = build_visualization("SELECT w, wau, note FROM t",
+                            ["w", "wau", "note"],
+                            [["2026-03-02", 147939, "peak"],
+                             ["2026-03-09", 147048, "flat"]])
+    chart = v["chart"]
+    assert chart["kind"] == "line"
+    assert "series" not in chart
+    assert chart["points"] == [{"x": "2026-03-02", "y": 147939},
+                               {"x": "2026-03-09", "y": 147048}]
+
+
+def test_chart_bar_with_three_columns_unchanged():
+    # Multi-series applies to line charts only: a bar result keeps
+    # the old behavior (first two columns charted, further columns in
+    # the table only).
+    v = build_visualization("SELECT c, dau, extra FROM t",
+                            ["country", "dau", "extra"],
+                            [["US", 100, 5], ["IN", 80, 4]])
+    chart = v["chart"]
+    assert chart["kind"] == "bar"
+    assert "series" not in chart
+    assert chart["points"] == [{"x": "US", "y": 100}, {"x": "IN", "y": 80}]

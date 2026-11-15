@@ -146,6 +146,20 @@ VERSIONS = {
             "singles": "benchmark_v10.json",
             "convs": "conversation_v10.json",
             "oracle": "oracle_v10.json"},
+    # v11 (weekly follow-ups, 2026-11-13): v10's 166 cases plus
+    # the user probes p17 (last 4 weeks after the weekly series,
+    # conversation), p18 (last 4 weeks, then "same for WhatsApp",
+    # conversation), p19 ("compare weekly Instagram vs WhatsApp",
+    # single), p20 (compare as a follow-up after the weekly
+    # series, conversation), p21 ("similar trend for creators"
+    # after the weekly series, conversation), p22 (creators series,
+    # then "same for WhatsApp", conversation) and p23 ("daily
+    # creators for Instagram?" then "weekly trend for this",
+    # conversation). All in dev; held-out stays 30.
+    "v11": {"manifest": "benchmark_v11_manifest.json",
+            "singles": "benchmark_v11.json",
+            "convs": "conversation_v11.json",
+            "oracle": "oracle_v11.json"},
 }
 
 
@@ -404,6 +418,63 @@ def _result_equiv_single(case, rows, cols):
                     not close(g, e) for g, e in zip(got, case["expected_values"])):
                 return False, "weekly series values differ from expected"
         return True, ""
+    if etype == "weekly_last4":
+        # 2026-11-13 (v11, p17/p18 are conversations; the branch
+        # also scores the last-4 rows if a single ever names them):
+        # the last 4 COMPLETE weeks -- 4 rows x 2 cols (week, wau).
+        # Row count is exact (4, not 14) and the values are exact
+        # counts. The expected_type pins the turn: the full weekly
+        # series (14 rows) fails the shape check, so the last-4
+        # answer can never be silently substituted for it, and a
+        # literal-last-4-rows answer (with the partial Mar 30 week)
+        # fails the values check.
+        if len(rows) != case.get("expected_rows"):
+            return False, f"rows={len(rows)} != {case.get('expected_rows')}"
+        if "expected_values" in case:
+            got = [float(r[-1]) for r in rows]
+            if len(got) != len(case["expected_values"]) or any(
+                    not close(g, e) for g, e in zip(got, case["expected_values"])):
+                return False, "last-4-weeks values differ from expected"
+        return True, ""
+    if etype == "creators_series":
+        # 2026-11-13 (v11, p21/p22 are conversations; the branch
+        # also scores the creators rows if a single ever names them):
+        # the weekly creators series -- 14 rows x 2 cols (week,
+        # creators), same shape as weekly_series but a different
+        # population (creators, not active users). The expected_type
+        # pins the turn: the WAU series fails the values check, so
+        # the two series can never be silently substituted for each
+        # other.
+        if len(rows) != case.get("expected_rows"):
+            return False, f"rows={len(rows)} != {case.get('expected_rows')}"
+        if "expected_values" in case:
+            got = [float(r[-1]) for r in rows]
+            if len(got) != len(case["expected_values"]) or any(
+                    not close(g, e) for g, e in zip(got, case["expected_values"])):
+                return False, "creators series values differ from expected"
+        return True, ""
+    if etype == "weekly_compare":
+        # 2026-11-13 (v11, p19): the two-app weekly comparison --
+        # 14 rows x 3 cols (week, app_a, app_b) from the combined
+        # FULL OUTER JOIN query. expected_values is {app: [14
+        # values]} keyed by the column aliases (the app ids), so
+        # each series is checked against its own app's values and
+        # the two series can never be swapped silently. A single-app
+        # weekly series (14 rows x 2 cols) fails the shape check.
+        if len(rows) != case.get("expected_rows"):
+            return False, f"rows={len(rows)} != {case.get('expected_rows')}"
+        if len(cols) != 3:
+            return False, f"expected 3 cols, got {len(cols)}"
+        if "expected_values" in case:
+            for ci, app in enumerate((cols[1], cols[2])):
+                want = case["expected_values"].get(app)
+                if want is None:
+                    return False, f"no expected series for column {app!r}"
+                got = [float(r[ci + 1]) for r in rows]
+                if len(got) != len(want) or any(
+                        not close(g, e) for g, e in zip(got, want)):
+                    return False, f"{app} weekly series values differ from expected"
+        return True, ""
     return False, f"no result comparison defined for type {etype!r}"
 
 
@@ -444,7 +515,8 @@ def score_single(case, outcome, structural_specs=None):
 
     items = {}
     if etype in ("scalar", "series", "series_by_dim", "breakdown", "mau_by_country",
-                 "creator_share", "mau_creators_by_country", "weekly_series"):
+                 "creator_share", "mau_creators_by_country", "weekly_series",
+                 "weekly_last4", "creators_series", "weekly_compare"):
         items["sql_syntax"] = (_item(True, "") if outcome["syntax_ok"]
                                else _item(False, outcome.get("syntax_error", "")))
         items["sql_safety"] = (_item(True, outcome["guard"][1]) if outcome["guard"][0]
@@ -891,6 +963,56 @@ def _run_single(case, con, data_dir, structural_specs, variant="baseline",
     plan_with_llm kwargs). The llm receipt is appended to the trace as
     a step, so the trace keeps its shape (a list of steps) plus the llm
     fields."""
+    if case["expected_type"] == "weekly_compare":
+        # 2026-11-13 (v11, p19): the compare turn is chat-level (two
+        # apps; planner templates are single-app), so a single-shot
+        # compare case is driven through a fresh ChatSession, like a
+        # conversation turn, not through plan(). The outcome shape is
+        # the same as the plan path (a plan dict carrying the executed
+        # SQL, EXPLAIN + guard checks, viz rows), so score_single
+        # scores it with the same five rubric items. The turn needs
+        # no planner metric, so the catalog-assisted/validated
+        # variants do not abstain on it -- it passes under all
+        # variants by construction (the session's variant only
+        # matters to turns that call _plan).
+        from socialpulse_nlq.chat import ChatSession
+        t0 = time.time()
+        session = ChatSession(data_dir, variant=variant,
+                              llm_transport=(llm or {}).get("transport"),
+                              llm_api_key=(llm or {}).get("api_key"),
+                              llm_tier=(llm or {}).get("tier", "free"))
+        reply = session.respond(case["question"])
+        ms = int((time.time() - t0) * 1000)
+        working = reply.get("working") or {}
+        viz = working.get("visualization") or {}
+        outcome = {"plan": {"type": reply.get("type"), "metric": "weekly_compare",
+                            "sql": working.get("sql")},
+                   "guard": (True, "no SQL"), "syntax_ok": True,
+                   "syntax_error": "", "exec_ok": True, "exec_error": "",
+                   "columns": [], "rows": [], "runtime_ms": ms, "weather": None,
+                   "trace": None}
+        sql = working.get("sql")
+        if sql:
+            try:
+                con.execute("EXPLAIN " + sql)
+            except Exception as e:  # noqa: BLE001 - syntax failure is data
+                outcome["syntax_ok"] = False
+                outcome["syntax_error"] = str(e)
+            outcome["guard"] = guard_sql(sql)
+            if outcome["guard"][0] and outcome["syntax_ok"]:
+                outcome.update({"columns": viz.get("columns") or [],
+                                "rows": viz.get("rows") or []})
+            else:
+                outcome["exec_ok"] = False
+                outcome["exec_error"] = "not executed: " + (
+                    "guard failed" if not outcome["guard"][0] else "syntax check failed")
+        else:
+            outcome["syntax_ok"] = False
+            outcome["syntax_error"] = "compare turn produced no SQL"
+            outcome["guard"] = (False, "no SQL to guard")
+            outcome["exec_ok"] = False
+            outcome["exec_error"] = "no SQL produced"
+        return score_single(case, outcome, structural_specs)
     if variant == "llm":
         from socialpulse_nlq.llm_planner import plan_with_llm
         p = plan_with_llm(case["question"], **(llm or {}))

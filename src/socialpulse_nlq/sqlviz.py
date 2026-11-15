@@ -7,8 +7,10 @@ Two independent pieces, both derived from the executed query only:
    result whose first column looks like a date/month and whose second
    column is numeric draws a line chart; a two-column result whose
    first column is categorical and whose second column is numeric
-   draws a bar chart; anything else gets the table only, with a note
-   saying why no chart was drawn. The table is always present.
+   draws a bar chart; a result whose first column is a date and whose
+   second and later columns are all numeric draws a multi-series line
+   chart (2026-11-13, v11); anything else gets the table only, with a
+   note saying why no chart was drawn. The table is always present.
 2. Diagram of the SQL itself: source tables -> joins -> filters ->
    grouping/aggregation -> output, as stage boxes carrying the actual
    table names, join conditions, filter conditions, and aggregation
@@ -347,6 +349,19 @@ def _chart_for(columns, rows):
     creators) stay in the table only. Anything else — a single scalar,
     or a (category, date, value) result whose second column is a date
     (one bar per row would repeat categories) — gets the table only.
+
+    Multi-series (2026-11-13, v11): a result whose first column looks
+    like a date/month and whose second AND later columns are all
+    numeric for every row draws a multi-series line chart -- one line
+    per numeric column, in column order. The payload carries "series"
+    (a list of {label, points}) alongside the single-series "points"
+    (the first series, kept so the existing single-series renderers --
+    the dashboard canvas chart reads points -- keep drawing the first
+    series unchanged) and "y_label" (the first series' label). If any
+    later column is not numeric for every row, the payload falls back
+    to the single-series chart of the first two columns. Multi-series
+    applies to line charts only; a bar result keeps the old behavior
+    (first two columns charted, further columns in the table only).
     """
     if len(columns) < 2 or not rows:
         return None
@@ -357,8 +372,20 @@ def _chart_for(columns, rows):
         y_vals.append(r[1])
     x_vals = [str(r[0]) for r in rows]
     kind = "line" if all(_DATE_RE.match(x) for x in x_vals) else "bar"
-    return {"kind": kind, "x_label": columns[0], "y_label": columns[1],
-            "points": [{"x": x, "y": y} for x, y in zip(x_vals, y_vals)]}
+    payload = {"kind": kind, "x_label": columns[0], "y_label": columns[1],
+               "points": [{"x": x, "y": y} for x, y in zip(x_vals, y_vals)]}
+    if kind == "line" and len(columns) > 2:
+        series = []
+        for ci in range(1, len(columns)):
+            vals = []
+            for r in rows:
+                if len(r) <= ci or not isinstance(r[ci], (int, float)) or isinstance(r[ci], bool):
+                    return payload  # not all numeric: single-series only
+                vals.append(r[ci])
+            series.append({"label": columns[ci],
+                           "points": [{"x": x, "y": y} for x, y in zip(x_vals, vals)]})
+        payload["series"] = series
+    return payload
 
 
 def build_visualization(sql, columns, rows, executed=True):

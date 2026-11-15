@@ -400,6 +400,16 @@ class ChatSession:
         # never cleared by a breakdown turn (that is the point); a
         # new MAU turn re-sets it.
         self.mau_context = None
+        # Last answered metric (see the p23 anaphora, 2026-11-13):
+        # the metric id of the last turn that answered a single
+        # metric (e.g. "daily_creators_mean"), or None when the last
+        # answer was not a single metric (weather, a combined turn,
+        # watch-outs, a comparison). A follow-up that says "this"
+        # ("weekly trend for this") resolves the pronoun against it.
+        # Set by metric turns; cleared by turns that establish a new
+        # non-metric context (weather, watch-outs, the compare turn);
+        # a clarification never touches it (nothing was answered).
+        self.last_metric = None
         # Last single SQL executed by a drill-down/breakdown helper, for
         # the "Show the working" panel. Weather, diagnosis, recommendation
         # and brief turns run many queries or none, so they set nothing
@@ -540,6 +550,7 @@ class ChatSession:
                     sql, "app", filters["app"]):
                 self.app = filters["app"]
             self.stage = "query"
+            self.last_metric = plan.get("metric")
             reply = self._reply("query", text, engine=engine)
         elif ptype == "weather_report":
             reply = self._weather_turn(plan.get("app"))
@@ -728,6 +739,7 @@ class ChatSession:
         self.app = app
         self.stage = "mau"
         self.topic = None
+        self.last_metric = "mau_march"
         # Sticky context for breakdowns: March 2026, the MAU period.
         # Survives the breakdown turn, so chained breakdowns keep
         # resolving to this app and period until a weather or
@@ -786,6 +798,7 @@ class ChatSession:
         self.app = app
         self.stage = "mau"
         self.topic = None
+        self.last_metric = "mau_by_country"
         self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
         p = self._plan(f"MAU for {app} by country")
         if p["type"] != "query" or not p.get("sql"):
@@ -825,6 +838,67 @@ class ChatSession:
         return self._reply("mau_by_country", text,
                            mau_by_country={"app": app, "rows": share_rows, "total": total})
 
+    def _daily_creators_turn(self, app):
+        """Standalone daily-creators turn (2026-11-13, v11, p23).
+
+        The Nov 13 live probe -- "daily creators for Instagram?" --
+        was answered in the live shell by the LLM fallback turn (the
+        model never ran; the deterministic baseline plan answered),
+        because the deterministic chat had no scalar turn for it.
+        This turn answers it deterministically: the planner's
+        daily_creators_mean template (mean distinct creators per day
+        over the window, app-scoped), so the SQL, tables, and metric
+        definition in the working payload are the same receipts the
+        single-shot ask UI shows, and the reply type is "query" --
+        the same type the fallback turn returns for a scalar plan.
+        The turn verifies the plan is really the daily-creators
+        scalar (grain "creator x day (averaged)", app-scoped) before
+        running it. It sets self.last_metric so a follow-up "weekly
+        trend for this" (p23 turn 2) resolves "this" to the creators
+        metric, and clears the sticky MAU context (a new intent, not
+        a breakdown context, like the weekly-series turn).
+        """
+        from .planner import metric_definition, run_plan
+        self.app = app
+        self.stage = "daily_creators"
+        self.topic = None
+        self.last_metric = "daily_creators_mean"
+        self.mau_context = None
+        p = self._plan(f"daily creators for {app}")
+        if (p["type"] != "query" or p.get("metric") != "daily_creators_mean"
+                or p.get("grain") != "creator x day (averaged)" or not p.get("sql")
+                or p.get("filters", {}).get("app") != app):
+            return self._clarify("I could not build the daily-creators query for "
+                                 f"{app}. Try \"Daily creators for {app}?\"")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        value = rows[0][0] if rows else 0
+        start = p["filters"]["date_start"]
+        end = p["filters"]["date_end"]
+        label = _window_label(start, end)
+        definition = metric_definition("daily_creators_mean")
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": cols, "result_rows": rows,
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        self._set_options([
+            {"label": f"Weekly trend for creators on {app}",
+             "send": f"Weekly trend for creators on {app}"},
+            {"label": f"Weekly WAU for {app}",
+             "send": f"Weekly WAU by week for {app}"},
+            {"label": f"Daily creators for {others[0]}",
+             "send": f"Daily creators for {others[0]}?"},
+        ])
+        text = (f"Daily creators for {app} in {label}: mean {value:,.2f} distinct creators per day.\n\n"
+                "That is distinct users with at least one content item published that day on "
+                f"{app}, averaged over the window — a mean of daily counts, not a single day's count. "
+                "The exact SQL is in the working panel.")
+        return self._reply("query", text,
+                           daily_creators={"app": app, "value": value,
+                                          "start": start, "end": end})
+
     def _creator_share_turn(self, app):
         """Creator share of MAU (2026-11-10): distinct creators with
         >=1 content item published in March 2026 for the app, over
@@ -852,6 +926,7 @@ class ChatSession:
         self.app = app
         self.stage = "mau"
         self.topic = None
+        self.last_metric = "creator_share"
         self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
         p = self._plan(f"creator share of MAU for {app}")
         if p["type"] != "query" or p.get("metric") != "creator_share" or not p.get("sql"):
@@ -922,6 +997,9 @@ class ChatSession:
         self.app = app
         self.stage = "mau"
         self.topic = None
+        # Combined turn (MAU and creators): "this" after it is
+        # ambiguous, so the anaphora state is cleared, not set.
+        self.last_metric = None
         self.mau_context = {"app": app, "start": "2026-03-01", "end": "2026-03-31"}
         p = self._plan(f"MAU and creators for {app} by country")
         if p["type"] != "query" or p.get("metric") != "mau_creators_by_country" or not p.get("sql"):
@@ -996,6 +1074,23 @@ class ChatSession:
         phrase = _window_phrase(*self.series_window) if self.series_window else ""
         return f"weekly WAU by week for {app}{phrase}"
 
+    def _last4_question(self, app):
+        """Question that re-asks the stored last-4-weeks series for an
+        app. Mirror of _weekly_series_question: same window as the
+        last series, so an app-switch follow-up re-runs the last-4
+        series for the new app instead of the full series."""
+        phrase = _window_phrase(*self.series_window) if self.series_window else ""
+        return f"weekly WAU by week for {app} last 4 weeks{phrase}"
+
+    def _creators_series_question(self, app):
+        """Question that re-asks the stored creators series for an
+        app. Mirror of _weekly_series_question: the canonical
+        creators-series question for the app, so an app-switch
+        follow-up ("what about WhatsApp?", "same for WhatsApp")
+        re-runs the creators series for the new app instead of
+        opening a weather report."""
+        return f"weekly trend for creators on {app}"
+
     def _weekly_series_turn(self, app, question=None):
         """Standalone weekly-series turn (2026-11-12): WAU by week.
 
@@ -1021,6 +1116,7 @@ class ChatSession:
         self.app = app
         self.stage = "weekly_series"
         self.topic = None
+        self.last_metric = "wau_by_week"
         # A weekly series establishes its own context and is not a
         # breakdown context, so it clears the sticky MAU context:
         # after this turn a breakdown asks for weather first again.
@@ -1101,6 +1197,356 @@ class ChatSession:
                                          "low": min(vals), "low_week": weeks[low_i],
                                          "high": max(vals), "high_week": weeks[high_i],
                                          "partial_weeks": partial})
+
+    def _weekly_last4_turn(self, app, question=None):
+        """Last 4 complete weeks of the weekly series (2026-11-13, v11).
+
+        A single metric series, like the weekly-series turn, so no
+        weather report is required first. The planner's
+        wau_last_4_weeks template supplies the query -- the same
+        per-week query as wau_by_week, restricted to the last 4
+        Mondays whose whole week lies inside the window -- and the
+        working payload carries it with the metric definition, so
+        the shell renders the line chart + table + SQL diagram from
+        the same receipts. "Last 4 weeks" means the last 4 COMPLETE
+        weeks (Mar 2/9/16/23 for the frozen window), NOT the literal
+        last 4 rows: the Mar 30 week covers Mar 30-31 only, and
+        including it would read as a crash, so the reply names the
+        excluded week and why. The turn verifies the plan is really
+        the last-4 series (grain "user x week", app-scoped) before
+        running it, and that exactly 4 rows came back -- a shorter
+        series is a clarification, not a silently short answer.
+        Stage is "weekly_last4" (distinct from "weekly_series"), so
+        "same for WhatsApp" re-runs the last-4 series for the new
+        app instead of the full series.
+        """
+        import datetime
+        from .planner import metric_definition, run_plan
+        self.app = app
+        self.stage = "weekly_last4"
+        self.topic = None
+        self.last_metric = "wau_last_4_weeks"
+        self.mau_context = None
+        q = question or f"weekly WAU by week for {app} last 4 weeks"
+        if not _word(q.lower(), app):
+            # Same inheritance as the weekly turn: the follow-up form
+            # ("what about the last 4 weeks only?") names no app, so
+            # say it, or the plan would run the all-apps series while
+            # the reply claims one app.
+            q = f"{q} for {app}"
+        p = self._plan(q)
+        if (p["type"] != "query" or p.get("metric") != "wau_last_4_weeks"
+                or p.get("grain") != "user x week" or not p.get("sql")
+                or p.get("filters", {}).get("app") != app):
+            return self._clarify("I could not build the last-4-weeks WAU series for "
+                                 f"{app} from that question. Try \"Weekly WAU by week for {app} last 4 weeks\".")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        if not rows or len(rows) != 4:
+            return self._clarify(f"No last-4-weeks WAU series came back for {app} — the window may be empty.")
+        start = p["filters"]["date_start"]
+        end = p["filters"]["date_end"]
+        self.series_window = (start, end)
+        label = _window_label(start, end)
+        vals = [r[1] for r in rows]
+        weeks = [str(r[0]) for r in rows]
+        mean = sum(vals) / len(vals)
+        low_i = vals.index(min(vals))
+        high_i = vals.index(max(vals))
+        # The excluded trailing partial week: the Monday after the
+        # last returned week, when it still falls inside the window.
+        # For the frozen window that is the Mar 30 week (Mar 30-31
+        # only). If the window ends exactly on a Sunday there is no
+        # trailing partial week and the note is empty.
+        start_d = datetime.date.fromisoformat(start)
+        end_d = datetime.date.fromisoformat(end)
+        excluded = []
+        next_monday = datetime.date.fromisoformat(weeks[-1]) + datetime.timedelta(days=7)
+        if next_monday <= end_d:
+            excluded.append(next_monday.isoformat())
+        definition = metric_definition("wau_last_4_weeks")
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": cols, "result_rows": rows,
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        phrase = _window_phrase(*self.series_window)
+        self._set_options([
+            {"label": f"Weekly WAU for {app} (full series)",
+             "send": f"Weekly WAU by week for {app}{phrase}"},
+            {"label": f"Weekly WAU for {others[0]}",
+             "send": f"Weekly WAU by week for {others[0]}{phrase}"},
+            {"label": f"Weekly WAU for {others[1]}",
+             "send": f"Weekly WAU by week for {others[1]}{phrase}"},
+        ])
+        excluded_note = ""
+        if excluded:
+            em = datetime.date.fromisoformat(excluded[0])
+            days = (end_d - em).days + 1
+            excluded_note = (f" The week of {excluded[0]} is left out on purpose: it covers only "
+                             f"{em.strftime('%b %d')}–{end_d.strftime('%b %d')} ({days} days in the window), "
+                             "so its count would read as a crash, not a trend.")
+        text = (f"Weekly active users for {app}, last 4 complete weeks ({weeks[0]} to {weeks[-1]}).\n\n"
+                f"Mean {mean:,.0f} per week, low {min(vals):,} (week of {weeks[low_i]}), "
+                f"high {max(vals):,} (week of {weeks[high_i]}). The week-by-week series — "
+                "line chart, table, and the exact SQL — is in the working panel."
+                f"{excluded_note}\n\n"
+                "These are the last 4 complete weeks, not the literal last 4 rows: ask for the full "
+                "weekly series if you want all 14 weeks.")
+        return self._reply("weekly_last4", text,
+                           weekly_last4={"app": app, "start": start, "end": end,
+                                        "weeks": weeks, "values": vals, "mean": mean,
+                                        "low": min(vals), "low_week": weeks[low_i],
+                                        "high": max(vals), "high_week": weeks[high_i],
+                                        "excluded_partial_weeks": excluded})
+
+    def _weekly_compare_turn(self, app_a, app_b):
+        """Compare the weekly WAU series of two apps (2026-11-13, v11).
+
+        A chat-level turn, not a planner metric: planner templates
+        are single-app, so the comparison runs one combined SQL (a
+        FULL OUTER JOIN of the two weekly-series subqueries on the
+        week) through the same connection the watch-outs helpers use.
+        The working payload carries exactly that SQL, so the shell
+        renders the two-series line chart + table from the same
+        receipts; the SQL diagram is honestly unavailable (the SQL
+        joins two subqueries, which parse_sql does not model -- see
+        docs/benchmark.md, v11). Stats are computed from the two
+        series in Python, complete weeks only: peak week + value per
+        app, first-complete-week to peak growth, peak to last
+        complete week change, last-4-complete-week means + ratio.
+        The first/last weeks are partial and flagged; the stats
+        never use them. The window is the stored series window when
+        one exists (the follow-up form), else the full 90 days.
+        """
+        import datetime
+        self.app = app_a
+        self.stage = "weekly_compare"
+        self.topic = None
+        # Two apps, one metric each: "this" after a comparison is
+        # ambiguous, so the anaphora state is cleared, not set.
+        self.last_metric = None
+        self.mau_context = None
+        start, end = self.series_window or ("2026-01-01", "2026-03-31")
+        self.series_window = (start, end)
+        label = _window_label(start, end)
+
+        def _series_sub(app):
+            return (f"(SELECT CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) AS w, "
+                    f"COUNT(DISTINCT user_id) AS wau FROM fact_sessions "
+                    f"WHERE CAST(start_time AS DATE) BETWEEN DATE '{start}' AND DATE '{end}' "
+                    f"AND app = '{app}' GROUP BY w)")
+
+        sql = (f"SELECT COALESCE(a.w, b.w) AS w, a.wau AS {app_a}, b.wau AS {app_b} "
+               f"FROM {_series_sub(app_a)} a FULL OUTER JOIN {_series_sub(app_b)} b ON a.w = b.w "
+               f"ORDER BY w")
+        con = self._connect()
+        cur = con.execute(sql)
+        cols = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        if not rows or any(r[1] is None or r[2] is None for r in rows):
+            return self._clarify(f"No weekly WAU series came back for {app_a} and {app_b} — "
+                                 "the two series do not cover the same weeks.")
+        weeks = [str(r[0]) for r in rows]
+        vals_a = [r[1] for r in rows]
+        vals_b = [r[2] for r in rows]
+        start_d = datetime.date.fromisoformat(start)
+        end_d = datetime.date.fromisoformat(end)
+        partial = []
+        complete = []
+        for i, w in enumerate(weeks):
+            wd = datetime.date.fromisoformat(w)
+            if wd < start_d or wd + datetime.timedelta(days=6) > end_d:
+                partial.append(w)
+            else:
+                complete.append(i)
+        if len(complete) < 5:
+            return self._clarify("Not enough complete weeks in the window to compare "
+                                 f"{app_a} and {app_b} — need at least 5.")
+        ca = [vals_a[i] for i in complete]
+        cb = [vals_b[i] for i in complete]
+        cw = [weeks[i] for i in complete]
+        peak_a_i = ca.index(max(ca))
+        peak_b_i = cb.index(max(cb))
+        peak_a, peak_b = ca[peak_a_i], cb[peak_b_i]
+        peak_a_w, peak_b_w = cw[peak_a_i], cw[peak_b_i]
+        growth_a = (peak_a - ca[0]) / ca[0] * 100
+        growth_b = (peak_b - cb[0]) / cb[0] * 100
+        chg_a = (ca[-1] - peak_a) / peak_a * 100
+        chg_b = (cb[-1] - peak_b) / peak_b * 100
+        mean4_a = sum(ca[-4:]) / 4
+        mean4_b = sum(cb[-4:]) / 4
+        ratio = mean4_a / mean4_b
+        self.last_working = {
+            "sql": sql, "tables": ["fact_sessions"], "row_count": len(rows),
+            "result_columns": cols, "result_rows": rows,
+            "metric_definition": None,
+        }
+        others = [a for a in APPS if a not in (app_a, app_b)]
+        phrase = _window_phrase(*self.series_window)
+        self._set_options([
+            {"label": f"Weekly WAU for {app_a}",
+             "send": f"Weekly WAU by week for {app_a}{phrase}"},
+            {"label": f"Weekly WAU for {app_b}",
+             "send": f"Weekly WAU by week for {app_b}{phrase}"},
+            {"label": f"Weekly creators for {app_a}",
+             "send": f"Weekly trend for creators on {app_a}"},
+        ])
+        if peak_a_w == peak_b_w:
+            peak_line = (f"Both peak in the week of {peak_a_w} ({app_a} {peak_a:,}, {app_b} {peak_b:,}) "
+                         f"and plateau together: {app_a} {chg_a:+.2f}% from the peak to the week of {cw[-1]}, "
+                         f"{app_b} {chg_b:+.2f}%.")
+        else:
+            peak_line = (f"{app_a} peaks in the week of {peak_a_w} ({peak_a:,}), {app_b} in the week of "
+                         f"{peak_b_w} ({peak_b:,}); from each peak to the week of {cw[-1]}: {app_a} "
+                         f"{chg_a:+.2f}%, {app_b} {chg_b:+.2f}%.")
+        partial_note = ""
+        if partial:
+            partial_note = (" Note: the " + ("weeks" if len(partial) > 1 else "week") +
+                            " of " + " and ".join(partial) +
+                            (" are partial — the window starts Jan 1 and ends Mar 31, so those "
+                             "weeks cover fewer than 7 days and their counts are lower, not a drop."))
+        text = (f"Weekly active users, {app_a} vs {app_b}, by week ({len(rows)} weeks, {label}).\n\n"
+                f"{peak_line} Growth from the first complete week ({cw[0]}) to the peak is "
+                f"near-identical: {app_a} +{growth_a:.1f}% ({ca[0]:,} → {peak_a:,}), {app_b} +{growth_b:.1f}% "
+                f"({cb[0]:,} → {peak_b:,}). In the last 4 complete weeks {app_a} runs {ratio:.2f}x {app_b} "
+                f"(mean {mean4_a:,.1f} vs {mean4_b:,.1f} per week). The two-series chart, table, and the "
+                "exact SQL are in the working panel."
+                f"{partial_note}")
+        return self._reply("weekly_compare", text,
+                           weekly_compare={"app_a": app_a, "app_b": app_b,
+                                          "start": start, "end": end,
+                                          "weeks": weeks, "values_a": vals_a, "values_b": vals_b,
+                                          "peak_a": peak_a, "peak_a_week": peak_a_w,
+                                          "peak_b": peak_b, "peak_b_week": peak_b_w,
+                                          "growth_a_pct": growth_a, "growth_b_pct": growth_b,
+                                          "change_a_pct": chg_a, "change_b_pct": chg_b,
+                                          "mean4_a": mean4_a, "mean4_b": mean4_b,
+                                          "ratio": ratio, "partial_weeks": partial})
+
+    def _creators_series_turn(self, app, question=None):
+        """Standalone creators-by-week turn (2026-11-13, v11).
+
+        The Nov 13 live probe -- "can you give me a similar trend
+        for creators on Instagram?" after the weekly series --
+        clarified because the weekly-series turn covers active users
+        only and no turn serves creators as a series (the watch-outs
+        turn computes weekly creators as diagnosis evidence, not as
+        a series). The planner's creators_by_week template supplies
+        the query -- the same SQL the watch-outs turn's
+        _weekly_creators_series runs -- and the working payload
+        carries it with the metric definition, so the shell renders
+        the line chart + table + SQL diagram from the same receipts.
+        The turn verifies the plan is really the creators series
+        (grain "creator x week", app-scoped) before running it.
+        First/last weeks of the window are partial and flagged, as
+        in the WAU series. The reply names the largest
+        week-over-week drop between consecutive complete weeks when
+        it is >=20% (the watch-outs shock threshold, computed here,
+        not hardcoded) -- for all three apps that is the Feb 16
+        week. Stage is "creators_series", so "same for WhatsApp"
+        re-runs the creators series for the new app.
+        """
+        import datetime
+        from .planner import metric_definition, run_plan
+        self.app = app
+        self.stage = "creators_series"
+        self.topic = None
+        self.last_metric = "creators_by_week"
+        self.mau_context = None
+        q = question
+        if (q is None or ("week" not in q.lower() and "weekly" not in q.lower())
+                or "creator" not in q.lower()):
+            # The follow-up form names no week word ("similar trend
+            # for creators") or names no metric at all ("weekly trend
+            # for this", p23 -- "this" is the previous turn's creators
+            # metric, resolved by the routing block from
+            # self.last_metric): plan a canonical question instead.
+            # A window the user named in the follow-up is lost by
+            # this -- the turn runs the series window, which is the
+            # full window for the authorized follow-up forms.
+            q = f"weekly trend for creators on {app}"
+        if not _word(q.lower(), app):
+            q = f"{q} for {app}"
+        p = self._plan(q)
+        if (p["type"] != "query" or p.get("metric") != "creators_by_week"
+                or p.get("grain") != "creator x week" or not p.get("sql")
+                or p.get("filters", {}).get("app") != app):
+            return self._clarify("I could not build a weekly creators series for "
+                                 f"{app} from that question. Try \"Weekly trend for creators on {app}\".")
+        cols, rows, _ms = run_plan(p, self.data_dir)
+        if not rows:
+            return self._clarify(f"No weekly creators series came back for {app} — the window may be empty.")
+        start = p["filters"]["date_start"]
+        end = p["filters"]["date_end"]
+        self.series_window = (start, end)
+        label = _window_label(start, end)
+        vals = [r[1] for r in rows]
+        weeks = [str(r[0]) for r in rows]
+        mean = sum(vals) / len(vals)
+        low_i = vals.index(min(vals))
+        high_i = vals.index(max(vals))
+        start_d = datetime.date.fromisoformat(start)
+        end_d = datetime.date.fromisoformat(end)
+        partial = []
+        for w in weeks:
+            wd = datetime.date.fromisoformat(w)
+            if wd < start_d or wd + datetime.timedelta(days=6) > end_d:
+                partial.append(w)
+        # Largest week-over-week drop between consecutive complete
+        # weeks, named only when it is >=20% (the watch-outs shock
+        # threshold). Computed from the series, not hardcoded: for
+        # all three apps it is the Feb 16 week.
+        complete_idx = [i for i, w in enumerate(weeks) if w not in partial]
+        shock = None
+        for j in range(1, len(complete_idx)):
+            before_i, after_i = complete_idx[j - 1], complete_idx[j]
+            if after_i != before_i + 1:
+                continue
+            drop = vals[before_i] - vals[after_i]
+            if shock is None or drop > shock[0]:
+                shock = (drop, vals[before_i], vals[after_i], weeks[after_i])
+        definition = metric_definition("creators_by_week")
+        self.last_working = {
+            "sql": p["sql"], "tables": p["tables"], "row_count": len(rows),
+            "result_columns": cols, "result_rows": rows,
+            "metric_definition": ({"definition": definition[0], "grain": definition[1],
+                                   "denominator": definition[2]} if definition else None),
+        }
+        others = [a for a in APPS if a != app]
+        phrase = _window_phrase(*self.series_window)
+        self._set_options([
+            {"label": f"Weekly WAU for {app}",
+             "send": f"Weekly WAU by week for {app}{phrase}"},
+            {"label": f"Weekly creators for {others[0]}",
+             "send": f"Weekly trend for creators on {others[0]}"},
+            {"label": f"Weekly creators for {others[1]}",
+             "send": f"Weekly trend for creators on {others[1]}"},
+        ])
+        partial_note = ""
+        if partial:
+            partial_note = (" Note: the " + ("weeks" if len(partial) > 1 else "week") +
+                            " of " + " and ".join(partial) +
+                            (" are partial — the window starts Jan 1 and ends Mar 31, so those "
+                             "weeks cover fewer than 7 days and their counts are lower, not a drop."))
+        shock_note = ""
+        if shock and shock[0] > 0.2 * shock[1]:
+            shock_note = (f" The largest week-over-week drop is in the week of {shock[3]}: "
+                          f"{shock[1]:,} → {shock[2]:,} ({100 * (shock[2] - shock[1]) / shock[1]:+.1f}%).")
+        text = (f"Weekly creators for {app} in {label}, by week ({len(rows)} weeks).\n\n"
+                f"Mean {mean:,.0f} per week, low {min(vals):,} (week of {weeks[low_i]}), "
+                f"high {max(vals):,} (week of {weeks[high_i]}). The full week-by-week series — "
+                "line chart, table, and the exact SQL — is in the working panel."
+                f"{partial_note}{shock_note}\n\n"
+                "Creators are distinct users with at least one content item published that week on "
+                f"{app}.")
+        return self._reply("creators_series", text,
+                           creators_series={"app": app, "start": start, "end": end,
+                                           "weeks": len(rows), "mean": mean,
+                                           "low": min(vals), "low_week": weeks[low_i],
+                                           "high": max(vals), "high_week": weeks[high_i],
+                                           "partial_weeks": partial})
 
     def _weekly_creators_series(self, app, start, end):
         """Weekly distinct creators per ISO week, app-scoped.
@@ -1200,6 +1646,9 @@ class ChatSession:
         primary = problems[0] if problems else None
         self.topic = primary or self.topic
         self.stage = "watchouts"
+        # A diagnosis, not a single metric: "this" after watch-outs
+        # does not name a metric, so the anaphora state is cleared.
+        self.last_metric = None
         # Complete weeks only for trend claims: a week whose Monday
         # falls before the window start, or whose Sunday falls after
         # the window end, covers fewer than 7 in-window days.
@@ -1408,6 +1857,7 @@ class ChatSession:
         self.app = app
         self.stage = "daily_series"
         self.topic = None
+        self.last_metric = "dau_mean_daily"
         # A daily series establishes its own context and is not a
         # breakdown context, so it clears the sticky MAU context:
         # after this turn a breakdown asks for weather first again.
@@ -1471,6 +1921,10 @@ class ChatSession:
         self.weather = compute_weather(self.data_dir, app=app)
         self.stage = "weather"
         self.topic = None
+        # Weather is a new context, not a single metric: "this"
+        # after a weather report does not name a metric, so the
+        # anaphora state is cleared.
+        self.last_metric = None
         # Weather establishes its own context (and wins over MAU
         # context in _breakdown_period), so the sticky flag is
         # cleared: later breakdowns run off the weather period.
@@ -2209,7 +2663,7 @@ class ChatSession:
         # send text is what is actually sent, so a letter after a
         # drill-down advances to diagnosis/recommendation/brief instead
         # of re-opening the same drill-down.
-        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage in ("mau", "daily_series", "weekly_series", "watchouts")):
+        if q in ("a", "b", "c", "d", "1", "2", "3", "4") and self.options and (self.weather or self.stage in ("mau", "daily_series", "daily_creators", "weekly_series", "weekly_last4", "creators_series", "weekly_compare", "watchouts")):
             idx = ord(q) - ord("a") if q.isalpha() else int(q) - 1
             if 0 <= idx < len(self.options):
                 send = self.options[idx].get("send") or self.options[idx].get("topic")
@@ -2243,6 +2697,10 @@ class ChatSession:
                 # Daily-series follow-up keeps the series intent and
                 # the window, and swaps the app.
                 return self._daily_series_turn(stripped_clean, self._series_question(stripped_clean))
+            if self.stage == "daily_creators":
+                # Daily-creators follow-up keeps the scalar intent and
+                # swaps the app.
+                return self._daily_creators_turn(stripped_clean)
             if self.stage in ("weekly_series", "watchouts"):
                 # Weekly-series follow-up keeps the series intent and
                 # the window, and swaps the app. After a watch-outs
@@ -2251,6 +2709,14 @@ class ChatSession:
                 # the series, so a new app needs its own series
                 # before it can be diagnosed).
                 return self._weekly_series_turn(stripped_clean, self._weekly_series_question(stripped_clean))
+            if self.stage == "weekly_last4":
+                # Last-4 follow-up keeps the last-4 intent and the
+                # window, and swaps the app.
+                return self._weekly_last4_turn(stripped_clean, self._last4_question(stripped_clean))
+            if self.stage == "creators_series":
+                # Creators-series follow-up keeps the series intent
+                # and the window, and swaps the app.
+                return self._creators_series_turn(stripped_clean, self._creators_series_question(stripped_clean))
             if q.startswith("same for") and self.topic and self.weather:
                 # Same drill-down, different app: weather the new app
                 # first (so its numbers are the receipt), then re-run
@@ -2262,6 +2728,18 @@ class ChatSession:
                                  f"{reply['text']}")
                 return reply
             return self._weather_turn(stripped_clean)
+        if stripped_clean == "creators" and self.stage in ("weekly_series", "weekly_last4"):
+            # "same for creators" after a weekly series (full or
+            # last-4): the creators series for the series app, not
+            # the creators drill-down (which needs weather first).
+            # The topic_labels branch below would otherwise claim
+            # "creators" is a drill-down topic and clarify.
+            app = self.app
+            if app:
+                return self._creators_series_turn(app, None)
+            return self._clarify("Ask for a weekly series first — for example, "
+                                 "\"What's the weekly trend for active users for Instagram?\" — "
+                                 "then ask for the creators series.")
         if stripped_clean in self.topic_labels:
             if self.weather:
                 return self._drilldown_turn(stripped_clean)
@@ -2388,6 +2866,56 @@ class ChatSession:
             return self._reply("clarification",
                                "Which app's daily DAU? Reply instagram, whatsapp, or facebook — "
                                "for example, \"Daily DAU for Instagram in March 2026\".")
+        # Daily creators, standalone scalar (2026-11-13, v11, p23):
+        # "daily creators for Instagram?" is a single metric, so it
+        # needs no weather report first -- like MAU. Placed after the
+        # daily-series block (a daily-creators question names no
+        # "dau"/"daily active", so it never matches that block) and
+        # before the weekly-series block. Breakdowns are excluded (a
+        # "by country/surface" question is a breakdown, not the
+        # scalar), as are "trend"/"by day"/"each day"/"over time"
+        # (a series, not the mean -- though "creators per day" stays
+        # the scalar: it is the planner's own phrasing for the mean).
+        # Before this turn the question fell to the LLM fallback in
+        # the live shell; it now answers deterministically with the
+        # same type ("query") and value.
+        if (("daily creators" in q or "creators per day" in q or "how many creators" in q)
+                and " by country" not in q and " by surface" not in q
+                and " by platform" not in q and " by app" not in q
+                and " by acquisition" not in q
+                and "trend" not in q and "by day" not in q and "each day" not in q
+                and "over time" not in q):
+            app = app_found or self.app
+            if app:
+                return self._daily_creators_turn(app)
+            self._set_options([
+                {"label": a, "send": f"Daily creators for {a}?", "topic": None} for a in APPS
+            ])
+            return self._reply("clarification",
+                               "Which app's daily creators? Reply instagram, whatsapp, or facebook — "
+                               "for example, \"Daily creators for Instagram?\"")
+        # Compare weekly series of two apps (2026-11-13, v11):
+        # "compare weekly Instagram vs WhatsApp" (single-shot, both
+        # apps named) and the follow-up after a weekly series
+        # ("compare with WhatsApp"). Placed BEFORE the weekly-series
+        # block: a compare question naming a series word and "active
+        # user" would otherwise match that block and answer the
+        # single-app series, dropping the second app. A chat-level
+        # turn (planner templates are single-app): no planner metric,
+        # no inventory change. DAU/MAU questions are not WAU
+        # comparisons and fall through.
+        if ("compare" in q and "dau" not in q and "mau" not in q
+                and ("week" in q or "weekly" in q or self.stage == "weekly_series")):
+            named = [a for a in APPS if _word(q, a)]
+            if len(named) >= 2:
+                return self._weekly_compare_turn(named[0], named[1])
+            if len(named) == 1 and self.stage == "weekly_series" and named[0] != self.app:
+                return self._weekly_compare_turn(self.app, named[0])
+            if len(named) == 1:
+                return self._clarify("Compare with which app? Name two apps — for example, "
+                                     "\"Compare weekly Instagram vs WhatsApp\".")
+            # "compare" with no app named: fall through (not a compare
+            # turn -- e.g. "compare this with last month").
         # Weekly-series intent (2026-11-12): "WAU by week" asks for the
         # week-by-week series, not the averaged scalar. Placed after
         # the daily-series block (a daily question never names a week)
@@ -2417,6 +2945,98 @@ class ChatSession:
             return self._reply("clarification",
                                "Which app's weekly WAU? Reply instagram, whatsapp, or facebook — "
                                "for example, \"Weekly WAU by week for Instagram\".")
+        # Creators by week, single-shot (2026-11-13, v11): "weekly
+        # trend for creators on Instagram" -- the same series, asked
+        # without a prior weekly series. Mirrors the weekly-series
+        # block: series word + "creator" required, DAU/MAU excluded,
+        # breakdowns excluded. The follow-up form (no week word) is
+        # the block below; the "this" form (p23) is the anaphora
+        # block after the last-4 block.
+        if (("week" in q or "weekly" in q)
+                and ("trend" in q or "by week" in q or "each week" in q or "per week" in q)
+                and "creator" in q
+                and "dau" not in q and "mau" not in q
+                and "mean" not in q and "average" not in q
+                and " by country" not in q and " by surface" not in q
+                and " by platform" not in q and " by app" not in q
+                and " by acquisition" not in q):
+            app = (app_found or (self.mau_context["app"] if self.mau_context else None)
+                   or self.app)
+            if app:
+                return self._creators_series_turn(app, message)
+            self._set_options([
+                {"label": a, "send": f"Weekly trend for creators on {a}", "topic": None} for a in APPS
+            ])
+            return self._reply("clarification",
+                               "Which app's weekly creators? Reply instagram, whatsapp, or facebook — "
+                               "for example, \"Weekly trend for creators on Instagram\".")
+        # Last 4 weeks after a weekly series (2026-11-13, v11): "last
+        # 4 weeks only" / "last four weeks" / "show me the last 4
+        # weeks" returns the last 4 COMPLETE weeks (Mar 2/9/16/23),
+        # not the literal last 4 rows. Gated on stage in
+        # ("weekly_series", "weekly_last4"): with no series state it
+        # clarifies, and after MAU/daily-series state it clarifies
+        # too. Placed after the weekly-series block (a last-4
+        # question names no series word, so it never matches that
+        # block) and before watch-outs.
+        if self.stage in ("weekly_series", "weekly_last4") and (
+                "last 4 week" in q or "last four week" in q):
+            app = (app_found or (self.mau_context["app"] if self.mau_context else None)
+                   or self.app)
+            if app:
+                return self._weekly_last4_turn(app, message)
+            return self._clarify("Ask for a weekly series first — for example, "
+                                 "\"What's the weekly trend for active users for Instagram?\" — "
+                                 "then ask for the last 4 weeks.")
+        # "Weekly trend for this" after a creators metric (2026-11-13,
+        # v11, p23): "this" refers to the previous turn's metric, so
+        # the creators series fires only when the last answered metric
+        # is a creators metric (daily_creators_mean, creators_by_week,
+        # creator_share, creator_penetration, posts_per_creator_90d).
+        # The turn plans a canonical question (the user's question
+        # names no "creator" word, so the planner could not route
+        # it). App from the question or the session. After a WAU/DAU/
+        # MAU metric, or with no metric answered (weather, a fresh
+        # session), "this" does not resolve to creators and the
+        # question falls through to the generic clarification.
+        if (("week" in q or "weekly" in q)
+                and ("trend" in q or "by week" in q or "each week" in q or "per week" in q)
+                and _word(q, "this")
+                and self.last_metric in ("daily_creators_mean", "creators_by_week",
+                                         "creator_share", "creator_penetration",
+                                         "posts_per_creator_90d")
+                and "dau" not in q and "mau" not in q
+                and "mean" not in q and "average" not in q
+                and " by country" not in q and " by surface" not in q
+                and " by platform" not in q and " by app" not in q
+                and " by acquisition" not in q):
+            app = (app_found or (self.mau_context["app"] if self.mau_context else None)
+                   or self.app)
+            if app:
+                return self._creators_series_turn(app, message)
+            return self._clarify("Ask for a creators number first — for example, "
+                                 "\"Daily creators for Instagram?\" — then ask for the weekly trend.")
+        # Creators by week after a weekly series (2026-11-13, v11):
+        # "similar trend for creators" / "creators trend" / "same
+        # for creators" / "weekly trend for creators" returns the
+        # per-week distinct creators series for the series app. The
+        # follow-up form names no week word, so the turn plans a
+        # canonical question ("weekly trend for creators on {app}").
+        # Gated on stage in ("weekly_series", "weekly_last4"): the
+        # series the turn follows is a WAU series (full or last-4).
+        # Placed after the weekly-series block (a creators question
+        # names no "wau"/"active user", so it never matches that
+        # block) and before watch-outs.
+        if self.stage in ("weekly_series", "weekly_last4") and "creator" in q and (
+                "trend" in q or "similar" in q or "by week" in q or "each week" in q
+                or "per week" in q or "weekly" in q):
+            app = (app_found or (self.mau_context["app"] if self.mau_context else None)
+                   or self.app)
+            if app:
+                return self._creators_series_turn(app, message)
+            return self._clarify("Ask for a weekly series first — for example, "
+                                 "\"What's the weekly trend for active users for Instagram?\" — "
+                                 "then ask for the creators series.")
         # Watch-outs after a weekly series (2026-11-12): "tell me
         # what to watch out" / "what drove the plateau?" after a
         # weekly-series turn returns the diagnosis of the series --

@@ -555,3 +555,132 @@ def test_wau_by_week_variants_abstain():
         p = plan(q, variant=variant)
         assert p["type"] == "clarification" and p["sql"] is None, variant
         assert "no catalog definition" in p["clarification"], variant
+
+
+def test_complete_weeks_excludes_partial_weeks():
+    # 2026-11-13 (v11): _complete_weeks returns the ISO-week Mondays
+    # whose whole week lies inside the window -- 12 Mondays
+    # 2026-01-05..2026-03-23 for the frozen window; the Dec 29 week
+    # (Jan 1-4 only) and the Mar 30 week (Mar 30-31 only) are out.
+    from socialpulse_nlq.planner import _complete_weeks
+    assert _complete_weeks("2026-01-01", "2026-03-31") == [
+        "2026-01-05", "2026-01-12", "2026-01-19", "2026-01-26",
+        "2026-02-02", "2026-02-09", "2026-02-16", "2026-02-23",
+        "2026-03-02", "2026-03-09", "2026-03-16", "2026-03-23"]
+    assert _complete_weeks("2026-03-01", "2026-03-15") == ["2026-03-02", "2026-03-09"]
+    assert _complete_weeks("2026-01-01", "2026-01-04") == []
+
+
+def test_wau_last_4_weeks_template_sql():
+    # 2026-11-13 (v11, p17/p18): the last-4 template is the per-week
+    # query restricted by an explicit IN list of the 4 complete
+    # weeks -- never the literal last 4 rows. App-scoped; no AVG; the
+    # partial Mar 30 week is excluded by construction (its date is
+    # not in the list).
+    p = plan("what about the last 4 weeks only? for instagram")
+    assert p["type"] == "query" and p["metric"] == "wau_last_4_weeks"
+    assert p["grain"] == "user x week"
+    assert ("IN (DATE '2026-03-02', DATE '2026-03-09', DATE '2026-03-16', "
+            "DATE '2026-03-23')") in p["sql"]
+    assert "app = 'instagram'" in p["sql"]
+    assert "AVG(" not in p["sql"]
+    assert "2026-03-30" not in p["sql"]
+    # The bare follow-up form (no app, no "WAU" word) plans the same
+    # metric -- the chat turn inherits the app from the series.
+    p2 = plan("what about the last 4 weeks only?")
+    assert p2["metric"] == "wau_last_4_weeks" and "app = " not in p2["sql"]
+    assert plan("show me the last four weeks")["metric"] == "wau_last_4_weeks"
+    # A creators question is not a WAU question: the last-4 branch
+    # excludes "creator", so it clarifies at planner level (the chat
+    # turn plans a canonical creators question instead).
+    p3 = plan("last 4 weeks of creators for Instagram")
+    assert p3["type"] == "clarification" and p3["metric"] != "wau_last_4_weeks"
+    # A scalar phrasing stays the scalar even with a week word.
+    assert plan("mean WAU over the last 4 weeks for Instagram")["metric"] == "wau_mean_weekly"
+    # A window with fewer than 4 complete weeks is refused, not
+    # silently answered with a shorter series.
+    try:
+        build_sql("wau_last_4_weeks",
+                  {"app": "instagram", "date_start": "2026-03-01", "date_end": "2026-03-15"},
+                  None, "last 4 weeks")
+    except ValueError as e:
+        assert "fewer than 4 complete weeks" in str(e)
+    else:
+        raise AssertionError("short window did not raise")
+
+
+def test_wau_last_4_weeks_breakdown_clarifies_in_planner():
+    # A per-country last-4 series is a different template, not this
+    # one: the planner refuses instead of silently returning the
+    # unbroken series for a breakdown question.
+    p = plan("what about the last 4 weeks only for Instagram by country?")
+    assert p["type"] == "clarification" and p["metric"] == "wau_last_4_weeks"
+    assert "cannot be broken down" in p["clarification"]
+
+
+def test_wau_last_4_weeks_variants_abstain():
+    # Variant boundary (same as wau_by_week / mau_by_country /
+    # creator_share): the metric is not in the 20-metric catalog, so
+    # catalog-assisted and validated abstain on it; only the baseline
+    # answers it. The benchmark runs the baseline; if the metric is
+    # ever added to the catalog, this test is the one that has to
+    # change.
+    q = "what about the last 4 weeks only? for instagram"
+    assert plan(q, variant="baseline")["metric"] == "wau_last_4_weeks"
+    for variant in ("catalog-assisted", "validated"):
+        p = plan(q, variant=variant)
+        assert p["type"] == "clarification" and p["sql"] is None, variant
+        assert "no catalog definition" in p["clarification"], variant
+
+
+def test_creators_by_week_series_sql():
+    # 2026-11-13 (v11, p21/p22): per-week DISTINCT creators from
+    # fact_content_creation JOIN dim_content, app-scoped via
+    # c.app -- the creator population, not the active-user one.
+    # The week is CAST to DATE so the first column reads as a date
+    # (the sqlviz line-chart rule needs YYYY-MM-DD).
+    p = plan("weekly trend for creators on Instagram")
+    assert p["type"] == "query" and p["metric"] == "creators_by_week"
+    assert p["grain"] == "creator x week"
+    assert "DATE_TRUNC('week'" in p["sql"] and "COUNT(DISTINCT f.creator_id)" in p["sql"]
+    assert "JOIN dim_content" in p["sql"] and "GROUP BY w ORDER BY w" in p["sql"]
+    assert "c.app = 'instagram'" in p["sql"]
+    assert "AVG(" not in p["sql"]
+    assert "2026-01-01" in p["sql"] and "2026-03-31" in p["sql"]
+    assert "country = '" not in p["sql"]
+    p_wa = plan("weekly trend for creators on WhatsApp")
+    assert p_wa["metric"] == "creators_by_week" and "c.app = 'whatsapp'" in p_wa["sql"]
+    p_no_app = plan("weekly trend for creators")
+    assert p_no_app["metric"] == "creators_by_week" and "c.app = " not in p_no_app["sql"]
+    # "weekly creators for Instagram" alone (no series word) is not
+    # a series question -- it clarifies, matching the v9 series-word
+    # discipline. And the similar-trend follow-up phrasing has no
+    # week word, so it clarifies at planner level (the chat turn
+    # plans a canonical question instead).
+    assert plan("weekly creators for Instagram")["type"] == "clarification"
+    assert plan("can you give me a similar trend for creators on Instagram?")["type"] == "clarification"
+    # A DAU/MAU question is not a creators question, and a scalar
+    # phrasing stays the scalar.
+    assert plan("weekly trend for DAU on Instagram")["metric"] != "creators_by_week"
+    assert plan("mean creators by week for Instagram")["metric"] != "creators_by_week"
+
+
+def test_creators_by_week_breakdown_clarifies_in_planner():
+    # A per-country creators series is a different template, not
+    # this one: the planner refuses instead of silently returning
+    # the unbroken series for a breakdown question.
+    p = plan("weekly trend for creators on Instagram by country")
+    assert p["type"] == "clarification" and p["metric"] == "creators_by_week"
+    assert "cannot be broken down" in p["clarification"]
+
+
+def test_creators_by_week_variants_abstain():
+    # Variant boundary (same as wau_last_4_weeks): the metric is not
+    # in the 20-metric catalog, so catalog-assisted and validated
+    # abstain on it; only the baseline answers it.
+    q = "weekly trend for creators on Instagram"
+    assert plan(q, variant="baseline")["metric"] == "creators_by_week"
+    for variant in ("catalog-assisted", "validated"):
+        p = plan(q, variant=variant)
+        assert p["type"] == "clarification" and p["sql"] is None, variant
+        assert "no catalog definition" in p["clarification"], variant

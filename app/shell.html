@@ -262,6 +262,30 @@ function renderChart(v) {
     return `<svg viewBox="0 0 ${W} ${ch.points.length * rh + 6}" width="100%" xmlns="http://www.w3.org/2000/svg">${rows}</svg>` +
       `<p class="sub">Bar chart: ${esc(ch.x_label)} → ${esc(ch.y_label)}. Same data as the table below.</p>`;
   }
+  if (ch.series && ch.series.length > 1) {
+    // Multi-series line chart (2026-11-13, v11): one polyline per
+    // series, shared x-axis (the week labels) and a shared y-scale
+    // so the lines are comparable. Colors in series order. The
+    // single-series path below is untouched for every other turn.
+    const colors = ["#6d28d9", "#0e7490", "#db2777"];
+    const allY = ch.series.flatMap((s) => s.points.map((p) => p.y));
+    const min = Math.min(...allY), max = Math.max(...allY);
+    const span = (max - min) || 1;
+    const n = ch.series[0].points.length;
+    const xs = ch.series[0].points.map((p, i) => PAD + (n === 1 ? W / 2 : (i / (n - 1)) * (W - 2 * PAD)));
+    const lines = ch.series.map((s, si) => {
+      const yv = s.points.map((p) => PAD + (1 - (p.y - min) / span) * (H - 2 * PAD - 14));
+      const pts = xs.map((x, i) => `${x.toFixed(1)},${yv[i].toFixed(1)}`).join(" ");
+      const dots = xs.map((x, i) => `<circle cx="${x.toFixed(1)}" cy="${yv[i].toFixed(1)}" r="3" fill="${colors[si % colors.length]}"/>`).join("");
+      return `<polyline points="${pts}" fill="none" stroke="${colors[si % colors.length]}" stroke-width="2"/>${dots}`;
+    }).join("");
+    const legend = ch.series.map((s, si) =>
+      `<span style="color:${colors[si % colors.length]}">■ ${esc(s.label)}</span>`).join(" · ");
+    const first = ch.series[0].points[0].x, last = ch.series[0].points[n - 1].x;
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" xmlns="http://www.w3.org/2000/svg">${lines}` +
+      `<text x="${PAD}" y="${H - 2}" font-size="11">${esc(String(first))} → ${esc(String(last))} · ${fmtNum(min)} to ${fmtNum(max)}</text></svg>` +
+      `<p class="sub">Line chart: ${esc(ch.x_label)} → ${legend}. Same data as the table below.</p>`;
+  }
   const ys = ch.points.map((p) => p.y);
   const min = Math.min(...ys), max = Math.max(...ys);
   const span = (max - min) || 1;

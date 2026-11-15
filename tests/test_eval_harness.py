@@ -660,3 +660,315 @@ def test_check_values_watchouts_branch():
                          "text": text + " Creators will recover soon.",
                          "watchouts": wo}], failures)
     assert any("must not contain" in f for f in failures), failures
+
+
+def test_rubric_weekly_last4_type():
+    # 2026-11-13 (v11, p17/p18): the weekly_last4 expected_type
+    # scores a 4-row, two-column result (week, wau). Row count is
+    # exact (4, not 14) and the values are exact counts. A fabricated
+    # passing outcome: all five rubric items pass and task succeeds.
+    ig4 = [147939, 147048, 147057, 146510]
+    weeks = ["2026-03-02", "2026-03-09", "2026-03-16", "2026-03-23"]
+    case = {"id": "p17", "expected_type": "weekly_last4",
+            "expected_metric": "wau_last_4_weeks",
+            "expected_rows": 4,
+            "expected_values": ig4,
+            "family": "multi_turn_context",
+            "question": "what about the last 4 weeks only?"}
+    plan = {"type": "query", "metric": "wau_last_4_weeks",
+            "sql": ("SELECT CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) AS w, "
+                    "COUNT(DISTINCT user_id) AS wau FROM fact_sessions "
+                    "WHERE CAST(start_time AS DATE) BETWEEN DATE '2026-01-01' "
+                    "AND DATE '2026-03-31' AND app = 'instagram' "
+                    "AND CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) "
+                    "IN (DATE '2026-03-02', DATE '2026-03-09', DATE '2026-03-16', "
+                    "DATE '2026-03-23') GROUP BY w ORDER BY w"),
+            "tables": ["fact_sessions"], "grain": "user x week"}
+    rows = [[w, float(v)] for w, v in zip(weeks, ig4)]
+    r = score_single(case, _outcome(plan=plan, rows=rows,
+                                    columns=["w", "wau"]))
+    assert all(v["pass"] is True for v in r["items"].values()), r["items"]
+    assert r["sql_semantic"] is True and r["task_success"] is True
+    # The silent-substitution guards: the full 14-row weekly series
+    # fails the shape check (row count), and the literal last 4 rows
+    # (with the partial Mar 30 week, 69,683) fail the values check --
+    # so a "last 4 rows" answer can never pass as "last 4 complete
+    # weeks".
+    full_plan = dict(plan, metric="wau_by_week")
+    full_rows = [["2025-12-29", 63764.0], ["2026-01-05", 90699.0],
+                 ["2026-01-12", 99611.0], ["2026-01-19", 108169.0],
+                 ["2026-01-26", 117025.0], ["2026-02-02", 126050.0],
+                 ["2026-02-09", 134298.0], ["2026-02-16", 139222.0],
+                 ["2026-02-23", 146926.0], ["2026-03-02", 147939.0],
+                 ["2026-03-09", 147048.0], ["2026-03-16", 147057.0],
+                 ["2026-03-23", 146510.0], ["2026-03-30", 69683.0]]
+    r2 = score_single(case, _outcome(plan=full_plan, rows=full_rows,
+                                     columns=["w", "wau"]))
+    assert r2["items"]["result_equiv"]["pass"] is False
+    assert r2["task_success"] is False
+    literal_rows = [["2026-03-09", 147048.0], ["2026-03-16", 147057.0],
+                    ["2026-03-23", 146510.0], ["2026-03-30", 69683.0]]
+    r3 = score_single(case, _outcome(plan=plan, rows=literal_rows,
+                                     columns=["w", "wau"]))
+    assert r3["items"]["result_equiv"]["pass"] is False
+    assert r3["task_success"] is False
+
+
+def test_rubric_creators_series_type():
+    # 2026-11-13 (v11, p21/p22): the creators_series expected_type
+    # scores a 14-row, two-column result (week, creators). Row count
+    # is exact and the values are exact counts. A fabricated passing
+    # outcome: all five rubric items pass and task succeeds.
+    ig = [26410, 31979, 31832, 31995, 31898, 31955, 31289,
+          18120, 17942, 18142, 18186, 18057, 18073, 8252]
+    weeks = ["2025-12-29", "2026-01-05", "2026-01-12", "2026-01-19",
+             "2026-01-26", "2026-02-02", "2026-02-09", "2026-02-16",
+             "2026-02-23", "2026-03-02", "2026-03-09", "2026-03-16",
+             "2026-03-23", "2026-03-30"]
+    case = {"id": "p21", "expected_type": "creators_series",
+            "expected_metric": "creators_by_week",
+            "expected_rows": 14,
+            "expected_values": ig,
+            "family": "multi_turn_context",
+            "question": "can you give me a similar trend for creators on Instagram?"}
+    plan = {"type": "query", "metric": "creators_by_week",
+            "sql": ("SELECT CAST(DATE_TRUNC('week', CAST(f.published_at AS DATE)) AS DATE) AS w, "
+                    "COUNT(DISTINCT f.creator_id) AS creators FROM fact_content_creation f "
+                    "JOIN dim_content c ON c.content_id = f.content_id "
+                    "WHERE CAST(f.published_at AS DATE) BETWEEN DATE '2026-01-01' "
+                    "AND DATE '2026-03-31' AND c.app = 'instagram' GROUP BY w ORDER BY w"),
+            "tables": ["fact_content_creation", "dim_content"], "grain": "creator x week"}
+    rows = [[w, float(v)] for w, v in zip(weeks, ig)]
+    r = score_single(case, _outcome(plan=plan, rows=rows,
+                                    columns=["w", "creators"]))
+    assert all(v["pass"] is True for v in r["items"].values()), r["items"]
+    assert r["sql_semantic"] is True and r["task_success"] is True
+    # The silent-substitution guard: the WAU series (same shape, 14
+    # rows x 2 cols) fails the values check, so the two series can
+    # never be swapped.
+    wau_rows = [[w, float(v)] for w, v in zip(weeks, [63764, 90699, 99611, 108169,
+                                                      117025, 126050, 134298, 139222,
+                                                      146926, 147939, 147048, 147057,
+                                                      146510, 69683])]
+    r2 = score_single(case, _outcome(plan=dict(plan, metric="wau_by_week"),
+                                     rows=wau_rows, columns=["w", "wau"]))
+    assert r2["items"]["result_equiv"]["pass"] is False
+    assert r2["task_success"] is False
+
+
+def test_rubric_weekly_compare_type():
+    # 2026-11-13 (v11, p19): the weekly_compare expected_type scores
+    # a 14-row, three-column result (week, instagram, whatsapp).
+    # expected_values is {app: [14 values]} keyed by the column
+    # aliases, so each series is checked against its own app's
+    # values. A fabricated passing outcome: all five rubric items
+    # pass and task succeeds.
+    ig = [63764, 90699, 99611, 108169, 117025, 126050, 134298,
+          139222, 146926, 147939, 147048, 147057, 146510, 69683]
+    wa = [41660, 59924, 65795, 71728, 77911, 84107, 89297,
+          92651, 97829, 98372, 98125, 98063, 97675, 46177]
+    weeks = ["2025-12-29", "2026-01-05", "2026-01-12", "2026-01-19",
+             "2026-01-26", "2026-02-02", "2026-02-09", "2026-02-16",
+             "2026-02-23", "2026-03-02", "2026-03-09", "2026-03-16",
+             "2026-03-23", "2026-03-30"]
+    case = {"id": "p19", "expected_type": "weekly_compare",
+            "expected_metric": "weekly_compare",
+            "expected_rows": 14,
+            "expected_values": {"instagram": ig, "whatsapp": wa},
+            "family": "metric_scoping",
+            "question": "compare weekly Instagram vs WhatsApp"}
+    plan = {"type": "weekly_compare", "metric": "weekly_compare",
+            "sql": ("SELECT COALESCE(a.w, b.w) AS w, a.wau AS instagram, b.wau AS whatsapp "
+                    "FROM (SELECT CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) AS w, "
+                    "COUNT(DISTINCT user_id) AS wau FROM fact_sessions WHERE app = 'instagram' "
+                    "GROUP BY w) a FULL OUTER JOIN (SELECT CAST(DATE_TRUNC('week', "
+                    "CAST(start_time AS DATE)) AS DATE) AS w, COUNT(DISTINCT user_id) AS wau "
+                    "FROM fact_sessions WHERE app = 'whatsapp' GROUP BY w) b ON a.w = b.w ORDER BY w"),
+            "tables": ["fact_sessions"], "grain": "user x week"}
+    rows = [[w, float(a), float(b)] for w, a, b in zip(weeks, ig, wa)]
+    r = score_single(case, _outcome(plan=plan, rows=rows,
+                                    columns=["w", "instagram", "whatsapp"]))
+    assert all(v["pass"] is True for v in r["items"].values()), r["items"]
+    assert r["sql_semantic"] is True and r["task_success"] is True
+    # The silent-substitution guards: a single-app weekly series
+    # (14 rows x 2 cols) fails the shape check, and the two series
+    # swapped fail the values check.
+    r2 = score_single(case, _outcome(plan=dict(plan, metric="wau_by_week"),
+                                     rows=[[w, float(v)] for w, v in zip(weeks, ig)],
+                                     columns=["w", "wau"]))
+    assert r2["items"]["result_equiv"]["pass"] is False
+    assert r2["task_success"] is False
+    swapped = [[w, float(b), float(a)] for w, a, b in zip(weeks, ig, wa)]
+    r3 = score_single(case, _outcome(plan=plan, rows=swapped,
+                                     columns=["w", "instagram", "whatsapp"]))
+    assert r3["items"]["result_equiv"]["pass"] is False
+    assert r3["task_success"] is False
+
+
+def _load_conv_runner():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "run_conversation_benchmark",
+        ROOT / "scripts/run_conversation_benchmark.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.check_values
+
+
+def _viz_reply(type_, rows, chart=None, **payload):
+    reply = {"type": type_, "working": {"visualization": {
+        "available": True, "rows": rows, "chart": chart or {"kind": "line"}}}}
+    reply.update(payload)
+    return reply
+
+
+def test_check_values_weekly_last4_branch():
+    # 2026-11-13 (v11, p17/p18): the weekly_last4 check_values branch
+    # scores the LAST weekly_last4 reply's viz rows against the
+    # stored values (exact) and pins the excluded partial week.
+    check_values = _load_conv_runner()
+    ig4 = [147939, 147048, 147057, 146510]
+    conv = {"id": "p17", "checks": {
+        "weekly_last4_chart_kind": "line",
+        "weekly_last4_excluded": ["2026-03-30"],
+        "weekly_last4_values": ig4}}
+    rows = [["2026-03-02", 147939], ["2026-03-09", 147048],
+            ["2026-03-16", 147057], ["2026-03-23", 146510]]
+    failures = []
+    check_values(conv, [{"type": "weekly_series"},
+                        _viz_reply("weekly_last4", rows,
+                                   weekly_last4={"excluded_partial_weeks": ["2026-03-30"]})],
+                 failures)
+    assert failures == [], failures
+    # A wrong value fails, naming the branch.
+    failures = []
+    check_values(conv, [_viz_reply("weekly_last4",
+                                   [["2026-03-02", 147939], ["2026-03-09", 147048],
+                                    ["2026-03-16", 147057], ["2026-03-23", 69683]],
+                                   weekly_last4={"excluded_partial_weeks": ["2026-03-30"]})],
+                 failures)
+    assert any("last-4-weeks values" in f for f in failures), failures
+    # A wrong excluded week fails, naming the key.
+    failures = []
+    check_values(conv, [_viz_reply("weekly_last4", rows,
+                                   weekly_last4={"excluded_partial_weeks": []})],
+                 failures)
+    assert any("last-4-weeks excluded" in f for f in failures), failures
+    # A non-line chart fails.
+    failures = []
+    check_values(conv, [_viz_reply("weekly_last4", rows,
+                                   chart={"kind": "bar"},
+                                   weekly_last4={"excluded_partial_weeks": ["2026-03-30"]})],
+                 failures)
+    assert any("last-4-weeks chart" in f for f in failures), failures
+
+
+def test_check_values_weekly_compare_branch():
+    # 2026-11-13 (v11, p20): the weekly_compare check_values branch
+    # scores the weekly_compare reply's payload (both series exact,
+    # stats within 0.05) and requires a two-series line chart.
+    check_values = _load_conv_runner()
+    ig = [63764, 90699, 99611, 108169, 117025, 126050, 134298,
+          139222, 146926, 147939, 147048, 147057, 146510, 69683]
+    wa = [41660, 59924, 65795, 71728, 77911, 84107, 89297,
+          92651, 97829, 98372, 98125, 98063, 97675, 46177]
+    stats = {"change_a_pct": -0.97, "change_b_pct": -0.71,
+             "growth_a_pct": 63.11, "growth_b_pct": 64.16,
+             "mean4_a": 147138.5, "mean4_b": 98058.75,
+             "peak_a": 147939, "peak_a_week": "2026-03-02",
+             "peak_b": 98372, "peak_b_week": "2026-03-02",
+             "ratio": 1.50}
+    conv = {"id": "p20", "checks": {
+        "weekly_compare_chart_kind": "line",
+        "weekly_compare_stats": stats,
+        "weekly_compare_values": {"instagram": ig, "whatsapp": wa}}}
+    rows = [["2025-12-29", 63764, 41660], ["2026-03-02", 147939, 98372],
+            ["2026-03-30", 69683, 46177]]
+    wc = {"app_a": "instagram", "app_b": "whatsapp",
+          "values_a": ig, "values_b": wa}
+    wc.update(stats)
+    chart = {"kind": "line", "series": [{"label": "instagram"}, {"label": "whatsapp"}]}
+    failures = []
+    check_values(conv, [{"type": "weekly_series"},
+                        _viz_reply("weekly_compare", rows, chart=chart,
+                                   weekly_compare=wc)],
+                 failures)
+    assert failures == [], failures
+    # A wrong series fails, naming the app.
+    failures = []
+    check_values(conv, [_viz_reply("weekly_compare", rows, chart=chart,
+                                   weekly_compare=dict(wc, values_b=list(reversed(wa))))],
+                 failures)
+    assert any("whatsapp values" in f for f in failures), failures
+    # A wrong stat fails, naming the key.
+    failures = []
+    check_values(conv, [_viz_reply("weekly_compare", rows, chart=chart,
+                                   weekly_compare=dict(wc, ratio=2.0))],
+                 failures)
+    assert any("ratio" in f for f in failures), failures
+    # A single-series chart fails.
+    failures = []
+    check_values(conv, [_viz_reply("weekly_compare", rows,
+                                   chart={"kind": "line", "series": [{"label": "instagram"}]},
+                                   weekly_compare=wc)],
+                 failures)
+    assert any("2 series" in f for f in failures), failures
+    # No compare reply at all fails instead of silently passing.
+    failures = []
+    check_values(conv, [{"type": "weekly_series"}], failures)
+    assert any("no weekly_compare reply" in f for f in failures), failures
+
+
+def test_check_values_creators_series_branch():
+    # 2026-11-13 (v11, p21/p22/p23): the creators_series
+    # check_values branch scores the LAST creators_series reply's
+    # viz rows against the stored values (exact) and requires a line
+    # chart.
+    check_values = _load_conv_runner()
+    ig = [26410, 31979, 31832, 31995, 31898, 31955, 31289,
+          18120, 17942, 18142, 18186, 18057, 18073, 8252]
+    conv = {"id": "p21", "checks": {
+        "creators_series_chart_kind": "line",
+        "creators_series_values": ig}}
+    rows = [[f"2026-0{w}", v] for w, v in zip(range(1, 15), ig)]
+    failures = []
+    check_values(conv, [{"type": "weekly_series"},
+                        _viz_reply("creators_series", rows)],
+                 failures)
+    assert failures == [], failures
+    # A wrong value fails, naming the branch.
+    failures = []
+    check_values(conv, [_viz_reply("creators_series",
+                                   [["2026-01-01", 99999]] + rows[1:],
+                                   creators_series={"weeks": 14})],
+                 failures)
+    assert any("creators series values" in f for f in failures), failures
+    # A non-line chart fails.
+    failures = []
+    check_values(conv, [_viz_reply("creators_series", rows, chart={"kind": "bar"},
+                                   creators_series={"weeks": 14})],
+                 failures)
+    assert any("creators series chart" in f for f in failures), failures
+
+
+def test_check_values_daily_creators_branch():
+    # 2026-11-13 (v11, p23 turn 1): the daily_creators check_values
+    # branch scores the daily_creators payload's value within 0.01
+    # of the stored mean.
+    check_values = _load_conv_runner()
+    conv = {"id": "p23", "checks": {"daily_creators_value": 7493.02}}
+    failures = []
+    check_values(conv, [{"type": "query",
+                         "daily_creators": {"app": "instagram", "value": 7493.022222222222}}],
+                 failures)
+    assert failures == [], failures
+    # A wrong value fails, naming the key.
+    failures = []
+    check_values(conv, [{"type": "query",
+                         "daily_creators": {"app": "instagram", "value": 5000.0}}],
+                 failures)
+    assert any("daily creators value" in f for f in failures), failures
+    # No daily_creators payload at all fails instead of silently passing.
+    failures = []
+    check_values(conv, [{"type": "query"}], failures)
+    assert any("no daily_creators reply" in f for f in failures), failures

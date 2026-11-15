@@ -137,6 +137,106 @@ def check_values(conv, replies, failures):
                 failures.append(f"weekly series rows: got {len(got)}, expected {len(want)}")
             elif any(g != w for g, w in zip(got, want)):
                 failures.append("weekly series values differ from expected")
+    # Last 4 weeks (2026-11-13, v11, p17/p18): mirror the weekly
+    # series branch -- the LAST weekly_last4 reply is the one
+    # checked (turn 2 in p17; turn 3 in p18 is the WhatsApp last-4).
+    # Values exact; the excluded partial week is pinned by the
+    # payload's excluded_partial_weeks list.
+    last4_replies = [r for r in replies if r.get("weekly_last4")]
+    if last4_replies:
+        viz = (last4_replies[-1].get("working") or {}).get("visualization") or {}
+        if "weekly_last4_chart_kind" in checks:
+            chart = viz.get("chart") or {}
+            if chart.get("kind") != checks["weekly_last4_chart_kind"]:
+                failures.append(f"last-4-weeks chart: expected "
+                                f"{checks['weekly_last4_chart_kind']}, got {chart.get('kind')}")
+        if "weekly_last4_values" in checks:
+            rows = viz.get("rows") or []
+            got = [float(r[-1]) for r in rows if len(r) > 1]
+            want = [float(v) for v in checks["weekly_last4_values"]]
+            if len(got) != len(want):
+                failures.append(f"last-4-weeks rows: got {len(got)}, expected {len(want)}")
+            elif any(g != w for g, w in zip(got, want)):
+                failures.append("last-4-weeks values differ from expected")
+        if "weekly_last4_excluded" in checks:
+            got_ex = (last4_replies[-1].get("weekly_last4") or {}).get("excluded_partial_weeks")
+            if got_ex != checks["weekly_last4_excluded"]:
+                failures.append(f"last-4-weeks excluded: expected {checks['weekly_last4_excluded']}, "
+                                f"got {got_ex}")
+    # Weekly compare (2026-11-13, v11, p20): the reply carries a
+    # weekly_compare payload (both series + stats) and the working
+    # visualization carries the combined 14x3 rows. The values are
+    # checked per app against the stored series (exact counts); the
+    # stats (peak weeks exact, percents/means/ratio within 0.05)
+    # against the stored figures; the chart must be a line chart
+    # with two series. A missing weekly_compare reply is itself a
+    # failure.
+    if "weekly_compare_values" in checks or "weekly_compare_stats" in checks \
+            or "weekly_compare_chart_kind" in checks:
+        wc = next((r.get("weekly_compare") for r in replies if r.get("weekly_compare")), None)
+        if wc is None:
+            failures.append("weekly compare: no weekly_compare reply")
+        else:
+            if "weekly_compare_values" in checks:
+                want = checks["weekly_compare_values"]
+                for app_key, vals_key in (("app_a", "values_a"), ("app_b", "values_b")):
+                    app_name = wc.get(app_key)
+                    got = wc.get(vals_key) or []
+                    w = want.get(app_name)
+                    if w is None:
+                        failures.append(f"weekly compare: no expected series for {app_name}")
+                    elif len(got) != len(w) or any(g != e for g, e in zip(got, w)):
+                        failures.append(f"weekly compare {app_name} values differ from expected")
+            if "weekly_compare_stats" in checks:
+                want = checks["weekly_compare_stats"]
+                for key in ("peak_a", "peak_b", "peak_a_week", "peak_b_week"):
+                    if wc.get(key) != want[key]:
+                        failures.append(f"weekly compare {key}: expected {want[key]}, got {wc.get(key)}")
+                for key in ("growth_a_pct", "growth_b_pct", "change_a_pct",
+                            "change_b_pct", "mean4_a", "mean4_b", "ratio"):
+                    if abs(float(wc.get(key) or 0) - want[key]) > 0.05:
+                        failures.append(f"weekly compare {key}: expected ~{want[key]}, got {wc.get(key)}")
+            if "weekly_compare_chart_kind" in checks:
+                wc_reply = next((r for r in replies if r.get("weekly_compare")), None)
+                viz = (wc_reply.get("working") or {}).get("visualization") or {}
+                chart = viz.get("chart") or {}
+                if chart.get("kind") != checks["weekly_compare_chart_kind"]:
+                    failures.append(f"weekly compare chart: expected "
+                                    f"{checks['weekly_compare_chart_kind']}, got {chart.get('kind')}")
+                if len(chart.get("series") or []) != 2:
+                    failures.append(f"weekly compare chart: expected 2 series, "
+                                    f"got {len(chart.get('series') or [])}")
+    # Creators series (2026-11-13, v11, p21/p22/p23): mirror the
+    # weekly series branch -- the LAST creators_series reply is the
+    # one checked (turn 2 in p21/p23; turn 2 in p22 is the WhatsApp
+    # series). Values exact; chart kind line.
+    creators_replies = [r for r in replies if r.get("creators_series")]
+    if creators_replies:
+        viz = (creators_replies[-1].get("working") or {}).get("visualization") or {}
+        if "creators_series_chart_kind" in checks:
+            chart = viz.get("chart") or {}
+            if chart.get("kind") != checks["creators_series_chart_kind"]:
+                failures.append(f"creators series chart: expected "
+                                f"{checks['creators_series_chart_kind']}, got {chart.get('kind')}")
+        if "creators_series_values" in checks:
+            rows = viz.get("rows") or []
+            got = [float(r[-1]) for r in rows if len(r) > 1]
+            want = [float(v) for v in checks["creators_series_values"]]
+            if len(got) != len(want):
+                failures.append(f"creators series rows: got {len(got)}, expected {len(want)}")
+            elif any(g != w for g, w in zip(got, want)):
+                failures.append("creators series values differ from expected")
+    # Daily creators scalar (2026-11-13, v11, p23 turn 1): the reply
+    # carries a daily_creators payload (app, value). Mean within
+    # 0.01 of the stored value. A missing payload is itself a
+    # failure.
+    if "daily_creators_value" in checks:
+        dc = next((r.get("daily_creators") for r in replies if r.get("daily_creators")), None)
+        if dc is None:
+            failures.append("daily creators: no daily_creators reply")
+        elif abs(float(dc.get("value") or 0) - checks["daily_creators_value"]) > 0.01:
+            failures.append(f"daily creators value: expected ~{checks['daily_creators_value']}, "
+                            f"got {dc.get('value')}")
     # Watch-outs after a weekly series (2026-11-12, p15/p16): the
     # reply carries a watchouts payload (app, primary_topic, weekly
     # creators + WAU values, break numbers, plateau values). Counts

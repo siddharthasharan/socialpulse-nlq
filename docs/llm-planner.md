@@ -346,3 +346,69 @@ none). Live verification is still PENDING — Gemini generation
 has never been observed working (last verified states: HTTP 503
 at 13:29 PST and a 120s read timeout at 13:36 PST, both
 2026-11-12).
+
+## v11 weekly follow-ups — two metrics routable, compare is chat-level (2026-11-13)
+
+The v11 weekly follow-ups (benchmark v11, cases p17–p23) split
+three ways for the LLM planner:
+
+- **Last-4 weeks — routable.** "What about the last 4 weeks
+  only?" after a weekly series was a live clarification on
+  2026-11-13 (the model never ran — a Gemini 503 — and no
+  last-4 capability existed). The last-4 series is now a
+  capability the fallback can route to: `wau_last_4_weeks`
+  appears in the generated prompt inventory (filters honored:
+  app; breakdowns: none) with no prompt-text or version change —
+  the inventory is generated at prompt-build time from
+  `METRIC_DEFINITIONS` + the mechanical `build_sql` probe. A
+  model picking `wau_last_4_weeks` + instagram gets the last 4
+  COMPLETE weeks (147,939 / 147,048 / 147,057 / 146,510, mean
+  147,138.5), never the literal last 4 rows (the partial Mar 30
+  week is excluded by the template's IN list, not by the model).
+  The routing is pinned by mocked-transport tests in
+  `tests/test_llm_planner.py` (choice execution through
+  `build_sql`, inventory line).
+- **Creators by week — routable.** "Can you give me a similar
+  trend for creators on Instagram?" after a weekly series was a
+  live clarification on 2026-11-13 (same Gemini 503, model never
+  ran, no creators-series capability). `creators_by_week` appears
+  in the generated prompt inventory (filters honored: app;
+  breakdowns: none) with no prompt-text or version change. A
+  model picking `creators_by_week` + instagram gets the 14-week
+  per-week DISTINCT creators series (mean 23,866.43/week; first
+  and last weeks partial, flagged as such). The routing is pinned
+  by mocked-transport tests (choice execution through
+  `build_sql`, inventory line). The anaphora form ("weekly trend
+  for this" after a daily-creators scalar) is chat-level
+  (`self.last_metric`), not a router choice — the model routes
+  the turn-1 scalar (`daily_creators_mean`, already in the
+  inventory) and the deterministic chat resolves "this".
+- **Compare — chat-level, no inventory change.** The compare
+  turn (`weekly_compare`) is a deterministic chat turn like
+  watch-outs: there is **no planner metric for it** — planner
+  templates are single-app, and the compare needs two apps in
+  one answer — so the generated prompt inventory gains nothing
+  for it. The model cannot route a compare question to the turn;
+  those questions reach it through the deterministic chat routing
+  (compare block), never through the LLM. No mocked-transport
+  test is needed for routing that does not exist; the negative is
+  pinned instead (`tests/test_llm_planner.py`:
+  `test_inventory_gains_nothing_for_compare` — "weekly_compare"
+  and "compare" are absent from the inventory and
+  `"weekly_compare"` is not a metric id). The inventory lines for
+  `wau_by_week`, `wau_last_4_weeks`, and `creators_by_week` are
+  unchanged (filters honored: app; breakdowns: none).
+- **Daily creators — deterministic now.** The p23 turn-1 scalar
+  ("daily creators for Instagram?", mean 7,493.02/day) was
+  answered in the live shell only by the LLM fallback turn (the
+  model never ran; the deterministic baseline plan answered)
+  because the deterministic chat had no scalar turn for it. It
+  now answers deterministically (`_daily_creators_turn`, type
+  `query`, metric `daily_creators_mean` — already in the
+  inventory), so the live fallback no longer answers it.
+
+Live verification is still PENDING — Gemini generation has never
+been observed working (last verified states: HTTP 503 at 13:29
+PST 2026-11-12, a 120s read timeout at 13:36 PST 2026-11-12, and
+a 503 in the user's 2026-11-13 12:28 PST screenshot's working
+trace).

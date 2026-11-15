@@ -250,6 +250,24 @@ METRIC_DEFINITIONS = {
     # covers only Jan 1-4 and the last week (Mon Mar 30 2026) only
     # Mar 30-31, so both are partial weeks with lower counts.
     "wau_by_week": ("Distinct users with at least one session in each ISO week, by week (Jan 1-Mar 31 2026). App-scoped: the weekly values are that app's own, unlike wau_mean_weekly, which honors no app filter and only ever returns the all-apps mean. The first week (Dec 29) covers only Jan 1-4 and the last week (Mar 30) only Mar 30-31.", "user x week", "distinct users"),
+    # wau_last_4_weeks (2026-11-13, v11) is a template-only metric,
+    # like wau_by_week: NOT in catalog/measures.yaml (20 metrics).
+    # The last 4 COMPLETE weeks of the window -- a week is complete
+    # when its Monday is >= the window start and its Sunday is <=
+    # the window end. "Last 4 weeks" means the last 4 complete
+    # weeks, NOT the literal last 4 rows: the literal last row is
+    # the partial Mar 30 week (Mar 30-31 only), and including it
+    # would read as a crash. App-scoped, like wau_by_week.
+    "wau_last_4_weeks": ("Distinct users with at least one session in each ISO week, for the last 4 complete weeks of the window (Mar 2/9/16/23 2026). App-scoped, like wau_by_week. The partial week of Mar 30 (Mar 30-31 only) is excluded.", "user x week", "distinct users"),
+    # creators_by_week (2026-11-13, v11) is a template-only metric,
+    # like wau_by_week: NOT in catalog/measures.yaml (20 metrics).
+    # The creators series -- distinct users with >=1 content item
+    # published in each ISO week, app-scoped via the same
+    # fact_content_creation JOIN dim_content join the weather cards
+    # and the watch-outs turn use. The first/last weeks are partial
+    # (same Mondays as the WAU series), and the Feb 16 week carries
+    # the creator-supply shock (31,289 -> 18,120 for Instagram).
+    "creators_by_week": ("Distinct users with at least one content item published in each ISO week, by week (Jan 1-Mar 31 2026). App-scoped via fact_content_creation JOIN dim_content. The first week (Dec 29) covers only Jan 1-4 and the last week (Mar 30) only Mar 30-31.", "creator x week", "distinct creators"),
     "mau_march": ("Distinct users with at least one session in March 2026.", "user x month", "distinct users"),
     # mau_by_country (2026-11-10) is a template-only metric, like the
     # routed metrics: it is NOT in catalog/measures.yaml, which stays
@@ -596,6 +614,27 @@ def _dim_expr(breakdown, context="user"):
     return None, None
 
 
+def _complete_weeks(ds: str, de: str):
+    """ISO-week Mondays whose whole week (Mon..Sun) lies inside
+    [ds, de], as ISO date strings, in order. A week is complete when
+    its Monday is >= ds and its Sunday is <= de -- so for the frozen
+    window (2026-01-01..2026-03-31) the list starts 2026-01-05 and
+    ends 2026-03-23: the Dec 29 week (Jan 1-4 only) and the Mar 30
+    week (Mar 30-31 only) are partial and excluded. Used by the
+    wau_last_4_weeks template (2026-11-13, v11)."""
+    import datetime as _dt
+
+    start = _dt.date.fromisoformat(ds)
+    end = _dt.date.fromisoformat(de)
+    monday = start - _dt.timedelta(days=start.weekday())
+    weeks = []
+    while monday <= end:
+        if monday >= start and monday + _dt.timedelta(days=6) <= end:
+            weeks.append(monday.isoformat())
+        monday += _dt.timedelta(days=7)
+    return weeks
+
+
 def _series_or_scalar(q: str):
     if "mean" in q or "average" in q:
         return "scalar"
@@ -693,6 +732,52 @@ def build_sql(metric: str, f: dict, breakdown, q: str, series=None):
         return (f"SELECT CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) AS w, "
                 f"COUNT(DISTINCT user_id) AS wau FROM fact_sessions "
                 f"WHERE CAST(start_time AS DATE) BETWEEN DATE '{ds}' AND DATE '{de}'{app_where} "
+                f"GROUP BY w ORDER BY w"), tables, grain
+
+    if metric == "wau_last_4_weeks":
+        # Last 4 COMPLETE weeks of the window (2026-11-13, v11): the
+        # same per-week query as wau_by_week, restricted to the last 4
+        # Mondays whose whole week lies inside [ds, de]. Computed in
+        # Python so the SQL carries an explicit IN list of week dates
+        # -- the working panel shows exactly which weeks were
+        # returned, and a window with fewer than 4 complete weeks is
+        # a ValueError, not a silently short series. For the frozen
+        # window those are Mar 2/9/16/23 2026; the partial Mar 30
+        # week (Mar 30-31 only) is excluded by construction.
+        tables = ["fact_sessions"]
+        grain = "user x week"
+        if breakdown:
+            raise ValueError("WAU by week cannot be broken down: ask for the weekly series "
+                             "for one app, or WAU by country for the monthly cut.")
+        last4 = _complete_weeks(ds, de)[-4:]
+        if len(last4) < 4:
+            raise ValueError("fewer than 4 complete weeks in the window")
+        in_list = ", ".join(f"DATE '{d}'" for d in last4)
+        app_where = f" AND app = '{f['app']}'" if "app" in f else ""
+        return (f"SELECT CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) AS w, "
+                f"COUNT(DISTINCT user_id) AS wau FROM fact_sessions "
+                f"WHERE CAST(start_time AS DATE) BETWEEN DATE '{ds}' AND DATE '{de}'{app_where} "
+                f"AND CAST(DATE_TRUNC('week', CAST(start_time AS DATE)) AS DATE) IN ({in_list}) "
+                f"GROUP BY w ORDER BY w"), tables, grain
+
+    if metric == "creators_by_week":
+        # Weekly creators series (2026-11-13, v11): distinct users
+        # with >=1 content item published in each ISO week, app-scoped
+        # via the same fact_content_creation JOIN dim_content join the
+        # weather cards and the watch-outs turn use (the watch-outs
+        # turn's _weekly_creators_series runs exactly this SQL). No
+        # breakdown: a per-country weekly creators series is a
+        # different template, not this one.
+        tables = ["fact_content_creation", "dim_content"]
+        grain = "creator x week"
+        if breakdown:
+            raise ValueError("Creators by week cannot be broken down: ask for the weekly "
+                             "creators series for one app.")
+        app_where = f" AND c.app = '{f['app']}'" if "app" in f else ""
+        return (f"SELECT CAST(DATE_TRUNC('week', CAST(f.published_at AS DATE)) AS DATE) AS w, "
+                f"COUNT(DISTINCT f.creator_id) AS creators FROM fact_content_creation f "
+                f"JOIN dim_content c ON c.content_id = f.content_id "
+                f"WHERE CAST(f.published_at AS DATE) BETWEEN DATE '{ds}' AND DATE '{de}'{app_where} "
                 f"GROUP BY w ORDER BY w"), tables, grain
 
     if metric == "mau_march":
@@ -1134,6 +1219,25 @@ def plan(question: str, variant: str = "baseline"):
         metric = "median_session_duration_min"
     elif "stickiness" in q or "dau/mau" in q or "dau / mau" in q:
         metric = "dau_mau_stickiness"
+    elif (("last 4 week" in q or "last four week" in q)
+            and "creator" not in q and "dau" not in q and "mau" not in q
+            and "mean" not in q and "average" not in q):
+        # Last 4 complete weeks (2026-11-13, v11): "last 4 weeks
+        # only" after a weekly series -- the last 4 complete weeks
+        # (Mar 2/9/16/23 for the frozen window), NOT the literal last
+        # 4 rows (the Mar 30 week is partial, Mar 30-31 only, and
+        # would read as a crash). Placed before the wau_by_week
+        # branch so "weekly trend for the last 4 weeks" takes the
+        # windowed series, not the full one. No "wau"/"active user"
+        # word is required: the follow-up form ("what about the last
+        # 4 weeks only?") names neither, and the chat turn gates on
+        # stage == "weekly_series" anyway. Exclusions: "creator"
+        # (that is creators_by_week), "dau"/"mau" (other metrics),
+        # "mean"/"average" (a scalar, not a series). Variant
+        # boundary: not in the 20-metric catalog, so
+        # catalog-assisted and validated abstain; only the baseline
+        # answers it.
+        metric = "wau_last_4_weeks"
     elif (("week" in q or "weekly" in q)
             and ("trend" in q or "by week" in q or "each week" in q or "per week" in q)
             and ("wau" in q or "active user" in q)
@@ -1153,6 +1257,26 @@ def plan(question: str, variant: str = "baseline"):
         # 20-metric catalog, so catalog-assisted and validated
         # abstain on it; only the baseline answers it.
         metric = "wau_by_week"
+    elif (("week" in q or "weekly" in q)
+            and ("trend" in q or "by week" in q or "each week" in q or "per week" in q)
+            and "creator" in q
+            and "dau" not in q and "mau" not in q
+            and "mean" not in q and "average" not in q):
+        # Creators by week (2026-11-13, v11): the weekly creators
+        # series -- distinct users with >=1 content item in each ISO
+        # week. Placed after wau_by_week so a WAU series question
+        # never takes the creators template, and before the "wau"
+        # branch. The series word is required on purpose, mirroring
+        # wau_by_week: the chat turn constructs a canonical question
+        # ("weekly trend for creators on {app}") for the follow-up
+        # form ("similar trend for creators"), which names no week
+        # word. The earlier "creator" branches are specific phrases
+        # ("daily creators", "creator penetration", "posts per
+        # creator") that a series question does not match. Variant
+        # boundary: not in the 20-metric catalog, so
+        # catalog-assisted and validated abstain; only the baseline
+        # answers it.
+        metric = "creators_by_week"
     elif "wau" in q or "weekly active" in q:
         metric = "wau_mean_weekly"
     elif "creator" in q and (

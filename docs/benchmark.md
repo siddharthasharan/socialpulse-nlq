@@ -2483,11 +2483,88 @@ singles + 23 conversations = 166; the wiring script asserts
 
 ## v10 results
 
-[RESULTS PENDING — to be filled from the traces once the dev,
-held-out, and v9-regression runs land. Expected: dev 128/136
-(the 126 v9 dev passes plus p15 and p16), held-out 27/30
-(h02, h08, h18), oracle 166/166 agree, 0 inexact, v9
-regression unchanged (126/134, 27/30, oracle 164/164).]
+**Dev run (2026-11-12): 128/136 task success** — the 126 v9 dev
+passes plus p15 and p16. Per family:
+
+| Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
+|---|---|---|---|---|---|---|---|
+| metric_scoping | 39 | 32/39 | 31/31 | 31/31 | 31/31 | 29/29 | 32/39 |
+| aggregation_grain | 29 | 29/29 | 29/29 | 29/29 | 29/29 | 29/29 | 29/29 |
+| complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
+| ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
+| multi_turn_context | 16 | 16/16 | 15/15 | 15/15 | 16/16 | 10/10 | 16/16 |
+| incorrect_assumption | 9 | 8/9 | — | — | 1/1 | — | 8/9 |
+| guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
+| sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
+
+**Oracle agreement: v10 166/166, no inexact entries** (dev run
+trace; the held-out run was `--skip-oracle`, as usual).
+
+**Held-out run (2026-11-12): 27/30 task success**, the same 3
+failures as v9 (h02, h08, h18 — reported only, drove no fix). Per
+family: metric_scoping 10/12, aggregation_grain 3/3,
+complex_joins_breakdowns 5/5, ambiguous_metric 2/2,
+multi_turn_context 3/3, incorrect_assumption 1/2,
+guardrail_adversarial 2/2, sql_safety_syntax 1/1.
+
+**Dev failures (8 total — the same expected findings as v9):** h01,
+h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
+new failures: **p15 and p16 pass all five rubric items**
+(`result_equiv` for both is scored by the new `check_values`
+watchouts branch — the turn-2 reply's creators_before/after,
+daily means, WAU peak, and plateau list exact, text containing
+"creator supply" + "plateau" and no "will "). No "right answer,
+wrong SQL" warnings in either run.
+
+**v9 regression with the new code (same day, same data): dev
+126/134, held-out 27/30, oracle 164/164 agree in both runs**
+(traces `evals/runs/benchmark_v9_baseline_dev_20261113-000759.json`
+and `evals/runs/benchmark_v9_baseline_heldout_20261112-235659.json`).
+The watch-outs turn, the harness extensions, and the test fix
+changed no v9 outcome: the failures are exactly the 8 known dev
+findings and the 3 known held-out findings, and p01–p14 still
+pass.
+
+**Test suite (2026-11-13): 244 pass / 1 known fail / 5 skipped**
+(plain runner; the fail is the pre-existing
+`test_docked_chat_only::test_rounded_corners` on an untouched file;
+the 5 skips are the `test_questions` `tmp_path` fixture tests). 11
+new tests: 9 chat (p15/p16 verbatim phrasings with gold payload
+values + shock/plateau text + no forecast language, no-state
+clarification, MAU-state and daily-series-state clarification,
+WhatsApp app inheritance with its own shock numbers, recommendation
+still needs weather, app-switch re-runs the weekly series, option
+letter advances), 1 harness (the `check_values` watchouts branch:
+a passing payload passes, a wrong number fails naming the key, a
+missing watchouts reply fails, forecast language fails the text
+check), and 1 LLM (the prompt inventory gains nothing for
+watch-outs — negative test). The suite run also surfaced and fixed
+a pre-existing test-pollution bug: `_stub_session()` in
+`tests/test_chat.py` monkeypatched `chat.compute_weather` to a
+fake and never restored it, so any data test running after a stub
+test silently diagnosed the fake weather (its D7 is "up"; the real
+seed-42 D7 is down −1.8pp). `_real_session()` now restores the
+genuine function (saved at import time); no test mixes stub and
+real sessions, so the restore is safe. The bug had gone unnoticed
+because the fake mimics the real shape closely enough that the
+existing tests pass either way — the watch-outs test is the first
+that distinguishes them (it asserts `problems ==
+["creators", "retention"]`).
+
+**Live verification (local server probe, workspace ChatSession on
+the 500K data):** "What's the weekly trend for active users for
+Instagram?" → "tell me what to watch out" returns the watch-outs
+reply — "The creator-supply shock is the top finding..." with
+weekly creators 31,289 → 18,120 (−42.1%), daily ~10,314 Feb 5–Feb
+14 → ~4,667 Feb 15–Feb 28, break Feb 15, D7 19.6% (−1.8pp), the
+plateau (147,939 peak Mar 2, then 147,048 / 147,057 / 146,510),
+DAU 45,249 (+4.0%), engagement flat, partial weeks flagged, "it
+is not a forecast". No working panel; no weather state set.
+"what drove the plateau?" returns the same turn with the
+does-not-prove-cause caveat. A fresh session, or one after MAU or
+a daily series only, clarifies. After the WhatsApp weekly series
+the turn diagnoses WhatsApp (20,690 → 11,880, daily ~6,830 →
+~3,079, WAU peak 98,372).
 
 ## What the turn deliberately does NOT do
 
@@ -2543,3 +2620,534 @@ so the model sees exactly the v9 capability list. Live
 verification is still PENDING — Gemini generation has never been
 observed working (last verified states: HTTP 503 at 13:29 PST
 and a 120s read timeout at 13:36 PST, both 2026-11-12).
+
+# Benchmark v11 — weekly follow-ups: last 4 weeks, compare, creators series (2026-11-13)
+
+## The probes (live shell, 2026-11-13)
+
+Three live probes, all after a weekly series (or, for p23, after a
+daily-creators scalar) — all three clarified before the build:
+
+1. **Last 4 weeks.** After "What's the weekly trend for active
+   users for Instagram?" (answered: 14-week series, mean 120,286),
+   "what about the last 4 weeks only?" → "I could not map that
+   question to a catalog metric." The data supports it: the last 4
+   COMPLETE weeks are Mar 2/9/16/23 (147,939 / 147,048 / 147,057 /
+   146,510, mean 147,138.5). The literal last 4 rows would include
+   the partial Mar 30 week (69,683, Mar 30–31 only) and read as a
+   crash — so "last 4 weeks" means the last 4 complete weeks, NOT
+   the literal last 4 rows. That decision was stated to the user
+   when the build was authorized.
+2. **Compare.** "compare weekly Instagram vs WhatsApp" (single-shot,
+   both apps named) and "compare with WhatsApp" (follow-up after
+   the weekly series) both clarified before the build. The answer is
+   computable from data already in the 500K set: both series side by
+   side, both peak in the week of Mar 2 (147,939 / 98,372) and
+   plateau together (IG −0.97% Mar 2→23, WA −0.71%); growth first
+   complete week→peak near-identical (IG +63.1%, 90,699→147,939; WA
+   +64.2%, 59,924→98,372); Instagram runs ~1.50x WhatsApp in the
+   last 4 weeks (147,138.5 / 98,058.75).
+3. **Creators series.** After the weekly series, "can you give me
+   a similar trend for creators on Instagram?" (his live text had a
+   typo, "simialr") → "I could not map that question to a catalog
+   metric." The user expected it to work as a follow-up: "i tried
+   one more i thought this should have worked in turn by turn?"
+   The weekly-series turn covers active users only, and the
+   watch-outs turn computes weekly creators as diagnosis evidence
+   but no turn served them as a series. Per-week DISTINCT creators
+   (users with ≥1 content item that week) from
+   fact_content_creation, app-scoped: Instagram 26,410 / 31,979 /
+   31,832 / 31,995 / 31,898 / 31,955 / 31,289 / 18,120 / 17,942 /
+   18,142 / 18,186 / 18,057 / 18,073 / 8,252, mean 23,866.43.
+   The same creators-series gap has a second entry point, p23:
+   after "daily creators for Instagram?" (answered by the
+   deterministic scalar turn, mean 7,493.02 distinct creators/day),
+   "can you give me a weekly trend for this from 2026-01-01 to
+   2026-03-31" clarified. "This" refers to the previous turn's
+   metric (creators), and the dates are the full data window.
+
+"Show me active users over time" (from the Nov 12 sweep) stays out
+of v11 — it has no "week" word, so it is an LLM-router eval only,
+measurable once Gemini actually generates.
+
+## The turns (`src/socialpulse_nlq/planner.py`, `src/socialpulse_nlq/chat.py`, `src/socialpulse_nlq/sqlviz.py`, `app/shell.html`)
+
+### Turn 1 — Last-4-weeks (`wau_last_4_weeks`, planner metric + chat turn)
+
+Shape decision: a **planner template**, not a chat-only filter of
+`wau_by_week`. The last-4 series is a different query (an explicit
+`IN (DATE '2026-03-02', DATE '2026-03-09', DATE '2026-03-16',
+DATE '2026-03-23')` list, computed in Python by the new
+`_complete_weeks(ds, de)` helper — ISO-week Mondays whose whole
+week lies inside the window), and a template makes it routable by
+the LLM planner, scoreable by the single-shot harness, and
+reusable by the compare turn's window logic. `build_sql` raises
+`ValueError` if the window has fewer than 4 complete weeks, rather
+than silently answering a shorter series. Breakdowns raise
+`ValueError` (a per-country last-4 series is a different
+template). The template is app-scoped (unlike `wau_mean_weekly`,
+which honors no filters); `wau_mean_weekly` and h07 are untouched.
+
+The chat turn `_weekly_last4_turn(app, question=None)` runs after a
+weekly series (stage == `"weekly_series"`) or after a last-4 turn
+(stage == `"weekly_last4"`, so "last 4 weeks" repeats cleanly).
+Routing: the last-4 block fires on "last 4 week" / "last four
+week" with the app inherited from the series (sticky context /
+session app); "same for WhatsApp" re-runs last-4 for the new app
+via the app-switch branch. The reply names the excluded partial
+week explicitly ("The week of 2026-03-30 is left out on purpose:
+it covers only Mar 30–Mar 31 (2 days in the window), so its count
+would read as a crash, not a trend") and states "These are the
+last 4 complete weeks, not the literal last 4 rows". The payload
+`weekly_last4` carries `{app, start, end, weeks, values, mean,
+low, low_week, high, high_week, excluded_partial_weeks}`. Sets
+`last_metric = "wau_last_4_weeks"` and clears `mau_context`.
+
+### Turn 2 — Compare (`weekly_compare`, chat-level turn)
+
+Shape decision: a **chat-level turn, not a planner metric** —
+planner templates are single-app, and the compare needs two apps
+in one answer. One combined SQL via `self._connect()`:
+`SELECT COALESCE(a.w, b.w) AS w, a.wau AS {app_a}, b.wau AS
+{app_b} FROM (weekly subquery a) FULL OUTER JOIN (weekly subquery
+b) ON a.w = b.w ORDER BY w` (a single statement — `guard_sql`
+rejects ";" so two statements were never an option). The window is
+the stored series window when one exists (the follow-up form),
+else the full 90 days. Stats are computed in Python from the two
+series, complete weeks only: peak week+value per app, first
+complete week→peak growth %, peak→last-complete change %, last-4
+means + ratio. The text names the shared peak week conditionally
+("Both peak in the week of … and plateau together" when the peaks
+coincide; each named separately otherwise). The payload
+`weekly_compare` carries `{app_a, app_b, start, end, weeks (the
+week list — unlike the series payloads, which carry a count),
+values_a, values_b, peak_a, peak_a_week, peak_b, peak_b_week,
+growth_a_pct, growth_b_pct, change_a_pct, change_b_pct, mean4_a,
+mean4_b, ratio, partial_weeks}`. The working panel shows the
+combined SQL + table + two-series line chart (see the sqlviz
+extension below); the SQL diagram is honestly unavailable
+(`parse_sql`: "query joins subquery results, which the diagram
+does not model"). Sets `last_metric = None` (two apps — "this" is
+ambiguous). Routing: the compare block sits BEFORE the
+weekly-series block (so a compare question naming a series word +
+"active user" doesn't match the weekly block and drop the second
+app). ≥2 apps named → compare in named order; 1 app named + stage
+weekly_series + a different app → compare(series app, named); 1
+app named otherwise → clarify "Compare with which app?"; 0 apps
+→ fall through. A "compare" + "last 4 weeks" question takes the
+compare turn (full-series comparison, whose text gives the last-4
+means anyway). "same for WhatsApp" after a compare falls through
+to the weather report for the named app (a compare has two apps;
+"same for X" is ambiguous there).
+
+**sqlviz multi-series extension.** `_chart_for` (`src/socialpulse_nlq/sqlviz.py`)
+now emits a `"series"` list (one `{label, points}` per numeric
+column) alongside the single-series `"points"` (the first series,
+kept so the dashboard canvas chart, which reads `points`, keeps
+drawing the first series unchanged) and `"y_label"` (the first
+series' label), when the first column is a date and the second AND
+later columns are all numeric for every row. If any later column
+is not numeric, it falls back to the single-series payload.
+Multi-series applies to line charts only; bar results keep the old
+behavior (first two columns charted, further columns in the table
+only). Single-series behavior is byte-identical by construction
+(same code path when no `series` key is emitted), pinned by
+`test_chart_single_series_unchanged_no_series_key`. The shell
+renderer (`app/shell.html`, `renderChart`) gains a multi-series
+branch gated on `ch.series && ch.series.length > 1`, before the
+single-series line path: one polyline+dots per series, shared
+x-axis (week labels) and shared y-scale, colors `["#6d28d9",
+"#0e7490", "#db2777"]` in series order, legend line with colored
+"■ label" spans, caption "Line chart: {x_label} → {legend}.
+Same data as the table below." The single-series path is
+untouched.
+
+### Turn 3 — Creators-by-week series (`creators_by_week`, planner metric + chat turn)
+
+Shape decision: a **planner metric** (`creators_by_week`,
+template-only, NOT in `catalog/measures.yaml`) + chat turn,
+mirroring `wau_by_week`. The template is per-week
+`COUNT(DISTINCT f.creator_id)` from `fact_content_creation JOIN
+dim_content ON content_id`, app-scoped via `c.app`, same 14-week
+window, partial weeks flagged by the turn. Breakdowns raise
+`ValueError`. `plan()` branch sits after `wau_by_week` and before
+the "wau" branch, and requires week/weekly + a series word
+(trend / by week / each week / per week) + "creator", excluding
+dau/mau/mean/average. Earlier creator branches ("daily creators",
+"creator penetration", "posts per creator") are specific phrases
+a series question does not match. The similar-trend follow-up
+phrasing ("can you give me a similar trend for creators") has no
+week word, so it clarifies at planner level — the chat turn plans
+a canonical question (`f"weekly trend for creators on {app}"`),
+which drops a user-named window in the follow-up form (the turn
+runs the series window; for the authorized follow-up forms the
+window IS the full window — documented, not silently narrowed).
+
+The chat turn `_creators_series_turn(app, question=None)` runs
+after a weekly series (stage == `"weekly_series"`), after a
+last-4 turn (stage == `"weekly_last4"`), as a single-shot with the
+app named, and via the anaphora block (p23, below). It mirrors
+`_weekly_series_turn`: standalone (no weather required), clears
+`mau_context`, stores `series_window`, sets `last_metric =
+"creators_by_week"`. It names the largest week-over-week drop
+between consecutive complete weeks when ≥20% (the watch-outs
+shock threshold, computed from the series, not hardcoded — for all
+three apps it is the Feb 16 week: IG 31,289 → 18,120, −42.1%; WA
+20,690 → 11,880, −42.6%; FB 17,382 → 10,020, −42.4%). The payload
+`creators_series` carries `{app, start, end, weeks (count), mean,
+low, low_week, high, high_week, partial_weeks}`. "same for
+creators" after a weekly series is intercepted BEFORE the
+`topic_labels` branch ("creators" IS a topic label, so without the
+intercept the topic branch would clarify asking for weather
+first). "weekly creators for Instagram" alone (no series word)
+clarifies, matching the v9 series-word discipline.
+
+### The daily-creators scalar turn + the anaphora gate (p23)
+
+p23 needed two things: a deterministic scalar turn for "daily
+creators for Instagram?" (before the build, the live shell
+answered it only via the LLM fallback turn — the model never ran;
+the deterministic baseline plan answered — because the
+deterministic chat had no scalar turn for it), and a way for
+"weekly trend for this" to resolve "this" to the previous turn's
+metric.
+
+`_daily_creators_turn(app)` (after `_mau_by_country_turn`):
+stage `"daily_creators"`, metric `daily_creators_mean`, grain
+"creator x day (averaged)". Plans `f"daily creators for {app}"`
+via `self._plan`, verifies metric/grain/sql/app, runs via
+`run_plan`. Returns type `"query"` (the same type the LLM fallback
+turn returns for a scalar plan) with payload `daily_creators =
+{app, value, start, end}`. Text: "Daily creators for {app} in
+{label}: mean {value:,.2f} distinct creators per day" + the
+mean-of-daily-counts definition + the SQL note. Options: weekly
+creators trend for the same app, weekly WAU for the same app,
+daily creators for another app. Sets `last_metric =
+"daily_creators_mean"`, clears `mau_context`. The app-switch
+branch handles stage `"daily_creators"` ("same for WhatsApp"
+re-runs the scalar for the new app).
+
+`self.last_metric` (set in `__init__`, `None` by default) tracks
+the last answered metric: set by the metric turns (`_mau_turn` →
+"mau_march"; `_mau_by_country_turn` → "mau_by_country";
+`_creator_share_turn` → "creator_share"; `_daily_series_turn` →
+"dau_mean_daily"; `_weekly_series_turn` → "wau_by_week";
+`_weekly_last4_turn` → "wau_last_4_weeks"; `_creators_series_turn`
+→ "creators_by_week"; `_daily_creators_turn` →
+"daily_creators_mean"; `_render_llm_plan` query branch →
+`plan.get("metric")`); cleared by turns that establish a new
+non-metric context (`_mau_creators_by_country_turn` → None,
+combined — ambiguous; `_weekly_compare_turn` → None, two apps;
+`_weather_turn` → None; `_watchouts_turn` → None); a
+clarification never touches it. The anaphora block fires when the
+question carries series words ("weekly trend") + "this"/"for
+this" and `self.last_metric` is one of the creators metrics
+("daily_creators_mean", "creators_by_week", "creator_share",
+"creator_penetration", "posts_per_creator_90d"), with the
+dau/mau/mean/average/breakdown exclusions; app from the question
+→ mau_context → session, else clarify "Ask for a creators number
+first". The gate is **metric-only, not topic-based**: `self.topic`
+is NOT consulted, so "weekly trend for this" after a creators
+drill-down clarifies (out of scope, documented). After a WAU
+series (last_metric "wau_by_week") or after weather (last_metric
+cleared) it clarifies too.
+
+## The cases (p17–p23)
+
+All seven in dev; held-out stays 30.
+
+- **p17** (conversation, multi_turn_context): weekly IG → "what
+  about the last 4 weeks only?" → weekly_last4, IG 147,939 /
+  147,048 / 147,057 / 146,510, mean 147,138.5, excluded
+  `["2026-03-30"]`.
+- **p18** (conversation, multi_turn_context): weekly IG → last 4
+  weeks → "same for WhatsApp" → weekly_last4, WA 98,372 /
+  98,125 / 98,063 / 97,675, mean 98,058.75.
+- **p19** (single, metric_scoping): "compare weekly Instagram vs
+  WhatsApp" → weekly_compare. The `checks` field (chart kind
+  "line") is carried for the record but is NOT harness-evaluated
+  for a single (`check_values` runs for conversations only) — the
+  chart kind is verified by the fresh-session turn probe, not the
+  harness (same caveat as p13).
+- **p20** (conversation, multi_turn_context): weekly IG →
+  "compare with WhatsApp" → weekly_compare, with the compare
+  stats (peaks 147,939 / 98,372 on 2026-03-02; growth +63.11% /
+  +64.16%; changes −0.97% / −0.71%; last-4 means 147,138.5 /
+  98,058.75; ratio 1.50).
+- **p21** (conversation, multi_turn_context): weekly IG → "can
+  you give me a similar trend for creators on Instagram?" →
+  creators_series, IG values (see the probe section). His live
+  text had a typo ("simialr"); the case uses the corrected
+  spelling — the typo is recorded in the case description, not in
+  the question.
+- **p22** (conversation, multi_turn_context): creators series IG
+  → "same for WhatsApp" → creators_series, WA 17,429 / 21,308 /
+  21,250 / 21,270 / 21,245 / 21,219 / 20,690 / 11,880 / 11,925 /
+  11,820 / 11,970 / 11,934 / 11,970 / 5,458, mean 15,812.0.
+- **p23** (conversation, multi_turn_context): "daily creators
+  for Instagram?" → query/daily_creators 7,493.02 → "can you give
+  me a weekly trend for this from 2026-01-01 to 2026-03-31" →
+  creators_series, IG values.
+
+Oracle values are derived independently (agg + raw where an agg
+table exists; otherwise two independent raw formulations — see
+`scripts/wire_weekly_followups_cases.py`). The planner is never
+consulted for a value. The wiring script verifies: last-4 forms A
+== B exactly + ties to the v9 series at indices 9–12; creators
+forms A == B exactly + partial-week ties (Jan 1–4 alone, Mar
+30–31 alone) + the IG series matches the v10 p15
+expected_values exactly (third-path cross-check); daily creators
+forms A == B exactly; compare forms A == B exactly on all 14
+rows x 3 cols + stats recomputed from the verified series. No
+aggregate table carries weekly distinct users or weekly creators,
+so unlike p02/p03 there is no agg-vs-raw cross-check here; the
+cross-check is two independent raw formulations plus the
+partial-week ties (and the p15 cross-check for IG creators). That
+limit is stated in the oracle notes.
+
+## Harness extension
+
+- `src/socialpulse_nlq/eval_harness.py`: v11 in `VERSIONS`;
+  `_result_equiv_single` branches for `weekly_last4` (mirror
+  weekly_series, 4 rows), `creators_series` (mirror weekly_series,
+  14 rows), `weekly_compare` (14 rows x 3 cols, expected_values
+  `{app: [14 values]}` keyed by the column aliases, so each series
+  is checked against its own app's values and the two can never be
+  swapped silently); the three etypes added to `score_single`'s
+  plan-executed list; a chat-driven `_run_single` branch for
+  `weekly_compare` (p19 single — fresh ChatSession, respond,
+  EXPLAIN + guard_sql on the combined SQL, outcome from the
+  reply's working payload; trace None is fine) since the compare
+  turn has no planner metric.
+- `scripts/run_conversation_benchmark.py` — `check_values`
+  branches: `weekly_last4_values` (+ `weekly_last4_chart_kind`
+  "line" + `weekly_last4_excluded`, reading the LAST weekly_last4
+  reply's viz rows, 4 values exact); `weekly_compare_values` (+
+  `weekly_compare_chart_kind` "line" + `weekly_compare_stats`,
+  reading the weekly_compare reply's payload: series exact, peak
+  weeks exact, percents/means/ratio within 0.05, chart with 2
+  series); `creators_series_values` (+
+  `creators_series_chart_kind` "line", LAST creators_series
+  reply's viz rows, 14 values exact); `daily_creators_value`
+  (p23 turn 1: the first reply carrying a `daily_creators`
+  payload, value within 0.01 of 7,493.02). All follow the existing
+  branch style (missing-reply-is-a-failure; exact equality for
+  counts).
+- Structural checks run against EVERY turn's SQL, so the p17–p23
+  oracle entries carry only checks true of all their turns' SQL
+  (the same constraint p14 documented): p17 checks the Instagram
+  app substring + no AVG; p18 checks no AVG + no country filter
+  (no single app substring covers all three turns); p19 checks
+  both app substrings + no AVG; p20 checks the Instagram substring
+  + no AVG; p21 checks the Instagram substring + no AVG; p22
+  checks `creator_id` + no AVG; p23 checks the Instagram
+  substring only (turn 1's daily-creators SQL contains `AVG(creators)`
+  — the mean IS the metric there, so no AVG check). The exact
+  values are pinned by `check_values` instead.
+- p23's oracle entry is kind `conversation_values` with a single
+  scalar check (`daily_creators_value`, tolerance 0.01). The
+  turn-2 creators series values are verified in the wiring script
+  (two independent formulations + partial-week ties + the v10 p15
+  cross-check) and scored by the harness's `check_values`
+  creators branch; this oracle entry covers the scalar because
+  `run_oracle`'s `conversation_values` kind checks single values
+  only, and the series kind would need a second entry for the same
+  case id.
+
+**Variant asymmetry (documented, not "fixed").** p19 passes
+under all planner variants (chat-level turn, no planner metric —
+the session's variant only matters to turns that call `_plan`).
+p17/p18/p21/p22/p23 fail under catalog-assisted/validated (they
+route through `_plan` with template-only metrics, same as
+p13/p14): the two new metrics are not in `catalog/measures.yaml`
+(still 20 metrics). Adding them to the catalog is a separate
+decision, never authorized — offered after each build, no answer
+yet. The same question now stands for `wau_last_4_weeks` and
+`creators_by_week`.
+
+## v11 counts by family and split
+
+| Family | v10 | + probes | v11 total | v11 dev | v11 held-out |
+|---|---|---|---|---|---|
+| metric_scoping | 51 | 1 (p19) | 52 | 40 | 12 |
+| aggregation_grain | 32 | 0 | 32 | 29 | 3 |
+| complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
+| ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
+| multi_turn_context | 19 | 6 (p17, p18, p20, p21, p22, p23) | 25 | 22 | 3 |
+| incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
+| guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
+| sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
+| **Total** | **166** | **7** | **173** | **143** | **30** |
+
+Held-out is unchanged (30 cases, same ids as v10). **Honest
+limitation:** the probes were run during the build (that is how
+the turns were verified), so v11 held-out means "held out from
+fixes", not pristine — the same caveat as v1–v10. v11 = 144
+singles + 29 conversations = 173; the wiring script asserts
+144/29.
+
+## v11 results
+
+**Dev run (2026-11-13): 135/143 task success** — the 128 v10 dev
+passes plus p17–p23. Per family:
+
+| Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
+|---|---|---|---|---|---|---|---|
+| metric_scoping | 40 | 33/40 | 32/32 | 32/32 | 32/32 | 30/30 | 33/40 |
+| aggregation_grain | 29 | 29/29 | 29/29 | 29/29 | 29/29 | 29/29 | 29/29 |
+| complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
+| ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
+| multi_turn_context | 22 | 22/22 | 21/21 | 21/21 | 22/22 | 16/16 | 22/22 |
+| incorrect_assumption | 9 | 8/9 | — | — | 1/1 | — | 8/9 |
+| guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
+| sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
+
+**Oracle agreement: v11 173/173, no inexact entries** (dev run
+trace; the held-out run was `--skip-oracle`, as usual).
+
+**Held-out run (2026-11-13): 27/30 task success**, the same 3
+failures as v10 (h02, h08, h18 — reported only, drove no fix). Per
+family: metric_scoping 10/12, aggregation_grain 3/3,
+complex_joins_breakdowns 5/5, ambiguous_metric 2/2,
+multi_turn_context 3/3, incorrect_assumption 1/2,
+guardrail_adversarial 2/2, sql_safety_syntax 1/1.
+
+**Dev failures (8 total — the same expected findings as v10):** h01,
+h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
+new failures: **p17–p23 pass all five rubric items** — p19 is
+scored by the new chat-driven `_run_single` weekly_compare branch
+(combined SQL, EXPLAIN + guard, 14 rows x 3 cols against the
+per-app series); p17/p18 by the new `check_values` last-4 branch
+(4 values exact + excluded partial week + line chart); p20 by the
+compare branch (both series exact + stats within 0.05 + two-series
+line chart); p21/p22/p23 by the creators branch (14 values exact
++ line chart) and, for p23 turn 1, the daily-creators branch
+(value within 0.01 of 7,493.02). No "right answer, wrong SQL"
+warnings in either run.
+
+**v10 regression with the new code (same day, same data): dev
+128/136, held-out 27/30, oracle 166/166 agree in both runs**
+(traces `evals/runs/benchmark_v10_baseline_dev_20261113-212701.json`
+and `evals/runs/benchmark_v10_baseline_heldout_20261113-213106.json`).
+The three turns, the harness extensions, the sqlviz multi-series
+extension, and the shell renderer change changed no v10 outcome:
+the failures are exactly the 8 known dev findings and the 3 known
+held-out findings, and p01–p16 still pass.
+
+**Test suite (2026-11-13): 282 pass / 1 known fail / 5 skipped**
+(plain runner; the fail is the pre-existing
+`test_docked_chat_only::test_rounded_corners` on an untouched file;
+the 5 skips are the `test_questions` `tmp_path` fixture tests). 38
+new tests: 7 planner (`_complete_weeks`, both templates' SQL +
+plan branches + breakdown clarifications + variant abstention),
+16 chat (p17–p23 verbatim phrasings with gold payload values +
+partial-week/shock/compare-stats text, app switches, no-state and
+MAU-state clarifications, anaphora gating, `last_metric` clearing,
+option letters), 7 harness (rubric types for the three new etypes
+with silent-substitution guards + the four new `check_values`
+branches: passing payload passes, wrong number fails naming the
+key, missing reply fails, chart-kind and excluded-week checks),
+4 LLM (mocked-transport routing for both new metrics, inventory
+lines, the compare negative test), and 4 sqlviz (multi-series
+payload, single-series byte-identical, non-numeric fallback, bar
+unchanged). The first suite run also caught a wrong expectation in
+a new test (`test_weekly_last4_option_letter_advances` assumed
+"a" after last-4 is weather, like the weekly-series turn; the
+last-4 turn's options are series-first, so "a" re-runs the full
+series) — fixed to assert the turn's actual options, and the
+re-run is green.
+
+**Live verification (local server probe, workspace ChatSession on
+the 500K data):** every probe phrasing answers with the gold
+values — "what about the last 4 weeks only?" → weekly_last4
+(147,939 / 147,048 / 147,057 / 146,510, mean 147,138.5, Mar 30
+excluded with the crash reason); "same for WhatsApp" → WA last-4
+(98,372 / 98,125 / 98,063 / 97,675, mean 98,058.75); "compare
+weekly Instagram vs WhatsApp" → weekly_compare (both series,
+peaks 147,939 / 98,372 Mar 2, ratio 1.50x, two-series line chart);
+"compare with WhatsApp" after the series → the same turn;
+"can you give me a similar trend for creators on Instagram?" →
+creators_series (mean 23,866.43, Feb 16 shock −42.1% named);
+"same for WhatsApp" → WA creators (mean 15,812.0, shock −42.6%);
+"daily creators for Instagram?" → query, 7,493.02/day, then
+"can you give me a weekly trend for this from 2026-01-01 to
+2026-03-31" → creators_series for Instagram. No-state and
+MAU-state clarifications hold for the series turns; "weekly trend
+for this" after a WAU series or after weather clarifies; "same for
+WhatsApp" after a compare falls to weather.
+
+
+## What the turns deliberately do NOT do
+
+- **No app-scoped WAU scalar.** The last-4 turn and the compare
+  turn both serve the weekly series, not a scalar: "What's the WAU
+  for Instagram?" still has no deterministic turn (it is an
+  LLM-fallback case, h07). Adding a genuinely app-scoped WAU scalar
+  is a separate planner decision — it would change h07 and the v8
+  baseline — and is not authorized.
+- **No compare after "same for X".** After a compare turn, "same
+  for WhatsApp" falls through to the weather report for the named
+  app (a compare has two apps; "same for X" is ambiguous there).
+  A re-compare with a swapped app would need an explicit question
+  ("compare weekly WhatsApp vs Facebook").
+- **No drill-down, diagnosis, recommendation, or brief after the
+  series turns.** The last-4, compare, and creators turns set no
+  `self.weather`, so drill-down/diagnosis/recommendation/brief all
+  still gate on a weather report — the same boundary as the
+  watch-outs turn (v10). The honest path to a recommendation is
+  "What's happening with {app}?" first.
+- **No "weekly creators" without a series word.** "weekly
+  creators for Instagram" alone (no trend/by week/each week/per
+  week) clarifies, matching the v9 series-word discipline: "weekly
+  creators" alone names the metric, not a series question. The
+  similar-trend follow-up phrasing has no week word either, so it
+  clarifies at planner level — the chat turn plans a canonical
+  question instead.
+- **No anaphora beyond the metric gate.** "Weekly trend for this"
+  resolves only when `self.last_metric` is one of the creators
+  metrics. After a WAU series, after weather, or after a creators
+  drill-down (topic, not metric) it clarifies. The gate is
+  metric-only by design (`self.topic` is not consulted).
+- **No user-named window in the follow-up creators form.** The
+  canonical question the turn plans drops a user-named window in
+  the follow-up form — the turn runs the series window. For the
+  authorized follow-up forms the window IS the full window (p23's
+  "from 2026-01-01 to 2026-03-31" is the data window, not a
+  sub-range), so nothing is silently narrowed; a genuine sub-range
+  series is a separate turn.
+- **No catalog entries for the new metrics.** `wau_last_4_weeks`
+  and `creators_by_week` are template-only (NOT in
+  `catalog/measures.yaml`, still 20 metrics), so
+  catalog-assisted and validated abstain on p17/p18/p21/p22/p23
+  while p19 (chat-level, no planner metric) passes under all
+  variants. Adding them to the catalog is a separate decision,
+  never authorized.
+- **No forecast.** The creators turn names the shock as history
+  ("The largest week-over-week drop is in the week of 2026-02-16:
+  31,289 → 18,120 (−42.1%)") and the compare turn describes the
+  Jan–Mar 2026 window only; neither promises what happens next.
+
+## Running v11
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v11.py --split dev      # default
+PYTHONPATH=src python scripts/run_benchmark_v11.py --split heldout  # report only
+PYTHONPATH=src python scripts/run_benchmark_v11.py --split all
+PYTHONPATH=src python scripts/run_benchmark_v11.py --skip-oracle     # benchmark only
+PYTHONPATH=src python scripts/run_benchmark_v11.py --variant llm --split dev   # chunk B, same frozen set
+```
+
+## v11 with the LLM planner (chunk B, slice 1 + 2)
+
+The frozen v11 set (173 cases) also runs with `variant="llm"` —
+the LLM planner under the common contract (see
+`docs/llm-planner.md`). No benchmark, oracle, or manifest file
+changes for the LLM variant. The two new planner metrics
+(`wau_last_4_weeks`, `creators_by_week`) appear in the generated
+prompt inventory automatically (filters honored: app; breakdowns:
+none — see the v11 note in `docs/llm-planner.md`), so the model
+can route to them; the compare turn adds nothing to the inventory
+(it is chat-level, like watch-outs). Live verification is still
+PENDING — Gemini generation has never been observed working (last
+verified states: HTTP 503 at 13:29 PST 2026-11-12 and a 503 in the
+user's 2026-11-13 12:28 PST screenshot's working trace).
