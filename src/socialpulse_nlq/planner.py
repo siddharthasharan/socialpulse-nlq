@@ -1122,6 +1122,16 @@ def plan(question: str, variant: str = "baseline"):
     if variant not in VARIANTS:
         raise ValueError(f"unknown planner variant {variant!r}; known: {list(VARIANTS)}")
     q = question.lower().strip()
+    # Conversational-repair prefix (2026-11-16, v12): "no i mean ..."
+    # is a self-correction marker, not content -- but "i mean"
+    # contains the substring "mean", which the series branches
+    # exclude (a "mean" question asks for a scalar, not a series),
+    # so the repair form would clarify where the plain question
+    # answers. Strip the prefix so the repair form routes like the
+    # plain question. ChatSession.respond() strips the same prefix
+    # for chat routing (see chat.py); the planner strips it here
+    # because turns pass the raw message to _plan.
+    q = re.sub(r"^(no,?\s+)?i mean\s+", "", q)
     if not q:
         return {"type": "clarification", "metric": None, "sql": None, "tables": [], "grain": "",
                 "explanation": "",
@@ -1219,14 +1229,16 @@ def plan(question: str, variant: str = "baseline"):
         metric = "median_session_duration_min"
     elif "stickiness" in q or "dau/mau" in q or "dau / mau" in q:
         metric = "dau_mau_stickiness"
-    elif (("last 4 week" in q or "last four week" in q)
+    elif (("last 4 week" in q or "last four week" in q or "last 28 day" in q)
             and "creator" not in q and "dau" not in q and "mau" not in q
             and "mean" not in q and "average" not in q):
         # Last 4 complete weeks (2026-11-13, v11): "last 4 weeks
         # only" after a weekly series -- the last 4 complete weeks
         # (Mar 2/9/16/23 for the frozen window), NOT the literal last
         # 4 rows (the Mar 30 week is partial, Mar 30-31 only, and
-        # would read as a crash). Placed before the wau_by_week
+        # would read as a crash). "Last 28 days" (2026-11-16, v12)
+        # is the same span in different units -- 28 days is four
+        # weeks -- so it takes the same windowed series. Placed before the wau_by_week
         # branch so "weekly trend for the last 4 weeks" takes the
         # windowed series, not the full one. No "wau"/"active user"
         # word is required: the follow-up form ("what about the last
@@ -1239,8 +1251,9 @@ def plan(question: str, variant: str = "baseline"):
         # answers it.
         metric = "wau_last_4_weeks"
     elif (("week" in q or "weekly" in q)
-            and ("trend" in q or "by week" in q or "each week" in q or "per week" in q)
-            and ("wau" in q or "active user" in q)
+            and ("trend" in q or "by week" in q or "each week" in q or "per week" in q
+                 or "every week" in q)
+            and ("wau" in q or "active user" in q or "distinct user" in q)
             and "dau" not in q and "mau" not in q
             and "mean" not in q and "average" not in q):
         # WAU by week (2026-11-12): the weekly series, not the mean
@@ -1248,9 +1261,13 @@ def plan(question: str, variant: str = "baseline"):
         # Instagram?" is the Nov 12 live probe: before this branch it
         # fell through to the generic clarification (no weekly series
         # existed). The series word (trend / by week / each week /
-        # per week) is required on purpose: "weekly active users"
+        # per week / every week) is required on purpose: "weekly active users"
         # alone is the WAU metric name, and stays the mean scalar
-        # (wau_mean_weekly) -- the h07-adjacent question. Placed
+        # (wau_mean_weekly) -- the h07-adjacent question. "Every week"
+        # (2026-11-16, v12) is a series word too: "a chart for every
+        # week pull distinct users" is a weekly-series question, and
+        # "distinct user" names the same population as "active user"
+        # (distinct users with >=1 session in the week). Placed
         # before the "wau" branch so a question naming the series
         # never takes the scalar. Variant boundary (same as
         # mau_by_country / creator_share): the metric is not in the
@@ -1334,6 +1351,18 @@ def plan(question: str, variant: str = "baseline"):
                                   "Reels watch time, or messaging DAU, optionally with 'by app', 'by country', or 'over the last 28 days'.")}
     f = _extract_filters(q)
     breakdown = _breakdown(q)
+    # Last-4-weeks window (2026-11-16, v12): the template's definition
+    # is the last 4 COMPLETE weeks of the data window. _date_range
+    # narrows "last 28 days" to Mar 4-31, which holds only 3 complete
+    # weeks (Mar 9/16/23 -- the Mar 2 week starts before Mar 4), so
+    # build_sql would raise and the question would clarify. "Last 28
+    # days" names the span, not a sub-window: 28 days is four weeks,
+    # and the reply states the reading (last 4 complete weeks
+    # Mar 2/9/16/23). Force the full window for this metric, exactly
+    # as the "last 4 weeks" phrasing already gets (it extracts no
+    # date range).
+    if metric == "wau_last_4_weeks":
+        f["date_start"], f["date_end"] = DATA_START, DATA_END
     # "by acquisition" is the metric itself for retention, not a separate breakdown.
     if metric == "d7_retention_by_acquisition":
         breakdown = None

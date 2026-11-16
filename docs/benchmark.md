@@ -3151,3 +3151,258 @@ can route to them; the compare turn adds nothing to the inventory
 PENDING — Gemini generation has never been observed working (last
 verified states: HTTP 503 at 13:29 PST 2026-11-12 and a 503 in the
 user's 2026-11-13 12:28 PST screenshot's working trace).
+
+# Benchmark v12 — weekly routing widening: "chart for every week" + "last 28 days" (2026-11-16)
+
+## The probes (live shell, 2026-11-16)
+
+Two phrasings from the user's Nov 16 screenshot clarified on live
+(v11 code), even though the data and the turns already existed:
+
+1. "no i mean a chart for every week pull distinct users" — asked
+   twice, once after a daily-creators turn (the p23 context) and
+   once as a repair ("no i mean a chart for every week..."). The
+   weekly-series turn wanted "weekly"/"trend" wording and did not
+   match "chart for every week pull distinct users", with or without
+   the app named, before or after a weekly series.
+2. "WAU over last 28 days" — asked after the failed chart question.
+   "Last 28 days" was not matched to the last-4-weeks turn, fresh
+   or after a weekly series.
+
+Both are routing gaps, not missing capabilities: the weekly series
+and the last-4 series already answer these questions. v12 widens
+the routing and pins both phrasings as eval cases. No new planner
+metric, no new turn, no catalog change, no prompt change, no
+engine-label change.
+
+## The routing changes (`src/socialpulse_nlq/planner.py`, `src/socialpulse_nlq/chat.py`)
+
+Both layers had to move, because the chat turns call `self._plan(q)`
+on the raw message: widening the chat routing alone would still
+fail inside the turn's plan check, and widening the planner alone
+would never be reached by the chat routing.
+
+### "Every week" + "distinct user" (p24)
+
+- Series words: "every week" joins trend / by week / each week /
+  per week, in the planner's `wau_by_week` branch and the chat's
+  weekly-series block. "Chart for every week" is a series question;
+  so are the siblings "distinct users per week" and "distinct
+  users each week" (both verified by direct probe).
+- Metric words: "distinct user" joins "wau" / "active user".
+  Distinct users with >=1 session in the week is the same
+  population the series counts. The series-word gate still applies,
+  so a bare "distinct users" question (no week word) does not take
+  the series.
+- The "no i mean" repair prefix: the first probe failed in the
+  planner even after the widening, because "i mean" contains the
+  substring "mean", which the series branches exclude (a "mean"
+  question asks for a scalar, not a series). Both `plan()` and
+  `ChatSession.respond()` strip a leading repair prefix
+  (`^(no,?\s+)?i mean\s+`) before routing. The turns still receive
+  the raw message; `plan()` strips it again before planning. A
+  scalar phrasing with the prefix ("no i mean what is the mean
+  daily DAU...") still takes the scalar — the strip changes no
+  other routing.
+
+### "Last 28 days" (p25)
+
+- The last-4 turn (chat block + planner `wau_last_4_weeks` branch)
+  now matches "last 28 day" alongside "last 4 week" / "last four
+  week". 28 days is four weeks; the reply states the reading
+  ("Reading \"last 28 days\" as the last 4 complete weeks — 28 days
+  is four weeks") and keeps the existing note excluding the partial
+  Mar 30 week.
+- The window override: the first probe failed inside the turn even
+  after the match, because `_date_range` narrows "last 28 days" to
+  Mar 4–31, which holds only 3 complete weeks (Mar 9/16/23 — the
+  Mar 2 week starts before Mar 4), so `build_sql` raised and the
+  question clarified. `plan()` now forces the full window for the
+  `wau_last_4_weeks` metric: "last 28 days" names the span, not a
+  sub-window, exactly as the "last 4 weeks" phrasing already gets
+  (it extracts no date range). The plan carries the full window
+  and the same IN list as p17.
+- The gate is unchanged: stage in ("weekly_series",
+  "weekly_last4"). Fresh-session "WAU over last 28 days" still
+  clarifies by design, as does the form after a MAU turn. The
+  "dau" exclusion in the planner branch keeps DAU questions
+  untouched: "What is the DAU trend for instagram over the last 28
+  days?" still takes the daily series over Mar 4–31 (verified by
+  direct probe).
+
+## The cases (p24–p25)
+
+- **p24** (conversation, multi_turn_context, dev): one case pins
+  both forms of the same question, because those are the two
+  states the user was in. Turn 1 is the fresh-with-app form —
+  "no i mean a chart for every week pull distinct users for
+  Instagram" → weekly_series (14 weeks, mean 120,285.79/week).
+  Turn 2 is the after-weekly-series form — the user's verbatim
+  screenshot text, "no i mean a chart for every week pull
+  distinct users" (no app) → weekly_series again for Instagram
+  via the session app. The checks field scores the last
+  weekly_series reply (14 values exact + line chart).
+- **p25** (conversation, multi_turn_context, dev): turn 1 is the
+  p13 probe (weekly series for Instagram); turn 2 is "WAU over
+  last 28 days" → weekly_last4 (147,939 / 147,048 / 147,057 /
+  146,510, mean 147,138.5, partial Mar 30 week excluded).
+  Scored by the existing `check_values` last-4 branch (4 values
+  exact + excluded partial week + line chart).
+
+## Harness extension
+
+No new `check_values` branch was needed: p24 is scored by the
+existing weekly_series branch (last reply) and p25 by the existing
+last-4 branch. The harness change is `v12` in `VERSIONS` plus the
+runner `scripts/run_benchmark_v12.py` (a copy of the v11 runner).
+The wiring script is `scripts/wire_weekly_routing_cases.py`:
+it verifies the IG weekly series three ways (grouped
+COUNT(DISTINCT) on fact_sessions, DISTINCT-pairs on
+fact_sessions, and the daily distinct-user rows of
+agg_user_daily grouped by ISO week — all three agreeing
+exactly), plus the partial-week ties (Jan 1–4 = 63,764,
+Mar 30–31 = 69,683) and the last-4 tie to the weekly series at
+indices 9–12.
+
+## v12 counts by family and split
+
+| Family | v11 | + probes | v12 total | v12 dev | v12 held-out |
+|---|---|---|---|---|---|
+| metric_scoping | 52 | 0 | 52 | 40 | 12 |
+| aggregation_grain | 32 | 0 | 32 | 29 | 3 |
+| complex_joins_breakdowns | 21 | 0 | 21 | 16 | 5 |
+| ambiguous_metric | 10 | 0 | 10 | 8 | 2 |
+| multi_turn_context | 25 | +2 | 27 | 24 | 3 |
+| incorrect_assumption | 11 | 0 | 11 | 9 | 2 |
+| guardrail_adversarial | 13 | 0 | 13 | 11 | 2 |
+| sql_safety_syntax | 9 | 0 | 9 | 8 | 1 |
+| **Total** | **173** | **+2** | **175** | **145** | **30** |
+
+Held-out is unchanged (30): p24/p25 are in dev. The same
+honest limitation applies as v1–v11 — the probes were run
+during the build (that is how the turns were verified), so v12
+held-out means "held out from fixes", not pristine.
+
+## v12 results
+
+**Dev run (2026-11-16): 137/145 task success** — the 135 v11 dev
+passes plus p24/p25. Per family:
+
+| Family | n | task | sql_syntax | sql_safety | execution | result_equiv | final_answer |
+|---|---|---|---|---|---|---|---|
+| metric_scoping | 40 | 33/40 | 32/32 | 32/32 | 32/32 | 30/30 | 33/40 |
+| aggregation_grain | 29 | 29/29 | 29/29 | 29/29 | 29/29 | 29/29 | 29/29 |
+| complex_joins_breakdowns | 16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 | 16/16 |
+| ambiguous_metric | 8 | 8/8 | — | — | 4/4 | 4/4 | 8/8 |
+| multi_turn_context | 24 | 24/24 | 23/23 | 23/23 | 24/24 | 18/18 | 24/24 |
+| incorrect_assumption | 9 | 8/9 | — | — | 1/1 | — | 8/9 |
+| guardrail_adversarial | 11 | 11/11 | — | — | — | — | 11/11 |
+| sql_safety_syntax | 8 | 8/8 | — | — | — | — | 8/8 |
+
+**Oracle agreement: v12 175/175, no inexact entries** (dev run
+trace; the held-out run was `--skip-oracle`, as usual).
+
+**Held-out run (2026-11-16): 27/30 task success**, the same 3
+failures as v11 (h02, h08, h18 — reported only, drove no fix). Per
+family: metric_scoping 10/12, aggregation_grain 3/3,
+complex_joins_breakdowns 5/5, ambiguous_metric 2/2,
+multi_turn_context 3/3, incorrect_assumption 1/2,
+guardrail_adversarial 2/2, sql_safety_syntax 1/1.
+
+**Dev failures (8 total — the same expected findings as v11):** h01,
+h03, h04, h05, h06, h07, h09 (app-scope traps) and h17 (April). No
+new failures: **p24/p25 pass all five rubric items** — p24 by the
+existing `check_values` weekly_series branch (14 values exact +
+line chart, scored on the last weekly_series reply); p25 by the
+existing last-4 branch (4 values exact + excluded partial week +
+line chart). No "right answer, wrong SQL" warnings in either run.
+
+**v11 regression with the new code (same day, same data): dev
+135/143, held-out 27/30, oracle 173/173 agree in both runs**
+(traces `evals/runs/benchmark_v11_baseline_dev_20261116-214559.json`
+and `evals/runs/benchmark_v11_baseline_heldout_20261116-214821.json`).
+The routing widening, the repair-prefix strip, and the last-4
+window override changed no v11 outcome: the failures are exactly
+the 8 known dev findings and the 3 known held-out findings, and
+p01–p23 still pass.
+
+**Test suite (2026-11-16): 289 pass / 1 known fail / 5 skipped**
+(plain runner; the fail is the pre-existing
+`test_docked_chat_only::test_rounded_corners` on an untouched file;
+the 5 skips are the `test_questions` `tmp_path` fixture tests). 7
+new tests: 2 planner (chart-for-every-week routing + repair-prefix
+strip + variant abstention; last-28-days routing + full-window
+override + DAU untouched + variant abstention), 5 chat (p24 both
+forms with gold payload values + app switch, p25 with the reading
+note + gold values + app switch, p25 fresh/MAU-state
+clarifications).
+
+**Live verification (local server probe, workspace ChatSession on
+the 500K data):** every probe phrasing answers with the gold
+values — "no i mean a chart for every week pull distinct users
+for Instagram" → weekly_series (mean 120,286/week, 14 weeks,
+line chart); the same question after a weekly series → the same
+series via the session app; "same for WhatsApp" → WA series
+(mean 79,951/week); "distinct users per week for Instagram" and
+"distinct users each week for WhatsApp" → the series; "WAU over
+last 28 days" after a weekly series → weekly_last4 (147,939 /
+147,048 / 147,057 / 146,510, mean 147,138.5, reading note
+present, Mar 30 excluded); "same for WhatsApp" → WA last-4
+(98,372 / 98,125 / 98,063 / 97,675, mean 98,058.75). Gates hold:
+fresh-session and after-MAU "WAU over last 28 days" clarify;
+"weekly trend for this" after a WAU series clarifies (anaphora
+gate unchanged); h07 still clarifies; bare "weekly active users"
+still clarifies (no deterministic WAU turn); "weekly WAU by
+surface", "weekly users in April", and "weekly users for TikTok"
+still clarify; "What is the DAU trend for instagram over the last
+28 days?" still takes the daily series over Mar 4–31.
+
+## What the routing deliberately does NOT do
+
+- **No new turn or metric.** v12 adds routing to two existing
+  turns only. `wau_by_week` and `wau_last_4_weeks` stay
+  template-only (NOT in `catalog/measures.yaml`, still 20
+  metrics), so catalog-assisted and validated abstain on p24/p25,
+  same as p13/p14/p17/p18. Adding them to the catalog is a
+  separate decision, never authorized.
+- **No "last 28 days" without a series.** The gate is the same as
+  p17: the last-4 turn needs stage weekly_series or weekly_last4.
+  A fresh-session "WAU over last 28 days" clarifies — the
+  question names no series to take the last 4 weeks of.
+- **No sub-window last-4.** "Last 28 days" is read as the last 4
+  complete weeks of the data window, not Mar 4–31. The reply
+  states the reading, so the Mar 2 week (which starts two days
+  before Mar 4) is never silently included — the returned weeks
+  are named in the reply.
+- **No repair-prefix handling beyond "i mean".** Only a leading
+  "no i mean" / "i mean" is stripped. Other self-corrections
+  ("sorry, I meant...", "actually...") are not stripped; if one
+  shows up in a probe it becomes its own case.
+- **No anaphora change.** The p23 gate (`self.last_metric`) is
+  untouched: "weekly trend for this" still resolves only against
+  a creators metric, and still clarifies after a WAU series.
+
+## Running v12
+
+```bash
+PYTHONPATH=src python scripts/run_benchmark_v12.py --split dev      # default
+PYTHONPATH=src python scripts/run_benchmark_v12.py --split heldout  # report only
+PYTHONPATH=src python scripts/run_benchmark_v12.py --split all
+PYTHONPATH=src python scripts/run_benchmark_v12.py --skip-oracle     # benchmark only
+PYTHONPATH=src python scripts/run_benchmark_v12.py --variant llm --split dev   # chunk B, same frozen set
+```
+
+## v12 with the LLM planner (chunk B, slice 1 + 2)
+
+The frozen v12 set (175 cases) also runs with `variant="llm"` —
+the LLM planner under the common contract (see
+`docs/llm-planner.md`). No benchmark, oracle, or manifest file
+changes for the LLM variant. No prompt change in v12: the two
+metrics were already in the generated prompt inventory
+(`wau_by_week`, `wau_last_4_weeks`; filters honored: app;
+breakdowns: none), and the routing widening is deterministic
+chat/planner routing, not a prompt change — the model routes to
+the same metrics. Live verification is still PENDING — Gemini
+generation has never been observed working (last verified states:
+HTTP 503 at 13:29 PST 2026-11-12 and a 503 in the user's
+2026-11-13 12:28 PST screenshot's working trace).

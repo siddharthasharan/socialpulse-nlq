@@ -1325,6 +1325,96 @@ def test_weekly_last4_clarifies_without_series_or_after_mau():
     assert s.respond("what about the last 4 weeks only?")["type"] == "clarification"
 
 
+def test_weekly_series_chart_for_every_week_p24():
+    # 2026-11-16 (p24): the Nov 16 live probe -- "no i mean a chart
+    # for every week pull distinct users" -- answers the weekly
+    # series, both as a first turn naming the app and as a follow-up
+    # after a weekly series (the user's screenshot form). "Every
+    # week" is a series word and "distinct user" names the same
+    # population as "active user"; the "no i mean" repair prefix is
+    # stripped (it contains the substring "mean", which the series
+    # branches exclude).
+    s = _real_session()
+    if s is None:
+        return
+    r = s.respond("no i mean a chart for every week pull distinct users for Instagram")
+    assert r["type"] == "weekly_series" and r["app"] == "instagram"
+    ws = r["weekly_series"]
+    assert ws["weeks"] == 14 and abs(ws["mean"] - 120285.79) < 1.0
+    assert ws["low"] == 63764 and ws["high"] == 147939
+    assert r["working"]["visualization"]["rows"][9] == ["2026-03-02", 147939]
+    assert r["working"]["visualization"]["chart"]["kind"] == "line"
+    s2 = _real_session()
+    if s2 is None:
+        return
+    s2.respond("What's the weekly trend for active users for Instagram?")
+    r2 = s2.respond("no i mean a chart for every week pull distinct users")
+    assert r2["type"] == "weekly_series" and r2["app"] == "instagram"
+    assert abs(r2["weekly_series"]["mean"] - 120285.79) < 1.0
+
+
+def test_weekly_series_chart_for_every_week_same_for_whatsapp():
+    # p24 app-switch: "same for WhatsApp" after the chart-form series
+    # re-runs the full series for WhatsApp (stage weekly_series).
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("no i mean a chart for every week pull distinct users for Instagram")
+    r = s.respond("same for WhatsApp")
+    assert r["type"] == "weekly_series" and r["app"] == "whatsapp"
+    assert abs(r["weekly_series"]["mean"] - 79951.0) < 1.0
+    assert r["working"]["visualization"]["rows"][0] == ["2025-12-29", 41660]
+
+
+def test_weekly_last4_last_28_days_p25():
+    # 2026-11-16 (p25): "WAU over last 28 days" after a weekly series
+    # takes the last-4 turn: 28 days is four weeks, and the reply
+    # states the reading. Same 4 complete weeks as p17.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    r = s.respond("WAU over last 28 days")
+    assert r["type"] == "weekly_last4" and r["app"] == "instagram"
+    assert 'Reading "last 28 days" as the last 4 complete weeks' in r["text"]
+    assert "28 days is four weeks" in r["text"]
+    l4 = r["weekly_last4"]
+    assert l4["weeks"] == ["2026-03-02", "2026-03-09", "2026-03-16", "2026-03-23"]
+    assert l4["values"] == [147939, 147048, 147057, 146510]
+    assert abs(l4["mean"] - 147138.5) < 0.01
+    assert l4["excluded_partial_weeks"] == ["2026-03-30"]
+    assert r["working"]["visualization"]["rows"] == [
+        ["2026-03-02", 147939], ["2026-03-09", 147048],
+        ["2026-03-16", 147057], ["2026-03-23", 146510]]
+
+
+def test_weekly_last4_last_28_days_same_for_whatsapp():
+    # p25 app-switch: "same for WhatsApp" after the 28-days last-4
+    # re-runs last-4 for WhatsApp (stage weekly_last4), not the full
+    # series -- the same path as p18.
+    s = _real_session()
+    if s is None:
+        return
+    s.respond("What's the weekly trend for active users for Instagram?")
+    s.respond("WAU over last 28 days")
+    r = s.respond("same for WhatsApp")
+    assert r["type"] == "weekly_last4" and r["app"] == "whatsapp"
+    assert r["weekly_last4"]["values"] == [98372, 98125, 98063, 97675]
+    assert abs(r["weekly_last4"]["mean"] - 98058.75) < 0.01
+
+
+def test_weekly_last4_last_28_days_clarifies_fresh_or_after_mau():
+    # p25 gate: "WAU over last 28 days" with no weekly series first
+    # clarifies -- same gate as p17 ("last 4 weeks" needs a series).
+    # After a MAU turn (a different stage) it clarifies too.
+    s = _real_session()
+    if s is None:
+        return
+    assert s.respond("WAU over last 28 days")["type"] == "clarification"
+    s.respond("What's the MAU for Instagram?")
+    assert s.respond("WAU over last 28 days")["type"] == "clarification"
+
+
 def test_weekly_last4_option_letter_advances():
     # Option letters work after a last-4 turn (stage ==
     # "weekly_last4" satisfies the letter gate): "a" is the full

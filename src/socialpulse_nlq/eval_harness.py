@@ -160,6 +160,15 @@ VERSIONS = {
             "singles": "benchmark_v11.json",
             "convs": "conversation_v11.json",
             "oracle": "oracle_v11.json"},
+    # v12 (weekly routing widening, 2026-11-16): v11's 173 cases plus
+    # the user probes p24 ("no i mean a chart for every week pull
+    # distinct users", conversation -- fresh with app, then after a
+    # weekly series) and p25 ("WAU over last 28 days" after a weekly
+    # series, conversation). Both in dev; held-out stays 30.
+    "v12": {"manifest": "benchmark_v12_manifest.json",
+            "singles": "benchmark_v12.json",
+            "convs": "conversation_v12.json",
+            "oracle": "oracle_v12.json"},
 }
 
 

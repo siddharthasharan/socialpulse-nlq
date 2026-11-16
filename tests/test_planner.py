@@ -618,6 +618,53 @@ def test_wau_last_4_weeks_breakdown_clarifies_in_planner():
     assert "cannot be broken down" in p["clarification"]
 
 
+def test_wau_by_week_chart_for_every_week_p24():
+    # 2026-11-16 (v12, p24): "a chart for every week pull distinct
+    # users" is a weekly-series question -- "every week" is a series
+    # word and "distinct user" names the same population as "active
+    # user". The "no i mean" repair prefix is stripped: "i mean"
+    # contains the substring "mean", which the series branches
+    # exclude, so without the strip the repair form would clarify.
+    p = plan("no i mean a chart for every week pull distinct users for Instagram")
+    assert p["type"] == "query" and p["metric"] == "wau_by_week"
+    assert p["grain"] == "user x week" and "app = 'instagram'" in p["sql"]
+    assert plan("a chart for every week pull distinct users")["metric"] == "wau_by_week"
+    assert plan("distinct users per week for Instagram")["metric"] == "wau_by_week"
+    assert plan("show me distinct users each week for WhatsApp")["metric"] == "wau_by_week"
+    # The repair prefix does not change any other routing: a scalar
+    # phrasing with the prefix still takes the scalar.
+    assert plan("no i mean what is the mean daily DAU for instagram?")["metric"] == "dau_mean_daily"
+    # Variants still abstain on the new phrasing (template-only metric).
+    for variant in ("catalog-assisted", "validated"):
+        pv = plan("a chart for every week pull distinct users for Instagram", variant=variant)
+        assert pv["type"] == "clarification" and pv["sql"] is None, variant
+
+
+def test_wau_last_4_weeks_last_28_days_p25():
+    # 2026-11-16 (v12, p25): "WAU over last 28 days" is the last-4
+    # turn -- 28 days is four weeks. The window override matters:
+    # _date_range narrows "last 28 days" to Mar 4-31, which holds
+    # only 3 complete weeks, so without the override build_sql would
+    # raise and the question would clarify. The plan carries the full
+    # window and the same IN list as p17.
+    p = plan("WAU over last 28 days for instagram")
+    assert p["type"] == "query" and p["metric"] == "wau_last_4_weeks"
+    assert p["filters"]["date_start"] == "2026-01-01" and p["filters"]["date_end"] == "2026-03-31"
+    assert ("IN (DATE '2026-03-02', DATE '2026-03-09', DATE '2026-03-16', "
+            "DATE '2026-03-23')") in p["sql"]
+    assert plan("WAU over the last 28 days")["metric"] == "wau_last_4_weeks"
+    # A DAU question over the last 28 days is untouched -- "dau"
+    # excludes it from the last-4 branch, and it keeps its 28-day
+    # window (the daily series over Mar 4-31).
+    pd = plan("What is the DAU trend for instagram over the last 28 days?")
+    assert pd["metric"] == "dau_mean_daily"
+    assert pd["filters"]["date_start"] == "2026-03-04"
+    # Variants still abstain (template-only metric).
+    for variant in ("catalog-assisted", "validated"):
+        pv = plan("WAU over last 28 days for instagram", variant=variant)
+        assert pv["type"] == "clarification" and pv["sql"] is None, variant
+
+
 def test_wau_last_4_weeks_variants_abstain():
     # Variant boundary (same as wau_by_week / mau_by_country /
     # creator_share): the metric is not in the 20-metric catalog, so

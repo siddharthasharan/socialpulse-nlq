@@ -1287,7 +1287,16 @@ class ChatSession:
             excluded_note = (f" The week of {excluded[0]} is left out on purpose: it covers only "
                              f"{em.strftime('%b %d')}–{end_d.strftime('%b %d')} ({days} days in the window), "
                              "so its count would read as a crash, not a trend.")
-        text = (f"Weekly active users for {app}, last 4 complete weeks ({weeks[0]} to {weeks[-1]}).\n\n"
+        # "Last 28 days" (2026-11-16, v12) is the same span in
+        # different units -- 28 days is four weeks -- so the reply
+        # states the reading explicitly instead of silently
+        # answering a different window than the one asked for.
+        reading_note = ""
+        if "28 day" in q.lower():
+            reading_note = (" Reading \"last 28 days\" as the last 4 complete weeks — "
+                            "28 days is four weeks.")
+        text = (f"Weekly active users for {app}, last 4 complete weeks ({weeks[0]} to {weeks[-1]})."
+                f"{reading_note}\n\n"
                 f"Mean {mean:,.0f} per week, low {min(vals):,} (week of {weeks[low_i]}), "
                 f"high {max(vals):,} (week of {weeks[high_i]}). The week-by-week series — "
                 "line chart, table, and the exact SQL — is in the working panel."
@@ -2657,6 +2666,14 @@ class ChatSession:
     # -- Public entry point -------------------------------------------------
     def respond(self, message):
         q = (message or "").strip().lower()
+        # Conversational-repair prefix (2026-11-16, v12): "no i mean
+        # ..." is a self-correction marker, not content -- but "i
+        # mean" contains the substring "mean", which the series
+        # routing excludes, so the repair form would clarify where
+        # the plain question answers. Strip it for routing; the
+        # turns still receive the raw message, and plan() strips the
+        # same prefix before planning (see planner.py).
+        q = re.sub(r"^(no,?\s+)?i mean\s+", "", q)
         if not q:
             return self._clarify("Ask something — for example, \"What's happening with Instagram?\"")
         # Letter / number choice for the offered options. The option's
@@ -2920,16 +2937,23 @@ class ChatSession:
         # week-by-week series, not the averaged scalar. Placed after
         # the daily-series block (a daily question never names a week)
         # and before breakdown (a series is not a decomposition). The
-        # series word (trend / by week / each week / per week) is
-        # required, matching the planner branch: "weekly active users"
-        # alone is the WAU metric name and stays the mean scalar
-        # (no deterministic WAU turn, so it clarifies, as h07 does).
-        # "mean"/"average" stays the scalar; DAU/MAU questions are
+        # series word (trend / by week / each week / per week /
+        # every week) is required, matching the planner branch:
+        # "weekly active users" alone is the WAU metric name and
+        # stays the mean scalar (no deterministic WAU turn, so it
+        # clarifies, as h07 does). "Every week" (2026-11-16, v12)
+        # is a series word too, and "distinct user" names the same
+        # population as "active user": "a chart for every week pull
+        # distinct users" is a weekly-series question. The "no i
+        # mean" repair prefix needs no handling -- routing is
+        # substring-based, so it never blocks a match. "mean"/
+        # "average" stays the scalar; DAU/MAU questions are
         # not weekly series; "by country/surface/platform/app/
         # acquisition" is a breakdown, not a series.
         if (("week" in q or "weekly" in q)
-                and ("trend" in q or "by week" in q or "each week" in q or "per week" in q)
-                and ("wau" in q or "active user" in q)
+                and ("trend" in q or "by week" in q or "each week" in q or "per week" in q
+                     or "every week" in q)
+                and ("wau" in q or "active user" in q or "distinct user" in q)
                 and "dau" not in q and "mau" not in q
                 and "mean" not in q and "average" not in q
                 and " by country" not in q and " by surface" not in q
@@ -2973,14 +2997,17 @@ class ChatSession:
         # Last 4 weeks after a weekly series (2026-11-13, v11): "last
         # 4 weeks only" / "last four weeks" / "show me the last 4
         # weeks" returns the last 4 COMPLETE weeks (Mar 2/9/16/23),
-        # not the literal last 4 rows. Gated on stage in
+        # not the literal last 4 rows. "Last 28 days" (2026-11-16,
+        # v12) is the same span in different units -- 28 days is
+        # four weeks -- so it takes the same turn, and the reply
+        # states the reading. Gated on stage in
         # ("weekly_series", "weekly_last4"): with no series state it
         # clarifies, and after MAU/daily-series state it clarifies
         # too. Placed after the weekly-series block (a last-4
         # question names no series word, so it never matches that
         # block) and before watch-outs.
         if self.stage in ("weekly_series", "weekly_last4") and (
-                "last 4 week" in q or "last four week" in q):
+                "last 4 week" in q or "last four week" in q or "last 28 day" in q):
             app = (app_found or (self.mau_context["app"] if self.mau_context else None)
                    or self.app)
             if app:
