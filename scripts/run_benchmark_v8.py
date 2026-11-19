@@ -125,31 +125,32 @@ def main():
                     default="baseline",
                     help="slice-3 planner variant (see docs/ablations.md); "
                          "default baseline is the current planner exactly as-is; "
-                         "'llm' plans through the Gemini LLM planner "
+                         "'llm' plans through the OpenAI LLM planner "
                          "(see docs/llm-planner.md)")
     ap.add_argument("--limit", type=int, default=None,
                     help="LLM variant only: run only the first N cases of the "
                          "ordered split (singles in file order, then "
-                         "conversations). The free tier's daily request cap "
-                         "makes a full 162-case run a multi-day job; partial "
+                         "conversations). Rate limits and cost make a full run "
+                         "worth spreading; partial "
                          "runs are labeled as such in the trace.")
     ap.add_argument("--offset", type=int, default=0,
                     help="LLM variant only: skip the first N cases of the "
                          "ordered split (resume a paced run the next day).")
-    ap.add_argument("--tier", choices=["free", "paid"], default="free",
-                    help="LLM variant only: the AI Studio project's tier. "
-                         "Free bills $0; paid bills the paid-rate cost. "
-                         "The code cannot detect this — declare it honestly.")
+    ap.add_argument("--tier", choices=["free", "paid"], default="paid",
+                    help="LLM variant only: the key's tier. OpenAI is "
+                         "pay-as-you-go (paid bills the paid-rate cost; "
+                         "there is no free tier). The code cannot detect "
+                         "this — declare it honestly.")
     ap.add_argument("--pace", type=float, default=1.0,
                     help="LLM variant only: seconds to sleep between LLM "
-                         "calls (default 1.0). The free tier is rate-limited "
+                         "calls (default 1.0). The provider is rate-limited "
                          "per minute as well as per day.")
     ap.add_argument("--skip-oracle", action="store_true")
     ap.add_argument("--trace-out", type=Path, default=None)
     ap.add_argument("--no-trace", action="store_true")
     args = ap.parse_args()
-    if args.variant == "llm" and not os.environ.get("GEMINI_API_KEY"):
-        print("WARNING: variant=llm with no GEMINI_API_KEY set. Every case "
+    if args.variant == "llm" and not os.environ.get("LLM_API_KEY"):
+        print("WARNING: variant=llm with no LLM_API_KEY set. Every case "
               "will fall back to the deterministic baseline plan, labeled "
               "fallback=no_key in the trace. Those numbers are baseline "
               "numbers, NOT LLM numbers — do not compare them as if the "

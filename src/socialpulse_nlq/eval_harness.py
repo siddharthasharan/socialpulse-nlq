@@ -658,7 +658,7 @@ def score_conversation(conv, data_dir, structural_specs=None, variant="baseline"
     session = ChatSession(data_dir, variant=variant,
                           llm_transport=llm_kwargs.get("transport"),
                           llm_api_key=llm_kwargs.get("api_key"),
-                          llm_tier=llm_kwargs.get("tier", "free"))
+                          llm_tier=llm_kwargs.get("tier", "paid"))
     replies, turn_traces, failures = [], [], []
     con = None
     syntax_ok, safety_ok, exec_ok = True, True, True
@@ -989,7 +989,7 @@ def _run_single(case, con, data_dir, structural_specs, variant="baseline",
         session = ChatSession(data_dir, variant=variant,
                               llm_transport=(llm or {}).get("transport"),
                               llm_api_key=(llm or {}).get("api_key"),
-                              llm_tier=(llm or {}).get("tier", "free"))
+                              llm_tier=(llm or {}).get("tier", "paid"))
         reply = session.respond(case["question"])
         ms = int((time.time() - t0) * 1000)
         working = reply.get("working") or {}
@@ -1111,7 +1111,7 @@ def cases_for_split(manifest, split):
 
 def run_benchmark(root=ROOT, data_dir=None, split="dev", with_oracle=True,
                   version=MANIFEST_VERSION, variant="baseline",
-                  llm_transport=None, llm_api_key=None, llm_tier="free",
+                  llm_transport=None, llm_api_key=None, llm_tier="paid",
                   llm_pace_s=1.0, limit=None, offset=0):
     """Run the frozen benchmark for one split. Returns the full report dict.
     variant selects a slice-3 planner variant (see docs/ablations.md);
@@ -1119,11 +1119,12 @@ def run_benchmark(root=ROOT, data_dir=None, split="dev", with_oracle=True,
     variant="llm" (chunk B, slice 1) plans through the LLM planner
     instead: llm_transport / llm_api_key / llm_tier are threaded to
     plan_with_llm (None = the adapter default: urllib transport,
-    GEMINI_API_KEY from the environment, free tier). llm_pace_s sleeps
-    that long between LLM calls, so a free-tier run paces itself.
+    LLM_API_KEY from the environment, paid tier — the OpenAI API is
+    pay-as-you-go). llm_pace_s sleeps that long between LLM calls, so
+    a run paces itself under the provider's rate limits.
     limit/offset run only a slice of the ordered case list (singles in
-    file order, then conversations) — the free tier's daily request cap
-    makes a full 162-case run a multi-day job, so partial runs are a
+    file order, then conversations) — rate limits and cost make a full
+    175-case run worth spreading, so partial runs are a
     first-class, labeled outcome: the report records limit, offset,
     and partial=true. Partial runs are never compared as if complete."""
     data_dir = Path(data_dir or (Path(root) / "data/phase1"))

@@ -8,11 +8,10 @@ paired flip list, P50/P95 turn latency, and real-token cost per
 successful task.
 
 Cost method (see docs/llm-planner.md): tokens are the REAL values from
-the API usageMetadata in the traces. Cost is computed at the published
-paid rates for gemini-3.8-flash ($0.75 input / $3.75 output per 1M
-tokens through Dec 31 2026) and labeled as paid-rate cost; on the free
-tier the actual billed cost is $0 — both are printed, and the
-paid-rate figure is never presented as billed.
+the API usage in the traces. Cost is computed at the published
+paid rates for gpt-4o-mini ($0.15 input / $0.60 output per 1M
+tokens) and labeled as paid-rate cost; the OpenAI API is pay-as-you-go,
+so the paid-rate figure is also the billed figure on the paid tier.
 
 A trace that contains ANY fallback (no key, API error, malformed
 reply) is NOT a pure LLM comparison: this script refuses to compare
@@ -210,8 +209,8 @@ def main():
     for r in broken:
         print(f"  BROKEN {r['id']} [{r['family']}]")
     successes = sum(int(r["task_success"]) for r in llm_rep["results"])
-    print(f"\n### Cost (real tokens from usageMetadata; paid rates "
-          f"$0.75 input / $3.75 output per 1M; tier {llm_meta.get('tier', 'free')})")
+    print(f"\n### Cost (real tokens from usage; paid rates "
+          f"$0.15 input / $0.60 output per 1M; tier {llm_meta.get('tier', 'paid')})")
     print(f"  model calls: {totals['calls']}; "
           f"tokens: {totals['prompt_tokens']} prompt + "
           f"{totals['completion_tokens']} completion")

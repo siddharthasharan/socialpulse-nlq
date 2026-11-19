@@ -34,7 +34,7 @@ and the shell says so.
 - `GET /api/llm-routing-prompt` (slice 2) returns the pinned routing
   prompt (inventory rendered, `{question}` and `{context}` left to
   fill) plus the model id, prompt version + SHA-256, pinned generation
-  params, and the Gemini `generateContent` endpoint — no key involved.
+  params, and the OpenAI chat-completions endpoint — no key involved.
 - Copilot CORS patch (separate repo/service): `copilot_platform/server.py`
   — `_cors_origin()` allowlist (SocialPulse Render origin + localhost /
   127.0.0.1 any port), `Access-Control-Allow-Origin` on JSON responses,
@@ -50,19 +50,23 @@ How the demo decides which engine answers an Analytics question:
    daily-series, and MAU-by-country turns are unchanged and make zero
    model calls, key or no key.
 2. When no deterministic turn matches AND the server has an owner key
-   (`GEMINI_API_KEY` env var, set by the repo owner as a Render env
+   (`LLM_API_KEY` env var, set by the repo owner as a Render env
    var, never in the repo), the LLM fallback turn routes the question
-   through `plan_with_llm` (model `gemini-3.8-flash`, prompt
+   through `plan_with_llm` (model `gpt-4o-mini`, prompt
    `llm-prompt-v1`) and executes the returned plan through the
    deterministic engine. The model chooses the analysis, never the
    number. On API error / timeout / bad response the deterministic
    baseline answers instead, labeled in the receipt. With no owner key,
    the question gets today's generic "could not map" clarification.
+   The key slot is named generically ("LLM API key") on purpose; the
+   provider is pinned to OpenAI, so the slot takes an OpenAI key
+   today. (Previous provider, 2026-11-11 to 2026-11-17, was Gemini;
+   generation never worked there.)
 3. Visitor BYOK: a key field in the sidebar (Analytics only). The
    visitor's key lives only in their browser's `sessionStorage` and is
    never sent to this server. When the deterministic answer is the
    generic unmapped clarification and a visitor key is set, the browser
-   fetches the routing prompt, calls Gemini directly, and posts only
+   fetches the routing prompt, calls OpenAI directly, and posts only
    the model's choice (+ real token counts) to `/api/chat`. The backend
    validates the choice against the same allowlist as `plan_with_llm`
    and executes it through the same deterministic dispatch; an invalid
@@ -72,17 +76,17 @@ What the shell status means:
 
 - Mode note "Deterministic — no live LLM": no server-side key is
   configured. Every Analytics answer is deterministic.
-- Mode note "LLM-routed (Gemini 3.8 Flash)": the owner key is
+- Mode note "LLM-routed (GPT-4o-mini)": the owner key is
   configured. Deterministic turns still answer deterministically; only
   otherwise-unmapped questions go to the model.
 - Each answer's transcript label names its router: "analytics ·
-  deterministic", "analytics · LLM (Gemini 3.8 Flash)", or "analytics ·
+  deterministic", "analytics · LLM (GPT-4o-mini)", or "analytics ·
   LLM (your key)". The working panel shows the LLM receipt (model,
   prompt version, real tokens, fallback reason) for LLM-routed turns.
 
 Key handling, stated plainly: the owner key is read from the server
 environment and never leaves the server process except as the
-`x-goog-api-key` header to Gemini; it is never logged, never returned
+`Authorization: Bearer` header to OpenAI; it is never logged, never returned
 in any response, and never written to a trace. The visitor key never
 reaches the server at all. Neither key is ever in the repo.
 

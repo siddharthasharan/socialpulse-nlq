@@ -3,7 +3,7 @@
 Starts the real server with the owner key from the environment and
 checks the slice-2 wiring end to end, owner-key path first, then the
 visitor-BYOK path (simulating the browser: fetch the routing prompt,
-call Gemini directly, post the choice):
+call OpenAI directly, post the choice):
 
   1. GET /api/shell-config reports llm.configured=true.
   2. GET /api/llm-routing-prompt returns the pinned prompt + params.
@@ -21,9 +21,11 @@ per app), a weather report (whose WAU card is the real Instagram WAU,
 mean as Instagram's WAU (no all-apps note) is a live FAILURE, the h07
 trap in production.
 
-Requires GEMINI_API_KEY in the environment. WITHOUT a key this script
-prints LIVE VERIFICATION PENDING and exits 2: it never invents live
-results. The key is never printed.
+Requires LLM_API_KEY in the environment (an OpenAI API key — a
+ChatGPT subscription does NOT include API credits; the key comes
+from platform.openai.com with pay-as-you-go billing). WITHOUT a key
+this script prints LIVE VERIFICATION PENDING and exits 2: it never
+invents live results. The key is never printed.
 
 Usage:
     python scripts/smoke_demo_llm.py [--data data/phase1] [--port 8123]
@@ -87,11 +89,10 @@ def _llm_line(llm):
 
 
 def _parse_model_choice(data):
-    cands = (data or {}).get("candidates") or []
-    if not cands:
-        raise ValueError("model response has no candidates")
-    parts = cands[0].get("content", {}).get("parts") or []
-    text = "".join(p.get("text", "") for p in parts).strip()
+    choices = (data or {}).get("choices") or []
+    if not choices:
+        raise ValueError("model response has no choices")
+    text = ((choices[0].get("message") or {}).get("content") or "").strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):
@@ -153,9 +154,9 @@ def main():
     ap.add_argument("--data", type=Path, default=ROOT / "data/phase1")
     ap.add_argument("--port", type=int, default=0)
     args = ap.parse_args()
-    key = os.environ.get("GEMINI_API_KEY")
+    key = os.environ.get("LLM_API_KEY")
     if not key:
-        print("LIVE VERIFICATION PENDING: no GEMINI_API_KEY in the "
+        print("LIVE VERIFICATION PENDING: no LLM_API_KEY in the "
               "environment. Set the owner key (Render env var for the "
               "live demo) and re-run. Nothing was checked.")
         return 2
@@ -206,23 +207,27 @@ def main():
             "{context}", _format_context(byok_reply.get("context"))).replace(
             "{question}", WAU_Q)
         try:
+            gen = prompt_doc["generation"]
             data = _req("POST", prompt_doc["endpoint"],
-                        {"contents": [{"role": "user",
-                                      "parts": [{"text": prompt}]}],
-                         "generationConfig": prompt_doc["generation"]},
-                        headers={"x-goog-api-key": key}, timeout=300)
+                        {"model": prompt_doc["model"],
+                         "messages": [{"role": "user", "content": prompt}],
+                         "temperature": gen.get("temperature", 0),
+                         "max_tokens": gen.get("max_tokens", 512),
+                         "response_format": gen.get(
+                             "response_format", {"type": "json_object"})},
+                        headers={"Authorization": f"Bearer {key}"}, timeout=300)
         except Exception as e:  # noqa: BLE001 - model failure is BLOCKED
-            print(f"BLOCKED: direct Gemini call failed: {e}")
+            print(f"BLOCKED: direct OpenAI call failed: {e}")
             return 3
         choice = _parse_model_choice(data)
-        usage = data.get("usageMetadata") or {}
+        usage = data.get("usage") or {}
         reply = _req("POST", base + "/api/chat",
                      {"session_id": "smoke-demo-llm-byok", "message": WAU_Q,
                       "llm_choice": choice,
                       "llm_tokens": {
-                          "prompt": usage.get("promptTokenCount"),
-                          "completion": usage.get("candidatesTokenCount"),
-                          "total": usage.get("totalTokenCount")}},
+                          "prompt": usage.get("prompt_tokens"),
+                          "completion": usage.get("completion_tokens"),
+                          "total": usage.get("total_tokens")}},
                      timeout=300)
         ok, blocked, note = _check_wau_reply(reply, "byok")
         print(note)

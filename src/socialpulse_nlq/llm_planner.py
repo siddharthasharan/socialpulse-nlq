@@ -35,16 +35,23 @@ Failure is always a deterministic fallback, clearly labeled: no key,
 an API error, a timeout, or a malformed model reply all fall back to
 the baseline plan() result, with the reason recorded in the trace's
 llm fields. Nothing in this module ever logs, stores, or returns the
-API key: it is read from the GEMINI_API_KEY environment variable
+API key: it is read from the LLM_API_KEY environment variable
 (or passed in by a caller that owns it) and sent only as the
-x-goog-api-key header, never in a URL.
+Authorization: Bearer header, never in a URL.
 
 Costs: tokens are the REAL values from the API response
-usageMetadata — never estimates. Cost is computed at the published
-paid rates for gemini-3.8-flash ($0.75 input / $3.75 output per 1M
-tokens through Dec 31 2026) and labeled as a paid-rate cost; on the
-free tier the actual billed cost is $0, recorded separately as
-billed_usd. See docs/llm-planner.md for the full cost method.
+usage (prompt_tokens, completion_tokens, total_tokens) — never
+estimates. Cost is computed at the published paid rates for
+gpt-4o-mini ($0.15 input / $0.60 output per 1M tokens) and labeled
+as a paid-rate cost; the OpenAI API is pay-as-you-go, so the billed
+cost is the paid-rate cost (see billed_usd in the trace). See
+docs/llm-planner.md for the full cost method.
+
+Provider history: chunk B slices 1–2 used the previous provider
+(Google's free tier); generation never worked there (403s, 503s,
+timeouts, one truncated-JSON reply), so the transport switched to
+OpenAI on 2026-11-17 with gpt-4o-mini pinned. The prompt contract
+(llm-prompt-v1) is unchanged by the switch.
 """
 import hashlib
 import json
@@ -71,15 +78,22 @@ from .planner import (
     plan,
 )
 
-MODEL_ID = "gemini-3.8-flash"
+MODEL_ID = "gpt-4o-mini"
 PROMPT_VERSION = "llm-prompt-v1"
 PROMPT_FILE = Path(__file__).resolve().parent / "llm_prompt.md"
-API_KEY_ENV = "GEMINI_API_KEY"
-# Published paid rates for gemini-3.8-flash, per 1M tokens, through
-# Dec 31 2026 (Google AI Studio / Gemini API pricing page). Used ONLY
-# to compute the paid-rate cost figure; the free tier bills $0.
-PAID_INPUT_PER_1M = 0.75
-PAID_OUTPUT_PER_1M = 3.75
+# The key slot is named generically on purpose (user request,
+# 2026-11-17): "LLM API key", so anyone testing the demo uses this
+# one slot. The provider is PINNED to OpenAI in code — the slot takes
+# an OpenAI key today; a key for another provider in this slot will
+# NOT work (different endpoint and auth). Dual-provider detection is
+# a separate future fork, not built here.
+API_KEY_ENV = "LLM_API_KEY"
+OPENAI_URL = "https://api.openai.com/v1/chat/completions"
+# Published paid rates for gpt-4o-mini, per 1M tokens (OpenAI API
+# pricing page). Used ONLY to compute the paid-rate cost figure; the
+# OpenAI API is pay-as-you-go, so billed_usd is the paid-rate cost.
+PAID_INPUT_PER_1M = 0.15
+PAID_OUTPUT_PER_1M = 0.60
 MAX_OUTPUT_TOKENS = 512
 
 _GENERIC_CLARIFICATION = (
@@ -149,19 +163,17 @@ class LLMError(Exception):
         self.status = status
 
 
-class UrllibGeminiTransport:
-    """Stdlib-urllib transport for the Gemini API (generateContent).
+class UrllibOpenAITransport:
+    """Stdlib-urllib transport for the OpenAI API (chat completions).
 
-    The key is sent as the x-goog-api-key header, never in a URL and
-    never logged. Retries ONCE on a transient failure — HTTP 429 (rate
-    limit) or HTTP 503 (the model is overloaded: "experiencing high
-    demand, try again later", observed live 2026-11-11) — waiting
-    Retry-After when present, else retry_delay_s, then raises
+    The key is sent as the Authorization: Bearer header, never in a
+    URL and never logged. Retries ONCE on a transient failure —
+    HTTP 429 (rate limit) or HTTP 503 (the model is overloaded) —
+    waiting Retry-After when present, else retry_delay_s, then raises
     LLMError; the adapter falls back to the deterministic planner.
     `sleep` is injectable so tests can pass a no-op instead of waiting
-    out a real backoff. Default timeout 120s: the free tier under load
-    is slow (two 60s timeouts observed live 2026-11-11), so 60s would
-    turn slow calls into fallbacks.
+    out a real backoff. Default timeout 120s: a slow provider call
+    should get a second chance instead of an immediate fallback.
     """
 
     def __init__(self, model=MODEL_ID, timeout=120, retry_delay_s=20, sleep=None):
@@ -172,18 +184,18 @@ class UrllibGeminiTransport:
 
     @property
     def url(self):
-        return ("https://generativelanguage.googleapis.com/v1beta/models/"
-                f"{self.model}:generateContent")
+        return OPENAI_URL
 
     def generate(self, prompt, api_key):
         payload = json.dumps({
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0,
-                                 "maxOutputTokens": MAX_OUTPUT_TOKENS,
-                                 "responseMimeType": "application/json"},
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0,
+            "max_tokens": MAX_OUTPUT_TOKENS,
+            "response_format": {"type": "json_object"},
         }).encode("utf-8")
         headers = {"Content-Type": "application/json",
-                   "x-goog-api-key": api_key}
+                   "Authorization": f"Bearer {api_key}"}
         retried = False
         retry_status = None
         wait_s = 0.0
@@ -208,13 +220,13 @@ class UrllibGeminiTransport:
                     retried = True
                     retry_status = e.code
                     continue
-                raise LLMError(f"Gemini API HTTP {e.code}: {detail}",
+                raise LLMError(f"OpenAI API HTTP {e.code}: {detail}",
                                status=e.code)
             except (urllib.error.URLError, TimeoutError, OSError) as e:
-                raise LLMError(f"Gemini API request failed: {e}")
+                raise LLMError(f"OpenAI API request failed: {e}")
             except (ValueError, UnicodeDecodeError) as e:
-                raise LLMError(f"Gemini API returned an unreadable body: {e}")
-        raise LLMError("Gemini API request failed after retry")
+                raise LLMError(f"OpenAI API returned an unreadable body: {e}")
+        raise LLMError("OpenAI API request failed after retry")
 
     def _retry_wait(self, http_error):
         raw = None
@@ -495,14 +507,13 @@ def plan_from_choice(clean, question):
 
 
 def _parse_model_json(response):
-    """The model's JSON choice out of a generateContent response.
+    """The model's JSON choice out of a chat-completions response.
     Tolerates markdown fences around the JSON; anything else raises
     ValueError and the adapter falls back."""
-    candidates = (response or {}).get("candidates") or []
-    if not candidates:
-        raise ValueError("model response has no candidates")
-    parts = candidates[0].get("content", {}).get("parts") or []
-    text = "".join(p.get("text", "") for p in parts).strip()
+    choices = (response or {}).get("choices") or []
+    if not choices:
+        raise ValueError("model response has no choices")
+    text = ((choices[0].get("message") or {}).get("content") or "").strip()
     if text.startswith("```"):
         lines = text.splitlines()
         if lines and lines[0].startswith("```"):
@@ -514,10 +525,11 @@ def _parse_model_json(response):
 
 
 def cost_usd_paid_rate(prompt_tokens, completion_tokens):
-    """Cost at the published paid rates ($0.75 input / $3.75 output
+    """Cost at the published paid rates ($0.15 input / $0.60 output
     per 1M tokens). None when the token counts are unknown. This is a
-    paid-rate figure, never a billed figure — on the free tier the
-    billed cost is $0 (see billed_usd in the trace)."""
+    paid-rate figure; the OpenAI API is pay-as-you-go, so it is also
+    the billed figure when the tier is "paid" (see billed_usd in the
+    trace)."""
     if prompt_tokens is None or completion_tokens is None:
         return None
     return (prompt_tokens / 1_000_000 * PAID_INPUT_PER_1M
@@ -561,23 +573,23 @@ def _refusal_plan(llm):
 # --------------------------------------------------------------------------
 
 def plan_with_llm(question, context=None, transport=None, api_key=None,
-                  tier="free", timeout=120):
+                  tier="paid", timeout=120):
     """Plan one question with the LLM router under the common contract.
 
     Returns a plan dict in exactly the shape plan() returns
     (type/metric/sql/tables/grain/filters/breakdown/explanation/
     clarification), plus an "llm" key with the model id, prompt
-    version + SHA-256, real token counts from usageMetadata, paid-rate
+    version + SHA-256, real token counts from usage, paid-rate
     cost, latency, the raw model choice, and any fallback reason.
 
     context is the deterministic chat session's context (app, stage,
     mau_context, series_window) or None for a single-shot question.
     transport is an object with .generate(prompt, api_key) (default:
-    UrllibGeminiTransport); tests inject a fake. api_key overrides the
-    GEMINI_API_KEY environment variable. tier is "free" or "paid" and
-    only decides billed_usd (free bills $0); it is a runner-declared
-    fact about the key's AI Studio project, not something the code
-    detects.
+    UrllibOpenAITransport); tests inject a fake. api_key overrides the
+    LLM_API_KEY environment variable. tier is "paid" for OpenAI
+    (pay-as-you-go; billed_usd is the paid-rate cost) and only decides
+    billed_usd — "free" records $0 and is not honest for an OpenAI
+    key; it is a runner-declared fact, not something the code detects.
     """
     q = (question or "").lower().strip()
     llm = _llm_skeleton(tier)
@@ -620,7 +632,7 @@ def plan_with_llm(question, context=None, transport=None, api_key=None,
         return _with_llm(plan(question), llm)
     prompt, inventory_sha = build_prompt(question, context)
     llm["inventory_sha256"] = inventory_sha
-    transport = transport or UrllibGeminiTransport(timeout=timeout)
+    transport = transport or UrllibOpenAITransport(timeout=timeout)
     t0 = time.time()
     try:
         result = transport.generate(prompt, key)
@@ -648,11 +660,11 @@ def plan_with_llm(question, context=None, transport=None, api_key=None,
     llm["raw_choice"] = choice
     if isinstance(choice, dict):
         llm["model_explanation"] = choice.get("explanation")
-    usage = (result.get("response") or {}).get("usageMetadata") or {}
+    usage = (result.get("response") or {}).get("usage") or {}
     llm["raw_usage"] = dict(usage)
-    llm["prompt_tokens"] = usage.get("promptTokenCount")
-    llm["completion_tokens"] = usage.get("candidatesTokenCount")
-    llm["total_tokens"] = usage.get("totalTokenCount")
+    llm["prompt_tokens"] = usage.get("prompt_tokens")
+    llm["completion_tokens"] = usage.get("completion_tokens")
+    llm["total_tokens"] = usage.get("total_tokens")
     llm["cost_usd_paid_rate"] = cost_usd_paid_rate(llm["prompt_tokens"],
                                                    llm["completion_tokens"])
     llm["billed_usd"] = 0.0 if tier == "free" else llm["cost_usd_paid_rate"]

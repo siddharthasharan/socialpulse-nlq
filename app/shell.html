@@ -11,12 +11,15 @@
   WHAT THIS IS: one chat shell over TWO separate demos.
   - Analytics mode  -> SocialPulse NLQ chat backend (this server, /api/chat).
     Synthetic analytics data, 500K users, seed 42. Deterministic planner
-    + chat by default; when the server has an owner Gemini key
+    + chat by default; when the server has an owner LLM API key
     configured (GET /api/shell-config reports it), unmapped questions
     are routed through the LLM planner — the model picks which
     deterministic analysis to run, it never computes a number. A
-    visitor may also use their own Gemini key (BYOK): the browser calls
-    Gemini directly, the key never touches this server.
+    visitor may also use their own LLM API key (BYOK): the browser calls
+    OpenAI directly, the key never touches this server. The key slot
+    is named generically ("LLM API key") on purpose; the provider is
+    pinned to OpenAI (gpt-4o-mini) in code, so the slot takes an
+    OpenAI key today.
   - Experiments mode -> Experiment Copilot platform backend (a different
     service, /api/chat, /api/run, /api/run-status). Synthetic experiment
     data, deterministic decision rules. No live LLM.
@@ -120,13 +123,14 @@
     <p class="sub">Dataset (Analytics only, slice 1): <b>Social</b> — the only
       dataset wired up. See docs/shell.md for the extension point.</p>
     <div id="byokBox">
-      <p class="sub"><b>Your Gemini key (optional, Analytics only).</b>
+      <p class="sub"><b>Your LLM API key (optional, Analytics only).</b>
         For questions the deterministic chat cannot map: the browser calls
-        Gemini directly with your key and sends only the model's routing
+        OpenAI directly with your key and sends only the model's routing
         choice to this server. Your key lives only in this tab's session
         storage — it is never sent to this server, stored, or logged.
-        Leave it blank to stay deterministic-only.</p>
-      <input id="byokKey" type="password" placeholder="Gemini API key (optional)"
+        The slot takes an OpenAI key (the provider is pinned to
+        gpt-4o-mini). Leave it blank to stay deterministic-only.</p>
+      <input id="byokKey" type="password" placeholder="LLM API key (optional)"
         autocomplete="off" style="width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;font-size:13px">
       <div style="display:flex;gap:8px;margin-top:8px">
         <button class="btn secondary" id="byokSet">Use my key</button>
@@ -179,8 +183,8 @@ let conversations = [];
 let activeId = null;
 let runPoll = null;
 // Visitor BYOK key: sessionStorage ONLY, never sent to this server.
-// The browser calls Gemini directly with it (see byokRoute).
-const BYOK_KEY = "portfolio-shell-gemini-key";
+// The browser calls OpenAI directly with it (see byokRoute).
+const BYOK_KEY = "portfolio-shell-llm-key";
 const byokGet = () => { try { return sessionStorage.getItem(BYOK_KEY) || ""; } catch (e) { return ""; } };
 const byokSet = (v) => { try { if (v) sessionStorage.setItem(BYOK_KEY, v); else sessionStorage.removeItem(BYOK_KEY); } catch (e) {} };
 
@@ -226,12 +230,12 @@ function setModeBar() {
   // through the LLM planner; without one it is deterministic-only and
   // the note says exactly that (the static default in MODE_INFO).
   if (c.mode === "analytics" && shellLlm.configured) {
-    $("modeNote").textContent = "LLM-routed (Gemini 3.8 Flash) — the model picks which " +
+    $("modeNote").textContent = "LLM-routed (GPT-4o-mini) — the model picks which " +
       "deterministic analysis to run for questions the deterministic chat cannot map; " +
       "it never computes a number. Each answer names the engine that routed it.";
     $("sideNote").textContent = "Two separate demos in one chat shell. Analytics and " +
       "Experiments do not share data or sessions. Analytics routes unmapped questions " +
-      "through Gemini 3.8 Flash (owner key); Experiments stays deterministic.";
+      "through GPT-4o-mini (owner key); Experiments stays deterministic.";
     $("honestyFooter").textContent = "Honesty note: Analytics answers are deterministic " +
       "or LLM-routed to a deterministic analysis — the shell never computes a lift, a " +
       "metric, or a verdict itself, and it never mixes the two demos' data.";
@@ -335,7 +339,7 @@ function renderWorking(w) {
   if (w.llm) {
     const l = w.llm;
     const src = l.source === "visitor-key" ? "your key (BYOK)" : "owner key";
-    let line = `Routed by LLM (${esc(l.model || "gemini-3.8-flash")}, prompt ${esc(l.prompt_version || "")}, ${src})`;
+    let line = `Routed by LLM (${esc(l.model || "gpt-4o-mini")}, prompt ${esc(l.prompt_version || "")}, ${src})`;
     if (l.fallback) line += ` — model did NOT run: fallback ${esc(l.fallback)} (${esc(l.fallback_reason || "")}); the deterministic baseline answered instead`;
     else if (l.prompt_tokens != null || l.completion_tokens != null)
       line += ` — real tokens: prompt ${l.prompt_tokens}, completion ${l.completion_tokens}, total ${l.total_tokens}`;
@@ -461,7 +465,7 @@ function renderAll() { setModeBar(); renderList(); renderTranscript(); renderArt
 // router in res.engine ("deterministic" / "llm" / "llm-byok"); the
 // transcript shows it so a reader always knows what routed the turn.
 function engineLabel(engine) {
-  if (engine === "llm") return "analytics · LLM (Gemini 3.8 Flash)";
+  if (engine === "llm") return "analytics · LLM (GPT-4o-mini)";
   if (engine === "llm-byok") return "analytics · LLM (your key)";
   return "analytics · deterministic";
 }
@@ -478,13 +482,12 @@ function formatContext(ctx) {
     ctx.series_window[0] + ".." + ctx.series_window[1]);
   return lines.length ? lines.join("\n") : "No conversation context — this is the first question.";
 }
-// Parse the model's JSON choice out of a generateContent response,
+// Parse the model's JSON choice out of a chat-completions response,
 // tolerating markdown fences (same rule as llm_planner._parse_model_json).
 function parseModelChoice(data) {
-  const cands = (data && data.candidates) || [];
-  if (!cands.length) throw new Error("model response has no candidates");
-  const parts = ((cands[0].content || {}).parts) || [];
-  let text = parts.map((p) => p.text || "").join("").trim();
+  const choices = (data && data.choices) || [];
+  if (!choices.length) throw new Error("model response has no choices");
+  let text = (((choices[0].message || {}).content) || "").trim();
   if (text.startsWith("```")) {
     const lines = text.split("\n");
     if (lines[0].startsWith("```")) lines.shift();
@@ -494,8 +497,8 @@ function parseModelChoice(data) {
   return JSON.parse(text);
 }
 async function byokRoute(c, text, serverReply) {
-  // Visitor BYOK: the browser calls Gemini DIRECTLY with the visitor's
-  // key (x-goog-api-key header), parses the routing choice, and posts
+  // Visitor BYOK: the browser calls OpenAI DIRECTLY with the visitor's
+  // key (Authorization: Bearer), parses the routing choice, and posts
   // only {message, llm_choice, llm_tokens} to /api/chat. The key never
   // goes to this server. Returns the backend's reply, or null when the
   // visitor-key path could not route the question — the deterministic
@@ -517,26 +520,29 @@ async function byokRoute(c, text, serverReply) {
       .replace("{question}", text);
     const data = await fetch(routingPrompt.endpoint, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": key },
+      headers: { "Content-Type": "application/json", "Authorization": "Bearer " + key },
       body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: routingPrompt.generation,
+        model: routingPrompt.model,
+        messages: [{ role: "user", content: prompt }],
+        temperature: routingPrompt.generation.temperature,
+        max_tokens: routingPrompt.generation.max_tokens,
+        response_format: routingPrompt.generation.response_format,
       }),
     }).then((r) => {
-      if (!r.ok) throw new Error("Gemini returned " + r.status);
+      if (!r.ok) throw new Error("OpenAI returned " + r.status);
       return r.json();
     });
     const choice = parseModelChoice(data);
-    const usage = data.usageMetadata || {};
+    const usage = data.usage || {};
     return await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         session_id: c.serverSessionId || undefined, message: text,
         llm_choice: choice,
-        llm_tokens: { prompt: usage.promptTokenCount ?? null,
-                      completion: usage.candidatesTokenCount ?? null,
-                      total: usage.totalTokenCount ?? null },
+        llm_tokens: { prompt: usage.prompt_tokens ?? null,
+                      completion: usage.completion_tokens ?? null,
+                      total: usage.total_tokens ?? null },
       }),
     }).then((r) => r.json());
   } catch (e) {
@@ -563,7 +569,7 @@ async function sendText(text) {
     // Visitor BYOK, only for the generic unmapped clarification and
     // only when the visitor set a key: the browser routes with the
     // visitor's key and the backend's reply replaces the clarification.
-    // The key never leaves the browser except to Gemini.
+    // The key never leaves the browser except to OpenAI.
     if (res.unmapped && byokGet()) {
       const byokRes = await byokRoute(c, text, res);
       if (byokRes) {

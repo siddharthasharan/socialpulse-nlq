@@ -1,5 +1,21 @@
 # LLM planner — chunk B, slices 1–2 (2026-11-11)
 
+## Provider switch — OpenAI (2026-11-17)
+
+The provider switched from Gemini to OpenAI on 2026-11-17. Gemini
+generation never worked — 403s, 503 "high demand", timeouts, and one
+truncated-JSON reply across 2026-11-11 to 2026-11-17 — so the
+transport now posts to OpenAI chat completions with **gpt-4o-mini**
+pinned. The prompt contract (llm-prompt-v1) is unchanged by the
+switch, so a run under OpenAI is the same study condition as a run
+would have been under Gemini. The key slot is named generically
+**LLM_API_KEY** ("LLM API key") on purpose, so anyone testing the
+demo uses one slot; the provider is pinned to OpenAI in code, so the
+slot takes an OpenAI key today — a key for another provider in it
+will not work. The engine-label mismatch (a reply that says LLM
+while its trace says the model fell back) is a SEPARATE pending
+decision and was NOT touched by this switch.
+
 The LLM planner (`src/socialpulse_nlq/llm_planner.py`) adds a fourth
 planner variant, `llm`, to the frozen v8 benchmark. Slice 1 is the LLM
 planner under the common contract, owner-key only. Slice 2 wires it
@@ -22,13 +38,15 @@ deterministic baseline plan, clearly labeled in the trace.
 
 ## Pinned model
 
-- Model: `gemini-3.8-flash` (Google AI Studio / Gemini API, free tier).
-- Generation: temperature 0, maxOutputTokens 512, responseMimeType
-  `application/json`. The call is `generateContent` on
-  `generativelanguage.googleapis.com` — the Interactions API is the new
-  default but is NOT required; generateContent remains fully supported.
-- `gemini-2.5-flash` is NOT used anywhere: it returns 404 "no longer
-  available to new users".
+- Model: `gpt-4o-mini` (OpenAI API, pay-as-you-go). Pinned
+  2026-11-17 by the user's tap ("cheapest, my pick").
+- Generation: temperature 0, max_tokens 512, response_format
+  `{"type": "json_object"}`. The call is chat completions on
+  `api.openai.com` with an `Authorization: Bearer` key.
+- Previous provider (2026-11-11 to 2026-11-17): `gemini-3.8-flash`
+  (Google AI Studio / Gemini API, free tier). Generation never
+  worked there; see the switch note above. `gemini-2.5-flash` was
+  never used: it returns 404 "no longer available to new users".
 
 ## Prompt contract
 
@@ -85,14 +103,19 @@ choice is honored for `dau_mean_daily`; default behavior is unchanged
 
 ## Key handling
 
-- Read from the `GEMINI_API_KEY` environment variable only (or passed
+- Read from the `LLM_API_KEY` environment variable only (or passed
   in by a caller that owns it). Never hardcoded, never logged, never
   committed, never put in a trace file or a test. The transport sends
-  it as the `x-goog-api-key` header, never in a URL.
-- The study key is set as a Render env var by the user, never in the
-  repo. The demo's visitor BYOK (visitor key in browser session
-  storage only, browser calls the provider directly) is a later slice
-  and is NOT built here.
+  it as the `Authorization: Bearer` header, never in a URL. The slot
+  is named generically on purpose — one "LLM API key" slot for
+  anyone testing the demo — but the provider is pinned to OpenAI, so
+  the slot takes an OpenAI key today.
+- The key comes from platform.openai.com (API keys, pay-as-you-go
+  billing; minimum credit load $5). A ChatGPT subscription does NOT
+  include API credits — the API key is separate. The study key is
+  set as a Render env var by the user, never in the repo. The demo's
+  visitor BYOK (visitor key in browser session storage only, browser
+  calls the provider directly) is a later slice and is NOT built here.
 
 ## Fallback rules
 
@@ -101,7 +124,7 @@ result, with the reason in the trace's `llm` fields:
 
 | fallback | meaning |
 |---|---|
-| `no_key` | no `GEMINI_API_KEY` set and none passed in |
+| `no_key` | no `LLM_API_KEY` set and none passed in |
 | `api_error` | HTTP error / timeout / transport failure (status + detail in `fallback_reason`) |
 | `bad_response` | the model reply could not be parsed as JSON |
 
@@ -114,48 +137,46 @@ route) — the model never saw it.
 
 ## Cost method
 
-Tokens are the REAL values from the API response `usageMetadata`
-(`promptTokenCount`, `candidatesTokenCount`, `totalTokenCount`) —
+Tokens are the REAL values from the API response `usage`
+(`prompt_tokens`, `completion_tokens`, `total_tokens`) —
 never estimates. Two money figures are recorded per call:
 
-- `cost_usd_paid_rate`: prompt/1M × $0.75 + completion/1M × $3.75
-  (the published paid rates for gemini-3.8-flash through Dec 31 2026).
-  This is a paid-rate figure, never a billed figure.
-- `billed_usd`: $0.00 on the free tier; equal to the paid-rate cost on
-  the paid tier. The tier is a runner-declared fact about the key's
-  AI Studio project (`--tier free|paid`, default free) — the code
-  cannot detect it, so it must be declared honestly.
+- `cost_usd_paid_rate`: prompt/1M × $0.15 + completion/1M × $0.60
+  (the published paid rates for gpt-4o-mini). This is a paid-rate
+  figure; the OpenAI API is pay-as-you-go, so it is also the billed
+  figure on the paid tier.
+- `billed_usd`: equal to the paid-rate cost on the paid tier. The
+  tier is a runner-declared fact (`--tier paid`, the default) — the
+  code cannot detect it, so it must be declared honestly. There is
+  no free tier for the OpenAI API.
 
 The comparison script (`scripts/compare_llm.py`) prints both, plus
-cost per successful task at paid rates and billed. A full 162-case
-run at paid rates is on the order of a dollar; on the free tier the
-billed cost is $0 and the constraint is the request cap, not money.
+cost per successful task at paid rates and billed. A full 175-case
+run at paid rates is about $0.08 (measured from the real prompt
+builder: ~2,445 prompt tokens per call, ~150 completion tokens); a
+$5 credit load covers roughly 60 full runs.
 
-## Free-tier pacing
+## Pacing and rate limits
 
-The Gemini free tier caps requests per minute and per day (exact caps
-are shown per project in AI Studio, not published). The runner
-respects them:
+The OpenAI API is pay-as-you-go with per-minute rate limits (higher
+for older / higher-spending accounts). The runner respects them:
 
 - Sequential calls only, `--pace` seconds between calls (default 1.0).
-- The transport retries ONCE on HTTP 429 (rate limit) or HTTP 503
-  (the model is overloaded — observed live 2026-11-11: "model
-  experiencing high demand, try again later"), waiting Retry-After
-  when present, else 20s, then falls back and records the retry.
-  Default call timeout is 120s: the free tier under load is slow
-  (two 60s timeouts observed live 2026-11-11), so 60s would turn
-  slow calls into fallbacks.
+- The transport retries ONCE on HTTP 429 (rate limit) or HTTP 503,
+  waiting Retry-After when present, else 20s, then falls back and
+  records the retry. Default call timeout is 120s, so a slow call
+  gets a second chance instead of an immediate fallback.
 - `--limit N` / `--offset N` run a slice of the ordered case list, so
-  a full 162-case run can be spread across days; partial runs are
+  a full 175-case run can be spread out; partial runs are
   labeled `partial: true` in the trace and in the comparison output.
 - The trace records every call's `retried_429` / `retry_wait_s`.
 
 ## Harness and comparison
 
-- `scripts/run_benchmark_v8.py --variant llm [--split dev|heldout|all]
-  [--limit N] [--offset N] [--tier free|paid] [--pace SECONDS]` runs
-  the frozen v8 benchmark (162 cases, 132 dev / 30 held-out) with the
-  LLM planner. Without a key it warns loudly and every case falls
+- `scripts/run_benchmark_v12.py --variant llm [--split dev|heldout|all]
+  [--limit N] [--offset N] [--tier paid] [--pace SECONDS]` runs
+  the frozen v12 benchmark (175 cases, 145 dev / 30 held-out) with
+  the LLM planner. Without a key it warns loudly and every case falls
   back (labeled `fallback=no_key`) — those numbers are baseline
   numbers, NOT LLM numbers.
 - The per-case trace has the same shape as the deterministic trace (a
@@ -178,7 +199,7 @@ The demo (`scripts/app.py`, `/shell` + `/api/chat`) now uses the LLM
 planner in exactly one place: the fallback turn. The design decision,
 recorded because the brief's literal wording said otherwise: the demo
 session is constructed with the owner key (`llm_api_key`, tier from
-`GEMINI_TIER` or `free`) but its variant stays `"baseline"`. Setting
+`LLM_TIER` or `paid`) but its variant stays `"baseline"`. Setting
 `variant="llm"` would route the five deterministic turns' internal
 planning through the model — they call `_plan()` with synthetic
 canonical questions ("MAU and creators for instagram by country"), and
@@ -187,7 +208,7 @@ unpacks it. So the deterministic turns keep planning deterministically
 (zero model calls — pinned by test), and the LLM is consulted only when
 no deterministic turn matches a message.
 
-- **Owner key.** `app.py` reads `GEMINI_API_KEY` from the environment
+- **Owner key.** `app.py` reads `LLM_API_KEY` from the environment
   at session creation. When present, the session has an LLM available;
   when absent, the demo is exactly today's deterministic demo. The key
   is never logged, never returned in any response, and never written to
@@ -215,8 +236,8 @@ no deterministic turn matches a message.
   the fallback turn is built to surface it, not hide it.
 - **Honest shell status.** `GET /api/shell-config` now returns
   `"llm": {"configured", "model", "mode", "prompt_version"}` alongside
-  `copilot_base`. The shell's Analytics note reads "LLM-routed (Gemini
-  3.8 Flash)" when a key is configured and "Deterministic — no live
+  `copilot_base`. The shell's Analytics note reads "LLM-routed (GPT-4o-mini)"
+  when a key is configured and "Deterministic — no live
   LLM" when not; each answer's transcript label names its router.
 - **Visitor BYOK.** A key field in the shell sidebar (Analytics only).
   The key lives only in the visitor's browser `sessionStorage` and is
@@ -224,7 +245,7 @@ no deterministic turn matches a message.
   prompt from `GET /api/llm-routing-prompt` (rendered inventory +
   version + model id + pinned generation params, with `{question}` and
   `{context}` left to fill), substitutes the question and the session
-  context, calls Gemini `generateContent` directly, parses the JSON
+  context, calls OpenAI chat completions directly, parses the JSON
   choice, and POSTs `{message, llm_choice, llm_tokens}` to `/api/chat`.
   The backend validates the choice with `_validate_choice` and executes
   it with `plan_from_choice` — the same validation and the same
@@ -276,18 +297,24 @@ no deterministic turn matches a message.
 
 ## Live verification status (demo wiring)
 
-Live verification is PENDING — the key is now accepted, but
-generation has not yet been observed working. Timeline 2026-11-11:
-the key was connected and valid (list-models returns HTTP 200), but
-generateContent returned HTTP 403 PERMISSION_DENIED — a Google
-free-tier project/account restriction. The user fixed it ('done',
-14:25 PST): the 403 is GONE. Three test calls since: the first timed
-out at 60s, the second returned HTTP 503 "model experiencing high
-demand, try again later", the third timed out at 60s. Requests reach
-the model; the model is overloaded/slow right now. Retry later. The
-transport's 120s timeout and retry-once on 429/503 exist for exactly
-this: slow or overloaded free-tier calls get a second chance instead
-of an immediate fallback. Last retest 2026-11-11 15:21 PST timed out
+Live verification is PENDING — under Gemini the key was accepted
+but generation never worked (403s, 503s, timeouts, one truncated
+JSON reply, 2026-11-11 to 2026-11-17), so the transport switched to
+OpenAI on 2026-11-17. The next step is a live OpenAI run: set
+`LLM_API_KEY` (platform.openai.com, pay-as-you-go) and run the
+smoke scripts below. The Gemini timeline is kept here as history:
+
+Timeline 2026-11-11: the key was connected and valid (list-models
+returns HTTP 200), but generateContent returned HTTP 403
+PERMISSION_DENIED — a Google free-tier project/account restriction.
+The user fixed it ('done', 14:25 PST): the 403 is GONE. Three test
+calls since: the first timed out at 60s, the second returned HTTP
+503 "model experiencing high demand, try again later", the third
+timed out at 60s. Requests reach the model; the model is
+overloaded/slow right now. Retry later. The transport's 120s
+timeout and retry-once on 429/503 exist for exactly this: slow or
+overloaded free-tier calls get a second chance instead of an
+immediate fallback. Last retest 2026-11-11 15:21 PST timed out
 at 60s.
 
 Until a live call succeeds:
@@ -307,10 +334,10 @@ Until a live call succeeds:
 it starts the server with the owner key, checks `/api/shell-config`
 and `/api/llm-routing-prompt`, asks "What's the WAU for Instagram?"
 through the owner-key path, then simulates the BYOK path (fetch the
-prompt, call Gemini directly, post the choice). Exit codes match
+prompt, call OpenAI directly, post the choice). Exit codes match
 `smoke_llm.py`: 0 all live passes, 1 a live failure, 2 no key
 (pending), 3 blocked (the model did not run — a fallback is never
-counted as a pass). It needs the owner to set `GEMINI_API_KEY` as a
+counted as a pass). It needs the owner to set `LLM_API_KEY` as a
 Render env var before the live demo can be checked on Render.
 
 ## What the hybrid router will add later (not this slice)

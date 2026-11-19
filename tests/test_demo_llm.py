@@ -1,9 +1,10 @@
 """Chunk B, slice 2 — wire the LLM planner into the LIVE SocialPulse demo.
 
 Owner key (server-side) + honest shell status + visitor BYOK. All model
-calls use a mocked transport: nothing here depends on the live model,
-which has been returning 503/timeouts. The live check is
-scripts/smoke_demo_llm.py (pending a responsive model).
+calls use a mocked transport: nothing here depends on the live model.
+The live check is scripts/smoke_demo_llm.py (pending a responsive
+model — Gemini generation never worked, so the transport switched to
+OpenAI gpt-4o-mini on 2026-11-17).
 
 Key honesty pin: wau_mean_weekly honors NO app filter (the inventory
 probe says filters: []), so "What's the WAU for Instagram?" has no
@@ -38,12 +39,12 @@ SHELL = (ROOT / "app/shell.html").read_text()
 
 WAU_Q = "What's the WAU for Instagram?"
 PROMPT_SHA = "e45582cedd54d76e6cb01dd3c65f6ec318b982631acfa8689470264c3bcd6df4"
-USAGE = {"promptTokenCount": 1200, "candidatesTokenCount": 60,
-         "totalTokenCount": 1260}
+USAGE = {"prompt_tokens": 1200, "completion_tokens": 60,
+         "total_tokens": 1260}
 
 
 class FakeTransport:
-    """Canned generateContent response (same shape as the slice-1 fake).
+    """Canned chat-completions response (same shape as the slice-1 fake).
     Records every call's prompt and key."""
 
     def __init__(self, choice=None, raise_error=None, usage=None):
@@ -58,9 +59,9 @@ class FakeTransport:
             raise self.raise_error
         text = json.dumps(self.choice)
         return {"response": {
-                    "candidates": [{"content": {"parts": [{"text": text}]},
-                                    "finishReason": "STOP"}],
-                    "usageMetadata": dict(self.usage)},
+                    "choices": [{"message": {"content": text},
+                                 "finish_reason": "stop"}],
+                    "usage": dict(self.usage)},
                 "retried": False, "retry_status": None,
                 "retried_429": False, "retry_wait_s": 0.0}
 
@@ -75,9 +76,9 @@ def _query_choice(metric="dau_mean_daily", app="instagram", breakdown=None,
 @contextmanager
 def _env(**overrides):
     """Temporarily set env vars (None deletes). The ambient process
-    must not leak a real GEMINI_API_KEY into the no-LLM tests."""
+    must not leak a real LLM_API_KEY into the no-LLM tests."""
     saved = {}
-    for key in ("GEMINI_API_KEY", "GEMINI_TIER"):
+    for key in ("LLM_API_KEY", "LLM_TIER"):
         saved[key] = os.environ.get(key)
         os.environ.pop(key, None)
     for key, value in overrides.items():
@@ -112,17 +113,17 @@ def test_no_llm_unmapped_unchanged():
 
 
 def test_owner_key_factory_reads_env():
-    with _env(GEMINI_API_KEY="owner-key-xyz", GEMINI_TIER="free"):
+    with _env(LLM_API_KEY="owner-key-xyz", LLM_TIER="paid"):
         key, tier = _llm_config()
-        assert key == "owner-key-xyz" and tier == "free"
+        assert key == "owner-key-xyz" and tier == "paid"
         session = _new_chat_session(DATA)
         assert session.llm_api_key == "owner-key-xyz"
-        assert session.llm_tier == "free"
+        assert session.llm_tier == "paid"
         # The demo keeps the deterministic variant: the key is for the
         # fallback turn only, never for the deterministic turns' planning.
         assert session.variant == "baseline"
         status = _shell_llm_status()
-        assert status == {"configured": True, "model": "gemini-3.8-flash",
+        assert status == {"configured": True, "model": "gpt-4o-mini",
                           "mode": "owner-key",
                           "prompt_version": "llm-prompt-v1"}
         assert "owner-key-xyz" not in json.dumps(status)
@@ -151,7 +152,7 @@ def test_fallback_turn_clarification_from_model():
     assert "not defined per app" in reply["text"]
     assert (reply.get("working") or {}).get("sql") is None
     receipt = (reply.get("working") or {}).get("llm") or {}
-    assert receipt.get("model") == "gemini-3.8-flash"
+    assert receipt.get("model") == "gpt-4o-mini"
     assert receipt.get("prompt_version") == "llm-prompt-v1"
     assert receipt.get("fallback") is None
 
@@ -200,14 +201,14 @@ def test_fallback_turn_weather_report_gives_instagram_wau():
     assert len(wau) == 1
     assert wau[0]["current"] == 147138.5
     receipt = (reply.get("working") or {}).get("llm") or {}
-    assert receipt.get("model") == "gemini-3.8-flash"
+    assert receipt.get("model") == "gpt-4o-mini"
 
 
 def test_fallback_turn_api_error_falls_back_labeled():
     # The planner's fallback holds end-to-end: on an API error the
     # deterministic baseline plan answers, labeled api_error.
     transport = FakeTransport(
-        raise_error=LLMError("Gemini API HTTP 503: high demand", status=503))
+        raise_error=LLMError("OpenAI API HTTP 503: high demand", status=503))
     reply = _llm_session(transport).respond(WAU_Q)
     assert reply["type"] == "query"
     assert reply["engine"] == "llm"
@@ -382,11 +383,11 @@ def test_shell_config_reports_llm_status():
         payload = json.loads(body)
         assert payload["llm"]["configured"] is False
         assert payload["llm"]["mode"] == "none"
-    with _env(GEMINI_API_KEY="owner-key-xyz"):
+    with _env(LLM_API_KEY="owner-key-xyz"):
         _status, body = _get("/api/shell-config")
         payload = json.loads(body)
         assert payload["llm"] == {"configured": True,
-                                  "model": "gemini-3.8-flash",
+                                  "model": "gpt-4o-mini",
                                   "mode": "owner-key",
                                   "prompt_version": "llm-prompt-v1"}
         assert "owner-key-xyz" not in body.decode()
@@ -396,13 +397,13 @@ def test_llm_routing_prompt_endpoint():
     status, body = _get("/api/llm-routing-prompt")
     assert status == 200, body[:200]
     payload = json.loads(body)
-    assert payload["model"] == "gemini-3.8-flash"
+    assert payload["model"] == "gpt-4o-mini"
     assert payload["prompt_version"] == "llm-prompt-v1"
     assert payload["prompt_sha256"] == PROMPT_SHA
     assert payload["generation"] == {"temperature": 0,
-                                     "maxOutputTokens": 512,
-                                     "responseMimeType": "application/json"}
-    assert "generativelanguage.googleapis.com" in payload["endpoint"]
+                                     "max_tokens": 512,
+                                     "response_format": {"type": "json_object"}}
+    assert payload["endpoint"] == "https://api.openai.com/v1/chat/completions"
     assert "{question}" in payload["prompt"]
     assert "{context}" in payload["prompt"]
 
@@ -444,19 +445,20 @@ def test_chat_api_no_key_wau_is_unmapped():
 
 def test_shell_byok_field_and_key_handling():
     assert "byokBox" in SHELL
-    assert "portfolio-shell-gemini-key" in SHELL
+    assert "portfolio-shell-llm-key" in SHELL
     assert "sessionStorage" in SHELL
     assert "/api/llm-routing-prompt" in SHELL
-    # The key goes to Gemini only: exactly one header use, in the direct
-    # Gemini fetch — never in a /api/chat body.
-    assert SHELL.count('"x-goog-api-key": key') == 1
+    # The key goes to OpenAI only: exactly one header use, in the direct
+    # OpenAI fetch — never in a /api/chat body.
+    assert SHELL.count('"Authorization": "Bearer " + key') == 1
     assert "llm_choice" in SHELL and "llm_tokens" in SHELL
     # Per-answer engine labels + the unmapped gate for the BYOK retry.
     assert "engineLabel(res.engine)" in SHELL
     assert "res.unmapped && byokGet()" in SHELL
     # The deterministic claim survives as the no-key state text.
     assert "No live LLM" in SHELL
-    assert "LLM-routed (Gemini 3.8 Flash)" in SHELL
+    assert "LLM-routed (GPT-4o-mini)" in SHELL
+    assert "Your LLM API key" in SHELL
 
 
 # -- Frozen files --------------------------------------------------------------

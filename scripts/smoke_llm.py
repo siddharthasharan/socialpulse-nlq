@@ -1,6 +1,6 @@
 """Live smoke test for the LLM planner (chunk B, slice 1).
 
-Runs 5 cases against the LIVE Gemini API — p11 (MAU + creators by
+Runs 5 cases against the LIVE OpenAI API — p11 (MAU + creators by
 country), p08 (creator share of MAU), b01 (mean daily DAU), h20
 (guardrail-override attempt, must clarify, never execute), and h30
 (the ranking-window conversation, must clarify on turn 4) — through
@@ -8,29 +8,33 @@ the same harness code the benchmark runner uses, and prints the real
 llm receipt per case (model, tokens, paid-rate cost, latency,
 fallback).
 
-Requires GEMINI_API_KEY in the environment. WITHOUT a key this script
-prints LIVE VERIFICATION PENDING and exits 2: it never invents live
-results, and a fallback run is not a smoke test. A full benchmark run
-is scripts/run_benchmark_v8.py --variant llm; this script is the
-5-case check that the key, the model id, and the prompt contract work
-at all before spending a full run's request budget.
+Requires LLM_API_KEY in the environment (an OpenAI API key — a
+ChatGPT subscription does NOT include API credits; the key comes
+from platform.openai.com with pay-as-you-go billing). WITHOUT a key
+this script prints LIVE VERIFICATION PENDING and exits 2: it never
+invents live results, and a fallback run is not a smoke test. A full
+benchmark run is scripts/run_benchmark_v12.py --variant llm; this
+script is the 5-case check that the key, the model id, and the prompt
+contract work at all before spending a full run's request budget.
 
 A case only counts as a live pass when the MODEL ran it (real tokens
 in the receipt, no fallback). When the model call falls back — e.g.
-HTTP 403 PERMISSION_DENIED, which means the key is valid but the
-Google free-tier project/account is not allowed to generate with
-gemini-3.8-flash — the case is reported BLOCKED, not failed: the
-planner fell back to the deterministic baseline (labeled in the
-trace), and that is a key/project restriction, not a planner failure.
-Fixes are on the Google side: check the project status in AI Studio,
-complete Google age verification, create a new key, or attach
-billing/prepay (paid tier restores access).
+HTTP 401 (bad key) or 429 (rate limit / out of credits) — the case
+is reported BLOCKED, not failed: the planner fell back to the
+deterministic baseline (labeled in the trace), and that is a
+key/billing restriction, not a planner failure. Fixes are on the
+OpenAI side: check the key at platform.openai.com, add a payment
+method / credits, or wait out a rate limit.
+
+Provider history: slices 1–2 used the previous provider (free
+tier); generation never worked there, so the transport switched to
+OpenAI (gpt-4o-mini) on 2026-11-17.
 
 Usage:
     PYTHONPATH=src python scripts/smoke_llm.py [--data data/phase1]
-        [--tier free|paid] [--pace SECONDS]
+        [--tier paid] [--pace SECONDS]
 Exit code: 0 all 5 pass live; 1 a case failed live; 2 no key (pending);
-3 blocked (the model did not run — e.g. 403).
+3 blocked (the model did not run — e.g. 401/429).
 """
 import argparse
 import json
@@ -65,20 +69,24 @@ def _llm_line(llm):
 
 def _blocked_note(llm):
     """The plain-language blocked-key explanation, when the fallback
-    reason is a 403 — the key is valid, the Google project/account is
-    not allowed to generate. Returns None for other fallbacks."""
+    reason is a 401 (bad key) or 429 (rate limit / out of credits).
+    Returns None for other fallbacks."""
     reason = (llm or {}).get("fallback_reason") or ""
-    if "403" in reason or "PERMISSION_DENIED" in reason:
-        return ("BLOCKED KEY: the API returned HTTP 403 PERMISSION_DENIED "
-                "('The caller does not have permission'). The key is valid "
-                "(list-models works) — this Google free-tier project/account "
-                "is not allowed to generate with gemini-3.8-flash. This is "
-                "a key/project restriction, NOT a planner failure: the "
+    if "401" in reason or "Incorrect API key" in reason:
+        return ("BLOCKED KEY: the API returned HTTP 401 (incorrect API "
+                "key). The key is missing, wrong, or revoked — create a "
+                "new one at platform.openai.com and set LLM_API_KEY. "
+                "This is a key restriction, NOT a planner failure: the "
                 "planner fell back to the deterministic baseline, labeled "
-                "in the trace. Fixes are on the Google side: check the "
-                "project status in AI Studio, complete Google age "
-                "verification, create a new key, or attach billing/prepay "
-                "(paid tier restores access).")
+                "in the trace.")
+    if "429" in reason:
+        return ("BLOCKED: the API returned HTTP 429 (rate limit, or "
+                "insufficient quota — out of credits). Fixes are on the "
+                "OpenAI side: wait out a rate limit, or add a payment "
+                "method / credits at platform.openai.com. This is a "
+                "key/billing restriction, NOT a planner failure: the "
+                "planner fell back to the deterministic baseline, labeled "
+                "in the trace.")
     return None
 
 
@@ -109,12 +117,12 @@ def _live_status_single(case_id, result):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", type=Path, default=ROOT / "data/phase1")
-    ap.add_argument("--tier", choices=["free", "paid"], default="free")
+    ap.add_argument("--tier", choices=["free", "paid"], default="paid")
     ap.add_argument("--pace", type=float, default=1.0)
     args = ap.parse_args()
-    if not os.environ.get("GEMINI_API_KEY"):
-        print("LIVE VERIFICATION PENDING — no GEMINI_API_KEY in the environment.")
-        print("Set it (export GEMINI_API_KEY=... in the shell that runs this "
+    if not os.environ.get("LLM_API_KEY"):
+        print("LIVE VERIFICATION PENDING — no LLM_API_KEY in the environment.")
+        print("Set it (export LLM_API_KEY=... in the shell that runs this "
               "script; never commit it) and re-run. Nothing below is a live result.")
         return 2
     manifest = load_manifest(ROOT, version=VERSION)

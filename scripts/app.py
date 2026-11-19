@@ -25,7 +25,7 @@ from socialpulse_nlq.questions import load_all_questions, save_questions
 from socialpulse_nlq.usage import client_ip, record_event, usage_snapshot
 from socialpulse_nlq.llm_planner import (
     MAX_OUTPUT_TOKENS, MODEL_ID, PROMPT_VERSION,
-    UrllibGeminiTransport, build_routing_prompt_template,
+    UrllibOpenAITransport, build_routing_prompt_template,
 )
 import uuid
 
@@ -64,19 +64,23 @@ def parse_experiments():
 
 
 # Chunk B, slice 2 — owner-key LLM wiring. The server reads
-# GEMINI_API_KEY from the environment (set by the repo owner as a
+# LLM_API_KEY from the environment (set by the repo owner as a
 # Render env var, never committed) and hands it to each ChatSession.
-# The session's variant stays "baseline": the deterministic turns keep
-# planning deterministically, and the key is used ONLY by the LLM
-# fallback turn for otherwise-unmapped questions. No key -> the demo
-# behaves exactly as before (deterministic-only). The key is never
-# logged, never returned in any response, and never written to a
-# trace; request logging is a no-op (log_message below).
+# The slot is named generically ("LLM API key") on purpose, so
+# anyone testing the demo uses this one slot; the provider is pinned
+# to OpenAI in code, so the slot takes an OpenAI key today — a key
+# for another provider in this slot will NOT work. The session's variant stays
+# "baseline": the deterministic turns keep planning deterministically,
+# and the key is used ONLY by the LLM fallback turn for
+# otherwise-unmapped questions. No key -> the demo behaves exactly as
+# before (deterministic-only). The key is never logged, never returned
+# in any response, and never written to a trace; request logging is a
+# no-op (log_message below).
 def _llm_config():
-    key = os.environ.get("GEMINI_API_KEY") or None
-    tier = os.environ.get("GEMINI_TIER", "free")
+    key = os.environ.get("LLM_API_KEY") or None
+    tier = os.environ.get("LLM_TIER", "paid")
     if tier not in ("free", "paid"):
-        tier = "free"
+        tier = "paid"
     return key, tier
 
 
@@ -167,9 +171,9 @@ class Handler(BaseHTTPRequestHandler):
                 "inventory_sha256": inventory_sha,
                 "prompt": prompt,
                 "generation": {"temperature": 0,
-                               "maxOutputTokens": MAX_OUTPUT_TOKENS,
-                               "responseMimeType": "application/json"},
-                "endpoint": UrllibGeminiTransport().url,
+                               "max_tokens": MAX_OUTPUT_TOKENS,
+                               "response_format": {"type": "json_object"}},
+                "endpoint": UrllibOpenAITransport().url,
             })
         elif path == "/api/gallery":
             self._send_json({"scenarios": GALLERY_SCENARIOS})

@@ -1,5 +1,5 @@
 """LLM planner unit tests (chunk B, slice 1). No key, no network: every
-model reply comes from FakeTransport, a canned generateContent
+model reply comes from FakeTransport, a canned chat-completions
 response. The only tests that touch the data dir are the two
 harness/chat dispatch tests at the end, which execute one real query
 each on data/phase1."""
@@ -19,13 +19,14 @@ from socialpulse_nlq.planner import METRIC_DEFINITIONS, build_sql, plan
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE = {"date_start": "2026-01-01", "date_end": "2026-03-31"}
-USAGE = {"promptTokenCount": 100, "candidatesTokenCount": 20,
-         "totalTokenCount": 120}
+USAGE = {"prompt_tokens": 100, "completion_tokens": 20,
+         "total_tokens": 120}
+PROMPT_SHA = "e45582cedd54d76e6cb01dd3c65f6ec318b982631acfa8689470264c3bcd6df4"
 
 
 class FakeTransport:
-    """Canned generateContent response. `choice` is the parsed JSON the
-    model 'returns'; `usage` the usageMetadata; `raise_error` an
+    """Canned chat-completions response. `choice` is the parsed JSON the
+    model 'returns'; `usage` the usage object; `raise_error` an
     LLMError raised instead; `raw_text` a literal reply body (for
     malformed-JSON tests). Records every call's prompt and key."""
 
@@ -42,9 +43,9 @@ class FakeTransport:
             raise self.raise_error
         text = self.raw_text if self.raw_text is not None else json.dumps(self.choice)
         return {"response": {
-                    "candidates": [{"content": {"parts": [{"text": text}]},
-                                    "finishReason": "STOP"}],
-                    "usageMetadata": dict(self.usage)},
+                    "choices": [{"message": {"content": text},
+                                 "finish_reason": "stop"}],
+                    "usage": dict(self.usage)},
                 "retried": False, "retry_status": None,
                 "retried_429": False, "retry_wait_s": 0.0}
 
@@ -72,7 +73,7 @@ def test_choice_executes_via_build_sql():
     assert llm["prompt_tokens"] == 100 and llm["completion_tokens"] == 20
     assert llm["total_tokens"] == 120
     assert llm["cost_usd_paid_rate"] == cost_usd_paid_rate(100, 20)
-    assert llm["billed_usd"] == 0.0  # free tier bills $0
+    assert llm["billed_usd"] == llm["cost_usd_paid_rate"]  # paid tier bills the paid rate
     assert llm["raw_choice"]["metric"] == "dau_mean_daily"
 
 
@@ -166,7 +167,7 @@ def test_malformed_json_fallback():
 
 def test_api_error_fallback():
     p = _plan("What is the mean daily DAU?",
-              FakeTransport(raise_error=LLMError("Gemini API HTTP 500: boom",
+              FakeTransport(raise_error=LLMError("OpenAI API HTTP 500: boom",
                                                  status=500)))
     assert p["llm"]["fallback"] == "api_error", p["llm"]
     assert "500" in (p["llm"]["fallback_reason"] or ""), p["llm"]
@@ -174,13 +175,13 @@ def test_api_error_fallback():
 
 
 def test_no_key_fallback():
-    saved = os.environ.pop("GEMINI_API_KEY", None)
+    saved = os.environ.pop("LLM_API_KEY", None)
     try:
         p = plan_with_llm("What is the mean daily DAU?",
                           transport=FakeTransport(_query_choice()))
     finally:
         if saved is not None:
-            os.environ["GEMINI_API_KEY"] = saved
+            os.environ["LLM_API_KEY"] = saved
     assert p["llm"]["fallback"] == "no_key", p["llm"]
     assert p["metric"] == plan("What is the mean daily DAU?")["metric"]
 
@@ -216,14 +217,13 @@ def _http_error(url, code):
 
 
 def test_transport_retries_once_on_503_then_succeeds():
-    # Observed live 2026-11-11: the free tier returns 503 "model
-    # experiencing high demand". The transport retries once, then
-    # returns the successful response with the retry recorded.
+    # The transport retries once on a transient 503, then returns the
+    # successful response with the retry recorded.
     import urllib.request
-    from socialpulse_nlq.llm_planner import UrllibGeminiTransport
-    body = {"candidates": [{"content": {"parts": [{"text": json.dumps(_query_choice())}]},
-                            "finishReason": "STOP"}],
-            "usageMetadata": dict(USAGE)}
+    from socialpulse_nlq.llm_planner import UrllibOpenAITransport
+    body = {"choices": [{"message": {"content": json.dumps(_query_choice())},
+                         "finish_reason": "stop"}],
+            "usage": dict(USAGE)}
     calls = []
 
     def fake_urlopen(req, timeout=None):
@@ -235,17 +235,27 @@ def test_transport_retries_once_on_503_then_succeeds():
     real = urllib.request.urlopen
     urllib.request.urlopen = fake_urlopen
     try:
-        out = UrllibGeminiTransport(sleep=lambda s: None).generate("prompt", "test-key")
+        out = UrllibOpenAITransport(sleep=lambda s: None).generate("prompt", "test-key")
     finally:
         urllib.request.urlopen = real
     assert len(calls) == 2, calls
     assert out["retried"] is True and out["retry_status"] == 503, out
-    assert out["response"]["usageMetadata"] == USAGE
+    assert out["response"]["usage"] == USAGE
+    # The retried request is a chat-completions call: OpenAI URL,
+    # Bearer auth, JSON-mode body for the pinned model.
+    req = calls[0]
+    assert req.full_url == "https://api.openai.com/v1/chat/completions", req.full_url
+    assert req.get_header("Authorization") == "Bearer test-key"
+    payload = json.loads(req.data.decode("utf-8"))
+    assert payload["model"] == "gpt-4o-mini", payload
+    assert payload["messages"] == [{"role": "user", "content": "prompt"}]
+    assert payload["temperature"] == 0 and payload["max_tokens"] == 512
+    assert payload["response_format"] == {"type": "json_object"}
 
 
 def test_transport_raises_after_second_503():
     import urllib.request
-    from socialpulse_nlq.llm_planner import LLMError, UrllibGeminiTransport
+    from socialpulse_nlq.llm_planner import LLMError, UrllibOpenAITransport
 
     def fake_urlopen(req, timeout=None):
         raise _http_error(req.full_url, 503)
@@ -253,7 +263,7 @@ def test_transport_raises_after_second_503():
     real = urllib.request.urlopen
     urllib.request.urlopen = fake_urlopen
     try:
-        UrllibGeminiTransport(sleep=lambda s: None).generate("prompt", "test-key")
+        UrllibOpenAITransport(sleep=lambda s: None).generate("prompt", "test-key")
     except LLMError as e:
         assert e.status == 503, e
     else:
@@ -263,19 +273,21 @@ def test_transport_raises_after_second_503():
 
 
 def test_token_recording_and_cost():
-    usage = {"promptTokenCount": 1234, "candidatesTokenCount": 56,
-             "totalTokenCount": 1290}
+    usage = {"prompt_tokens": 1234, "completion_tokens": 56,
+             "total_tokens": 1290}
     p = _plan("What is the mean daily DAU?",
               FakeTransport(_query_choice(), usage=usage))
     llm = p["llm"]
     assert llm["prompt_tokens"] == 1234 and llm["completion_tokens"] == 56
     assert llm["total_tokens"] == 1290
     assert llm["raw_usage"] == usage
-    assert llm["cost_usd_paid_rate"] == 1234 / 1_000_000 * 0.75 + 56 / 1_000_000 * 3.75
-    assert llm["billed_usd"] == 0.0
-    p_paid = _plan("What is the mean daily DAU?",
-                   FakeTransport(_query_choice(), usage=usage), tier="paid")
-    assert p_paid["llm"]["billed_usd"] == p_paid["llm"]["cost_usd_paid_rate"]
+    assert llm["cost_usd_paid_rate"] == 1234 / 1_000_000 * 0.15 + 56 / 1_000_000 * 0.60
+    # OpenAI is pay-as-you-go: the default tier is "paid", so the
+    # billed cost is the paid-rate cost.
+    assert llm["billed_usd"] == llm["cost_usd_paid_rate"]
+    p_free = _plan("What is the mean daily DAU?",
+                   FakeTransport(_query_choice(), usage=usage), tier="free")
+    assert p_free["llm"]["billed_usd"] == 0.0
 
 
 def test_prompt_contract():
@@ -473,3 +485,38 @@ def test_inventory_gains_nothing_for_compare():
     assert "weekly_compare" not in inventory
     assert "compare" not in inventory.lower()
     assert "weekly_compare" not in METRIC_DEFINITIONS
+
+
+def test_prompt_file_unchanged_by_openai_switch():
+    # 2026-11-17: the provider switch (Gemini -> OpenAI) must not
+    # touch the prompt contract. The prompt file is byte-identical to
+    # llm-prompt-v1 (SHA pinned in tests/test_demo_llm.py too), so a
+    # run under OpenAI is the same study condition as under Gemini.
+    assert prompt_sha256() == PROMPT_SHA
+    assert PROMPT_VERSION == "llm-prompt-v1"
+    # The prompt file's header still names the old provider (it is
+    # part of the pinned file); the active code must not.
+    assert "gpt-4o-mini" in (ROOT / "src/socialpulse_nlq/llm_planner.py").read_text()
+
+
+def test_no_gemini_in_active_code():
+    # 2026-11-17: the OpenAI switch removes the Gemini transport from
+    # the active path. No production file, runner, smoke script, or
+    # the shell may name the old provider. Excluded on purpose:
+    # llm_prompt.md (pinned contract, byte-identical by design) and
+    # docs/benchmark.md + docs/llm-planner.md history sections (past
+    # tense, they record that Gemini was the previous provider).
+    checked = list((ROOT / "src/socialpulse_nlq").glob("*.py"))
+    checked += [ROOT / "scripts/app.py", ROOT / "scripts/smoke_llm.py",
+                ROOT / "scripts/smoke_demo_llm.py",
+                ROOT / "scripts/compare_llm.py",
+                ROOT / "app/shell.html"]
+    checked += sorted((ROOT / "scripts").glob("run_benchmark_v*.py"))
+    offenders = {str(p): [l for l in p.read_text().splitlines()
+                          if "gemini" in l.lower()]
+                 for p in checked}
+    offenders = {p: lines for p, lines in offenders.items() if lines}
+    assert not offenders, offenders
+    from socialpulse_nlq.llm_planner import API_KEY_ENV, MODEL_ID
+    assert API_KEY_ENV == "LLM_API_KEY"
+    assert MODEL_ID == "gpt-4o-mini"

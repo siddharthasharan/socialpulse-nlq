@@ -19,7 +19,7 @@ surface numbers the weather report or a named drill-down query produced.
 
 Chunk B, slice 2 adds exactly one LLM entry point: when NO deterministic
 turn matches a message AND the session has an LLM available (owner key
-via GEMINI_API_KEY, or a visitor key supplied as a pre-validated choice
+via LLM_API_KEY, or a visitor key supplied as a pre-validated choice
 through respond_with_llm_choice), the question is routed through
 plan_with_llm and the returned plan is executed through the same
 deterministic build_sql/guard path — the model chooses the analysis,
@@ -354,12 +354,13 @@ class ChatSession:
     """One multi-turn conversation. Create one per UI session id."""
 
     def __init__(self, data_dir, variant="baseline", llm_transport=None,
-                 llm_api_key=None, llm_tier="free"):
+                 llm_api_key=None, llm_tier="paid"):
         self.data_dir = Path(data_dir)
         self.variant = variant
         # Chunk B, slice 1: the LLM variant's transport / key / tier,
         # threaded to _plan(). None means the adapter default (urllib
-        # transport, GEMINI_API_KEY from the environment, free tier).
+        # transport, LLM_API_KEY from the environment, paid tier —
+        # the OpenAI API is pay-as-you-go, there is no free tier).
         self.llm_transport = llm_transport
         self.llm_api_key = llm_api_key
         self.llm_tier = llm_tier
@@ -437,12 +438,12 @@ class ChatSession:
     def _llm_available(self):
         """True when a model call is possible: a transport was injected
         (tests / harness), a key was passed to this session, or the
-        GEMINI_API_KEY environment variable is set (plan_with_llm reads
+        LLM_API_KEY environment variable is set (plan_with_llm reads
         it itself). False means the demo is deterministic-only and an
         unmapped question gets today's generic clarification."""
         if self.llm_transport is not None or self.llm_api_key:
             return True
-        return bool(os.environ.get("GEMINI_API_KEY"))
+        return bool(os.environ.get("LLM_API_KEY"))
 
     def _llm_context(self):
         """The session context plan_with_llm routes with — the same
